@@ -25,6 +25,8 @@ CommandTray 是一个适用于 Windows 10/11 x64 的轻量系统托盘工具，�
 - `CommandTray-X.Y.Z-win-x64.zip`：便携版，解压后直接运行 `CommandTray.exe`。
 - `SHA256SUMS.txt`：用于校验下载文件完整性。
 
+当前发布包尚未进行 Authenticode 签名，首次运行时 Windows 可能显示 SmartScreen 提示。请从官方 Releases 下载并核对随附的 SHA-256 校验值；签名进度见[代码签名政策](CODE_SIGNING_POLICY.md)。
+
 程序启动后会驻留在系统托盘。关闭设置窗口只会隐藏窗口；如需完全退出，请右键托盘图标并选择“退出”。
 
 ## 快速开始
@@ -99,3 +101,10 @@ dotnet run --project .\src\CommandTray\CommandTray.csproj
 ```
 
 贡献与发布规则见 [`AGENTS.md`](AGENTS.md)。
+
+## 许可证与项目政策
+
+- [MIT 许可证](LICENSE)
+- [代码签名政策](CODE_SIGNING_POLICY.md)
+- [隐私说明](PRIVACY.md)
+- [安全政策](SECURITY.md)

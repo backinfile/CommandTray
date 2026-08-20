@@ -25,6 +25,8 @@ Download the latest version from [Releases](https://github.com/backinfile/Comman
 - `CommandTray-X.Y.Z-win-x64.zip`: portable build; extract it and run `CommandTray.exe`.
 - `SHA256SUMS.txt`: checksums for verifying downloads.
 
+Current release packages are not yet Authenticode-signed, so Windows may display a SmartScreen warning on first launch. Download only from the official Releases page and verify the included SHA-256 checksums. See the [code signing policy](CODE_SIGNING_POLICY.md) for status.
+
 CommandTray stays in the notification area after launch. Closing the settings window only hides it; use **Exit** from the tray menu to quit completely.
 
 ## Quick start
@@ -99,3 +101,10 @@ dotnet run --project .\src\CommandTray\CommandTray.csproj
 ```
 
 See [`AGENTS.md`](AGENTS.md) for contribution and release rules.
+
+## License and project policies
+
+- [MIT License](LICENSE)
+- [Code signing policy](CODE_SIGNING_POLICY.md)
+- [Privacy notice](PRIVACY.md)
+- [Security policy](SECURITY.md)
