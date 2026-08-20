@@ -13,7 +13,8 @@ $zip = Join-Path $portable "CommandTray-$Version-win-x64.zip"
 if (Test-Path -LiteralPath $zip) { Remove-Item -LiteralPath $zip }
 Compress-Archive -Path (Join-Path $publish '*') -DestinationPath $zip
 Get-FileHash -Algorithm SHA256 -LiteralPath $zip | Format-List
-$iscc = Get-Command ISCC.exe -ErrorAction SilentlyContinue
+# Chocolatey can expose more than one ISCC shim; invoke one resolved command.
+$iscc = Get-Command ISCC.exe -ErrorAction SilentlyContinue | Select-Object -First 1
 if (-not $iscc) {
     $isccPath = @(
         (Join-Path $env:LOCALAPPDATA 'Programs\Inno Setup 6\ISCC.exe'),
