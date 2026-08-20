@@ -101,11 +101,60 @@ public sealed class LogViewerForm : Form
             _position = stream.Position;
             if (appended.Length == 0) return;
             if (_placeholderShown) { _text.Clear(); _placeholderShown = false; }
-            _text.AppendText(appended);
+            AppendColorizedText(appended);
             if (!_follow()) return;
             _text.SelectionStart = _text.TextLength;
             _text.ScrollToCaret();
         }
         catch (IOException) { /* next timer tick retries during rotation */ }
+    }
+
+    private void AppendColorizedText(string appended)
+    {
+        var previousSelectionStart = _text.SelectionStart;
+        var previousSelectionLength = _text.SelectionLength;
+        var oldLength = _text.TextLength;
+
+        _text.SelectionStart = oldLength;
+        _text.SelectionLength = 0;
+        _text.SelectionColor = UiTheme.ConsoleText;
+        _text.AppendText(appended);
+
+        // Include the preceding character so a line split across two reads is
+        // reclassified once its remaining text arrives.
+        var firstAffectedCharacter = Math.Max(0, oldLength - 1);
+        var firstAffectedLine = _text.GetLineFromCharIndex(firstAffectedCharacter);
+        var lastAffectedLine = _text.GetLineFromCharIndex(_text.TextLength - 1);
+        var totalLength = _text.TextLength;
+
+        for (var lineNumber = firstAffectedLine; lineNumber <= lastAffectedLine; lineNumber++)
+        {
+            var lineStart = _text.GetFirstCharIndexFromLine(lineNumber);
+            var nextLineStart = _text.GetFirstCharIndexFromLine(lineNumber + 1);
+            var lineLength = nextLineStart >= 0 ? nextLineStart - lineStart : totalLength - lineStart;
+
+            _text.Select(lineStart, lineLength);
+            var severity = LogLineClassifier.Classify(_text.SelectedText);
+            if (lineNumber != firstAffectedLine && severity == LogLineSeverity.Normal) continue;
+
+            _text.SelectionColor = severity switch
+            {
+                LogLineSeverity.Error => UiTheme.ConsoleErrorText,
+                LogLineSeverity.Warning => UiTheme.ConsoleWarningText,
+                _ => UiTheme.ConsoleText
+            };
+        }
+
+        // Reset the insertion color before restoring a user's selection.
+        _text.SelectionStart = _text.TextLength;
+        _text.SelectionLength = 0;
+        _text.SelectionColor = UiTheme.ConsoleText;
+
+        if (!_follow())
+        {
+            _text.Select(
+                Math.Min(previousSelectionStart, _text.TextLength),
+                Math.Min(previousSelectionLength, Math.Max(0, _text.TextLength - previousSelectionStart)));
+        }
     }
 }

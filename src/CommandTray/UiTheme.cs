@@ -27,6 +27,8 @@ internal static class UiTheme
     public static readonly Color SelectedBack = Color.FromArgb(229, 241, 251);
     public static readonly Color ConsoleBack = Color.FromArgb(24, 24, 24);
     public static readonly Color ConsoleText = Color.Gainsboro;
+    public static readonly Color ConsoleErrorText = Color.FromArgb(255, 123, 114);
+    public static readonly Color ConsoleWarningText = Color.FromArgb(227, 179, 65);
 
     public static Color StateColor(ServiceState state) => state switch
     {
