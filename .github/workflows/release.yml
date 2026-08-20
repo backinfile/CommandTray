@@ -1,0 +1,101 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build and publish Windows release
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+      DOTNET_NOLOGO: "1"
+
+    steps:
+      - name: Check out tagged commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Validate immutable release source
+        id: version
+        shell: pwsh
+        run: |
+          $tag = '${{ github.ref_name }}'
+          if ($tag -notmatch '^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$') {
+            throw "Release tag must use vX.Y.Z: $tag"
+          }
+
+          $version = $tag.Substring(1)
+          "VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+          git fetch origin "+refs/heads/dev:refs/remotes/origin/dev"
+          git fetch origin "+refs/heads/release/$version:refs/remotes/origin/release/$version"
+
+          $releaseCommit = (git rev-parse "refs/remotes/origin/release/$version").Trim()
+          if ($releaseCommit -ne '${{ github.sha }}') {
+            throw "Tag $tag must point to the exact commit at release/$version."
+          }
+
+          git merge-base --is-ancestor '${{ github.sha }}' refs/remotes/origin/dev
+          if ($LASTEXITCODE -ne 0) {
+            throw "Release commit must come from dev."
+          }
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Set up Python test dependency
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress --yes
+
+      - name: Test, publish, and package
+        shell: pwsh
+        run: .\scripts\publish.ps1 -Version $env:VERSION
+
+      - name: Generate SHA-256 checksums
+        shell: pwsh
+        run: |
+          $assets = @(
+            "artifacts/portable/CommandTray-$env:VERSION-win-x64.zip",
+            "artifacts/installer/CommandTray-$env:VERSION-win-x64-setup.exe"
+          )
+          foreach ($asset in $assets) {
+            if (-not (Test-Path -LiteralPath $asset)) { throw "Missing release asset: $asset" }
+          }
+          $lines = foreach ($asset in $assets) {
+            $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $asset).Hash.ToLowerInvariant()
+            "$hash  $([IO.Path]::GetFileName($asset))"
+          }
+          $lines | Set-Content -LiteralPath "artifacts/SHA256SUMS.txt" -Encoding ascii
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@fe965f7af51af5f2602596916f38a38df2e33de0 # v3.0.2
+        with:
+          name: CommandTray ${{ github.ref_name }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          make_latest: true
+          files: |
+            artifacts/portable/CommandTray-${{ steps.version.outputs.version }}-win-x64.zip
+            artifacts/installer/CommandTray-${{ steps.version.outputs.version }}-win-x64-setup.exe
+            artifacts/SHA256SUMS.txt

@@ -1,5 +1,8 @@
 param([string]$Version = "0.1.0")
 $ErrorActionPreference = 'Stop'
+if ($Version -notmatch '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$') {
+    throw "Version must use X.Y.Z without a leading v: $Version"
+}
 $root = Split-Path -Parent $PSScriptRoot
 $publish = Join-Path $root 'artifacts\publish\win-x64'
 $portable = Join-Path $root 'artifacts\portable'
@@ -19,5 +22,5 @@ if (-not $iscc) {
     ) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
     if ($isccPath) { $iscc = Get-Item -LiteralPath $isccPath }
 }
-if ($iscc) { & $iscc.FullName (Join-Path $root 'packaging\CommandTray.iss') }
+if ($iscc) { & $iscc.FullName "/DAppVersion=$Version" (Join-Path $root 'packaging\CommandTray.iss') }
 else { Write-Warning 'Inno Setup was not found; portable package was created, installer was skipped.' }

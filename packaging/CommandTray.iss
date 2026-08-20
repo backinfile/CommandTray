@@ -1,5 +1,7 @@
 #define AppName "CommandTray"
+#ifndef AppVersion
 #define AppVersion "0.1.0"
+#endif
 #define PublishDir "..\artifacts\publish\win-x64"
 
 [Setup]
