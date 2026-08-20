@@ -9,32 +9,45 @@ public sealed class SettingsForm : Form
     private readonly ConfigurationStore _store;
     private readonly ProcessSupervisor _supervisor;
 
+    // Left rail
+    private readonly TextBox _search = new() { PlaceholderText = "Filter / 筛选…" };
     private readonly ListBox _services = new()
     {
         Dock = DockStyle.Fill,
         IntegralHeight = false,
         DrawMode = DrawMode.OwnerDrawFixed,
-        DisplayMember = nameof(ServiceDefinition.Name),
-        BorderStyle = BorderStyle.FixedSingle
+        BorderStyle = BorderStyle.None,
+        BackColor = UiTheme.RailBack
     };
-    private readonly Panel _detailPanel = new() { Dock = DockStyle.Fill, AutoScroll = true };
-    private readonly Panel _emptyPanel = new() { Dock = DockStyle.Fill };
-    private readonly Label _title = new() { AutoSize = true, Font = UiTheme.Title };
-    private readonly Label _state = new() { AutoSize = true, Font = UiTheme.Bold };
-    private readonly TextBox _name = new(), _command = new(), _cwd = new(), _url = new(), _stopCommand = new();
-    private readonly TextBox _environment = new() { Multiline = true, ScrollBars = ScrollBars.Vertical, Height = 120 };
-    private readonly CheckBox _startWithManager = new() { Text = "Start with manager / 随管理器启动", AutoSize = true };
-    private readonly CheckBox _restart = new() { Text = "Restart on unexpected exit / 异常退出重启", AutoSize = true };
-    private readonly NumericUpDown _timeout = new() { Minimum = 1, Maximum = 300, Value = 5, Width = 90 };
-    private readonly Button _add = UiTheme.CreateButton("+ Add / 添加");
+    private readonly Button _add = UiTheme.CreatePrimaryButton("+ Add / 添加");
     private readonly Button _delete = UiTheme.CreateButton("Delete / 删除");
-    private readonly Button _save = UiTheme.CreatePrimaryButton("Save / 保存");
+
+    // Content header
+    private readonly Panel _contentPanel = new() { Dock = DockStyle.Fill, BackColor = SystemColors.Window };
+    private readonly Label _title = new() { AutoSize = true, Font = UiTheme.Header };
+    private readonly StateBadge _badge = new() { Margin = new Padding(0, 3, 10, 0) };
+    private readonly Label _stateDetail = new() { AutoSize = true, Font = UiTheme.Small, ForeColor = UiTheme.MutedText, Margin = new Padding(0, 6, 0, 0) };
     private readonly Button _start = UiTheme.CreateButton("Start / 启动");
     private readonly Button _stop = UiTheme.CreateButton("Stop / 停止");
     private readonly Button _restartButton = UiTheme.CreateButton("Restart / 重启");
+
+    // Detail cards
+    private Panel? _headerWrap;
+    private readonly Panel _scrollHost = new() { Dock = DockStyle.Fill, AutoScroll = true, BackColor = SystemColors.Window };
+    private readonly TextBox _name = new(), _command = new(), _cwd = new(), _url = new(), _stopCommand = new();
+    private readonly TextBox _environment = new() { Multiline = true, ScrollBars = ScrollBars.Vertical, Height = 120, Font = UiTheme.Monospace };
+    private readonly CheckBox _startWithManager = new() { Text = "Start with manager / 随管理器启动", AutoSize = true };
+    private readonly CheckBox _restart = new() { Text = "Restart on unexpected exit / 异常退出重启", AutoSize = true };
+    private readonly NumericUpDown _timeout = new() { Minimum = 1, Maximum = 300, Value = 5, Width = 90 };
+
+    // Footer
+    private readonly Button _save = UiTheme.CreatePrimaryButton("Save / 保存");
     private readonly Button _logs = UiTheme.CreateButton("View log / 查看日志");
     private readonly Button _import = UiTheme.CreateButton("Import / 导入");
     private readonly Button _export = UiTheme.CreateButton("Export / 导出");
+
+    // Empty state
+    private readonly Panel _emptyPanel = new() { Dock = DockStyle.Fill, BackColor = SystemColors.Window };
     private bool _allowExit;
 
     public event EventHandler? ConfigurationChanged;
@@ -48,14 +61,19 @@ public sealed class SettingsForm : Form
         Font = UiTheme.Regular;
         StartPosition = FormStartPosition.CenterScreen;
         AutoScaleMode = AutoScaleMode.Dpi;
-        MinimumSize = new Size(880, 620);
-        Size = new Size(1020, 720);
-        Padding = new Padding(10);
+        MinimumSize = new Size(920, 640);
+        Size = new Size(1060, 740);
+        BackColor = SystemColors.Window;
 
-        var root = new SplitContainer { Dock = DockStyle.Fill, SplitterDistance = 260, FixedPanel = FixedPanel.Panel1, SplitterWidth = 6 };
+        var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = Padding.Empty };
+        root.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 268));
+        root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         Controls.Add(root);
-        BuildServiceListPanel(root.Panel1);
-        BuildDetailPanel(root.Panel2);
+
+        var rail = BuildRail();
+        root.Controls.Add(rail, 0, 0);
+        root.Controls.Add(BuildContent(), 1, 0);
 
         AcceptButton = _save;
         var closeHotkey = new Button { Size = Size.Empty, TabStop = false };
@@ -63,6 +81,7 @@ public sealed class SettingsForm : Form
         Controls.Add(closeHotkey);
         CancelButton = closeHotkey;
 
+        _search.TextChanged += (_, _) => RefreshServiceList(Selected);
         _services.SelectedIndexChanged += (_, _) => LoadSelected();
         _add.Click += (_, _) => AddService();
         _delete.Click += (_, _) => DeleteSelected();
@@ -82,137 +101,207 @@ public sealed class SettingsForm : Form
         UpdateEmptyState();
     }
 
-    private void BuildServiceListPanel(SplitterPanel panel)
+    // ---------------------------------------------------------------- layout
+
+    private Control BuildRail()
     {
-        panel.Padding = new Padding(0, 0, 6, 0);
-        var header = UiTheme.CreateMutedLabel("Services / 服务");
-        header.Font = UiTheme.Bold;
-        header.ForeColor = SystemColors.ControlText;
-        header.Dock = DockStyle.Top;
-        header.Padding = new Padding(2, 0, 0, 6);
-
-        var buttons = new FlowLayoutPanel
+        var rail = new TableLayoutPanel
         {
-            Dock = DockStyle.Bottom,
-            AutoSize = true,
-            FlowDirection = FlowDirection.LeftToRight,
-            WrapContents = false,
-            Padding = new Padding(0, 8, 0, 0)
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            BackColor = UiTheme.RailBack,
+            Padding = new Padding(14, 16, 14, 14),
+            Margin = Padding.Empty
         };
-        buttons.Controls.AddRange([_add, _delete]);
+        rail.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
 
-        _services.Margin = new Padding(0);
-        _services.ItemHeight = (int)(Font.Height * 1.6);
+        var brand = new Label { Text = "CommandTray", Font = UiTheme.Title, AutoSize = true, Margin = new Padding(2, 0, 0, 0) };
+        var brandSub = UiTheme.CreateMutedLabel("Services / 服务");
+        brandSub.Margin = new Padding(2, 0, 0, 12);
+
+        _search.Dock = DockStyle.Top;
+        _search.Margin = new Padding(0, 0, 0, 10);
+        _search.BorderStyle = BorderStyle.FixedSingle;
+
+        _services.Margin = Padding.Empty;
+        _services.ItemHeight = (int)(Font.Height * 2.6);
         _services.DrawItem += DrawServiceItem;
 
-        panel.Controls.Add(_services);
-        panel.Controls.Add(buttons);
-        panel.Controls.Add(header);
+        var railButtons = new TableLayoutPanel { Dock = DockStyle.Bottom, AutoSize = true, ColumnCount = 2, Margin = new Padding(0, 10, 0, 0) };
+        railButtons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 55));
+        railButtons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 45));
+        _add.Dock = DockStyle.Fill; _add.AutoSize = false; _add.Height = 32; _add.Margin = new Padding(0, 0, 4, 0);
+        _delete.Dock = DockStyle.Fill; _delete.AutoSize = false; _delete.Height = 32; _delete.Margin = new Padding(4, 0, 0, 0);
+        railButtons.Controls.Add(_add, 0, 0);
+        railButtons.Controls.Add(_delete, 1, 0);
+
+        rail.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // brand
+        rail.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // sub
+        rail.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // search
+        rail.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); // list
+        rail.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // buttons
+        rail.Controls.Add(brand, 0, 0);
+        rail.Controls.Add(brandSub, 0, 1);
+        rail.Controls.Add(_search, 0, 2);
+        rail.Controls.Add(_services, 0, 3);
+        rail.Controls.Add(railButtons, 0, 4);
+
+        var wrapper = new Panel { Dock = DockStyle.Fill, Margin = Padding.Empty };
+        wrapper.Controls.Add(rail);
+        wrapper.Controls.Add(UiTheme.CreateSeparator(DockStyle.Right));
+        return wrapper;
     }
 
-    private void BuildDetailPanel(SplitterPanel panel)
+    private Control BuildContent()
     {
-        var actions = new TableLayoutPanel
+        // Header: title + badge + detail on the left, lifecycle buttons on the right.
+        var header = new TableLayoutPanel
         {
-            Dock = DockStyle.Bottom,
+            Dock = DockStyle.Top,
             AutoSize = true,
             ColumnCount = 2,
-            Padding = new Padding(4, 10, 0, 0)
+            Padding = new Padding(20, 16, 20, 14),
+            BackColor = SystemColors.Window
         };
-        actions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
-        actions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
-        var separator = new Panel { Dock = DockStyle.Top, Height = 1, BackColor = UiTheme.Separator, Margin = new Padding(0) };
-        actions.Controls.Add(separator, 0, 0);
-        actions.SetColumnSpan(separator, 2);
-        actions.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        actions.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        var processActions = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight, WrapContents = false };
-        processActions.Controls.AddRange([_start, _stop, _restartButton]);
-        var configActions = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, Anchor = AnchorStyles.Right };
-        configActions.Controls.AddRange([_logs, _import, _export, _save]);
-        actions.Controls.Add(processActions, 0, 1);
-        actions.Controls.Add(configActions, 1, 1);
+        header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        header.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
 
+        var titleStack = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, Margin = Padding.Empty };
+        var titleRow = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, WrapContents = false, AutoSize = true, Margin = Padding.Empty };
+        titleRow.Controls.Add(_badge);
+        titleRow.Controls.Add(_title);
+        titleStack.Controls.Add(titleRow);
+        titleStack.Controls.Add(_stateDetail);
+        header.Controls.Add(titleStack, 0, 0);
+
+        var lifecycle = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, WrapContents = false, AutoSize = true, Anchor = AnchorStyles.Right, Margin = new Padding(12, 0, 0, 0) };
+        lifecycle.Controls.AddRange([_start, _stop, _restartButton]);
+        header.Controls.Add(lifecycle, 1, 0);
+
+        var headerWrap = new Panel { Dock = DockStyle.Top, AutoSize = true };
+        headerWrap.Controls.Add(header);
+        headerWrap.Controls.Add(UiTheme.CreateSeparator(DockStyle.Bottom));
+
+        // Scrollable card stack.
         var stack = new TableLayoutPanel
         {
             Dock = DockStyle.Top,
             AutoSize = true,
             ColumnCount = 1,
-            Padding = new Padding(6, 2, 6, 6)
+            Padding = new Padding(20, 16, 20, 16)
         };
         stack.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-
-        var header = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 1, Margin = new Padding(0, 0, 0, 10) };
-        header.Controls.Add(_title);
-        var stateRow = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, Margin = new Padding(0, 4, 0, 0) };
-        var stateCaption = UiTheme.CreateMutedLabel("State / 状态");
-        stateCaption.Margin = new Padding(0, 0, 8, 0);
-        stateRow.Controls.Add(stateCaption);
-        stateRow.Controls.Add(_state);
-        header.Controls.Add(stateRow);
-        stack.Controls.Add(header);
-
-        stack.Controls.Add(CreateGroup("General / 常规", grid =>
+        stack.Controls.Add(CreateCard("Service / 服务", grid =>
         {
             AddRow(grid, "Name / 名称", _name);
             AddRow(grid, "CMD command / 命令", _command);
             AddRow(grid, "Working directory / 目录", WithBrowse(_cwd));
             AddRow(grid, "Open URL / 网页", _url);
         }));
-
-        stack.Controls.Add(CreateGroup("Shutdown / 停止", grid =>
+        stack.Controls.Add(CreateCard("Shutdown / 停止", grid =>
         {
             AddRow(grid, "Stop command / 停止命令", _stopCommand);
             AddRow(grid, "Stop timeout / 超时秒", _timeout);
             AddRow(grid, "Options / 选项", Stack(_startWithManager, _restart));
         }));
-
-        stack.Controls.Add(CreateGroup("Environment / 环境变量", grid =>
+        stack.Controls.Add(CreateCard("Environment / 环境变量", grid =>
         {
             AddRow(grid, "", _environment);
             var hint = UiTheme.CreateMutedLabel("One NAME=value per line. Prefix secret names with * / 每行 NAME=value，敏感变量名前加 *");
-            hint.Margin = new Padding(3, 2, 3, 0);
+            hint.Margin = new Padding(3, 4, 3, 0);
             AddRow(grid, "", hint);
         }));
+        _scrollHost.Controls.Add(stack);
 
-        _detailPanel.Controls.Add(stack);
-        _detailPanel.Padding = new Padding(6, 4, 6, 4);
-
-        var emptyLabel = new Label
+        // Footer action bar.
+        var footer = new TableLayoutPanel
         {
-            Dock = DockStyle.Fill,
-            TextAlign = ContentAlignment.MiddleCenter,
-            ForeColor = UiTheme.MutedText,
-            Text = "No services yet. Click \"+ Add / 添加\" to create one.\r\n还没有服务，请点击 \"+ Add / 添加\" 创建。"
+            Dock = DockStyle.Bottom,
+            AutoSize = true,
+            ColumnCount = 2,
+            Padding = new Padding(20, 10, 20, 12),
+            BackColor = SystemColors.Window
         };
-        _emptyPanel.Controls.Add(emptyLabel);
+        footer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        footer.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        var leftHint = UiTheme.CreateMutedLabel("Changes are saved per service / 修改按服务保存");
+        leftHint.Anchor = AnchorStyles.Left;
+        leftHint.Margin = new Padding(0, 8, 0, 0);
+        var footerButtons = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, WrapContents = false, AutoSize = true, Anchor = AnchorStyles.Right };
+        _save.Margin = new Padding(0);
+        footerButtons.Controls.AddRange([_logs, _import, _export, _save]);
+        footer.Controls.Add(leftHint, 0, 0);
+        footer.Controls.Add(footerButtons, 1, 0);
+        var footerWrap = new Panel { Dock = DockStyle.Bottom, AutoSize = true };
+        footerWrap.Controls.Add(footer);
+        footerWrap.Controls.Add(UiTheme.CreateSeparator(DockStyle.Top));
 
-        panel.Controls.Add(_emptyPanel);
-        panel.Controls.Add(_detailPanel);
-        panel.Controls.Add(actions);
-        _detailPanel.BringToFront();
+        // Empty state.
+        var emptyStack = new FlowLayoutPanel
+        {
+            FlowDirection = FlowDirection.TopDown,
+            WrapContents = false,
+            AutoSize = true,
+            Anchor = AnchorStyles.None
+        };
+        var emptyTitle = new Label { Text = "No service selected / 未选择服务", Font = UiTheme.Title, AutoSize = true, ForeColor = UiTheme.MutedText, TextAlign = ContentAlignment.MiddleCenter, Margin = new Padding(0, 0, 0, 8), Anchor = AnchorStyles.None };
+        var emptyBody = UiTheme.CreateMutedLabel("Select a service on the left, or click \"+ Add / 添加\" to create one.\r\n请在左侧选择服务，或点击 \"+ Add / 添加\" 新建。");
+        emptyBody.TextAlign = ContentAlignment.MiddleCenter;
+        emptyBody.Anchor = AnchorStyles.None;
+        emptyStack.Controls.Add(emptyTitle);
+        emptyStack.Controls.Add(emptyBody);
+        _emptyPanel.Controls.Add(emptyStack);
+        _emptyPanel.Resize += (_, _) => emptyStack.Location = new Point(
+            Math.Max(0, (_emptyPanel.ClientSize.Width - emptyStack.Width) / 2),
+            Math.Max(0, (_emptyPanel.ClientSize.Height - emptyStack.Height) / 2 - 30));
+        _emptyPanel.Visible = false;
+
+        _headerWrap = headerWrap;
+        _contentPanel.Controls.Add(_emptyPanel);
+        _contentPanel.Controls.Add(_scrollHost);
+        _contentPanel.Controls.Add(headerWrap);
+        _contentPanel.Controls.Add(footerWrap);
+        return _contentPanel;
     }
 
     private void DrawServiceItem(object? sender, DrawItemEventArgs e)
     {
         if (e.Index < 0 || e.Index >= _services.Items.Count) return;
-        e.DrawBackground();
         if (_services.Items[e.Index] is not ServiceDefinition service) return;
-        var state = _supervisor.GetSnapshot(service).State;
+        var snapshot = _supervisor.GetSnapshot(service);
         var selected = (e.State & DrawItemState.Selected) == DrawItemState.Selected;
-        var dotSize = Math.Max(8, e.Bounds.Height / 3);
-        var dotBounds = new Rectangle(e.Bounds.X + 8, e.Bounds.Y + (e.Bounds.Height - dotSize) / 2, dotSize, dotSize);
+        var focused = (e.State & DrawItemState.Focus) == DrawItemState.Focus &&
+                      (e.State & DrawItemState.NoFocusRect) != DrawItemState.NoFocusRect;
+
+        using (var back = new SolidBrush(selected ? UiTheme.SelectedBack : UiTheme.RailBack))
+            e.Graphics.FillRectangle(back, e.Bounds);
+        if (selected)
+        {
+            using var accent = new SolidBrush(UiTheme.Accent);
+            e.Graphics.FillRectangle(accent, e.Bounds.X, e.Bounds.Y + 4, 3, e.Bounds.Height - 8);
+        }
+
+        var dotSize = Math.Max(8, Font.Height / 2 + 2);
+        var dotY = e.Bounds.Y + (e.Bounds.Height - dotSize) / 2;
+        var dotBounds = new Rectangle(e.Bounds.X + 12, dotY, dotSize, dotSize);
         e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
-        using (var brush = new SolidBrush(selected ? Color.White : UiTheme.StateColor(state)))
+        using (var brush = new SolidBrush(UiTheme.StateColor(snapshot.State)))
             e.Graphics.FillEllipse(brush, dotBounds);
         e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.Default;
-        var textBounds = new Rectangle(dotBounds.Right + 8, e.Bounds.Y, Math.Max(0, e.Bounds.Right - dotBounds.Right - 12), e.Bounds.Height);
-        TextRenderer.DrawText(e.Graphics, service.Name, e.Font ?? _services.Font, textBounds,
-            selected ? SystemColors.HighlightText : SystemColors.ControlText,
-            TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
-        if ((e.State & DrawItemState.Focus) == DrawItemState.Focus && (e.State & DrawItemState.NoFocusRect) != DrawItemState.NoFocusRect)
-            e.DrawFocusRectangle();
+
+        var textX = dotBounds.Right + 10;
+        var textWidth = Math.Max(0, e.Bounds.Right - textX - 10);
+        var nameRect = new Rectangle(textX, e.Bounds.Y + 6, textWidth, Font.Height + 2);
+        var stateRect = new Rectangle(textX, nameRect.Bottom + 1, textWidth, e.Bounds.Bottom - nameRect.Bottom - 4);
+        TextRenderer.DrawText(e.Graphics, service.Name, UiTheme.Bold, nameRect, SystemColors.ControlText,
+            TextFormatFlags.Left | TextFormatFlags.Top | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
+        var detail = UiTheme.StateText(snapshot.State) + (snapshot.ProcessId is int pid ? $" · PID {pid}" : "");
+        TextRenderer.DrawText(e.Graphics, detail, UiTheme.Small, stateRect, UiTheme.StateColor(snapshot.State),
+            TextFormatFlags.Left | TextFormatFlags.Top | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
+        if (focused) ControlPaint.DrawFocusRectangle(e.Graphics, e.Bounds);
     }
+
+    // ---------------------------------------------------------------- behavior (unchanged semantics)
 
     public void AllowExit() => _allowExit = true;
 
@@ -230,9 +319,13 @@ public sealed class SettingsForm : Form
 
     private void RefreshServiceList(ServiceDefinition? select = null)
     {
+        var filter = _search.Text.Trim();
+        var items = _configuration.Services
+            .Where(s => filter.Length == 0 || s.Name.Contains(filter, StringComparison.OrdinalIgnoreCase))
+            .ToList();
         _services.DataSource = null;
-        _services.DataSource = _configuration.Services.ToList();
-        if (select is not null) _services.SelectedItem = select;
+        _services.DataSource = items;
+        if (select is not null && items.Contains(select)) _services.SelectedItem = select;
         else if (_services.Items.Count > 0 && _services.SelectedIndex < 0) _services.SelectedIndex = 0;
         UpdateEmptyState();
     }
@@ -241,8 +334,8 @@ public sealed class SettingsForm : Form
     {
         var hasSelection = Selected is not null;
         _emptyPanel.Visible = !hasSelection;
-        if (hasSelection) _detailPanel.BringToFront();
-        else _emptyPanel.BringToFront();
+        _scrollHost.Visible = hasSelection;
+        if (_headerWrap is not null) _headerWrap.Visible = hasSelection;
     }
 
     private void LoadSelected()
@@ -283,6 +376,7 @@ public sealed class SettingsForm : Form
     {
         var service = new ServiceDefinition { Name = "New service" };
         _configuration.Services.Add(service);
+        _search.Clear();
         RefreshServiceList(service);
     }
 
@@ -311,8 +405,9 @@ public sealed class SettingsForm : Form
     private void ApplySnapshot(ServiceSnapshot snapshot)
     {
         if (Selected?.Id != snapshot.Id) return;
-        _state.Text = $"{snapshot.State}{(snapshot.ProcessId is int pid ? $" · PID {pid}" : "")}{(snapshot.Error is { Length: > 0 } error ? $" · {error}" : "")}";
-        _state.ForeColor = UiTheme.StateColor(snapshot.State);
+        _badge.SetState(snapshot.State);
+        _stateDetail.Text = $"{(snapshot.ProcessId is int pid ? $"PID {pid}" : UiTheme.StateText(snapshot.State))}{(snapshot.Error is { Length: > 0 } error ? $" · {error}" : "")}";
+        _stateDetail.ForeColor = snapshot.Error is { Length: > 0 } ? UiTheme.StateColor(ServiceState.Faulted) : UiTheme.MutedText;
         _start.Enabled = snapshot.State is ServiceState.Stopped or ServiceState.Faulted;
         _stop.Enabled = snapshot.State == ServiceState.Running;
         _restartButton.Enabled = snapshot.State == ServiceState.Running;
@@ -337,6 +432,7 @@ public sealed class SettingsForm : Form
             _configuration.Services = imported.Services;
             _configuration.Language = imported.Language;
             _store.Save(_configuration);
+            _search.Clear();
             RefreshServiceList();
             ConfigurationChanged?.Invoke(this, EventArgs.Empty);
         }
@@ -364,23 +460,19 @@ public sealed class SettingsForm : Form
         return values;
     }
 
-    private static GroupBox CreateGroup(string text, Action<TableLayoutPanel> build)
+    // ---------------------------------------------------------------- helpers
+
+    private static Control CreateCard(string title, Action<TableLayoutPanel> build)
     {
-        var group = new GroupBox
-        {
-            Text = text,
-            AutoSize = true,
-            AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            Dock = DockStyle.Top,
-            Padding = new Padding(10, 4, 10, 10),
-            Margin = new Padding(0, 0, 0, 10)
-        };
+        var card = new CardPanel { Dock = DockStyle.Top, Margin = new Padding(0, 0, 0, 14) };
+        var heading = new Label { Text = title, Font = UiTheme.Bold, AutoSize = true, Dock = DockStyle.Top, Margin = new Padding(0, 0, 0, 8) };
         var grid = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 2 };
         grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 170));
         grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         build(grid);
-        group.Controls.Add(grid);
-        return group;
+        card.Controls.Add(grid);
+        card.Controls.Add(heading);
+        return card;
     }
 
     private static Control WithBrowse(TextBox textBox)
@@ -403,7 +495,7 @@ public sealed class SettingsForm : Form
     {
         var row = form.RowCount++;
         form.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        var caption = new Label { Text = label, AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(3, 6, 10, 6) };
+        var caption = new Label { Text = label, AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(3, 6, 10, 6), ForeColor = UiTheme.MutedText };
         control.Dock = control is FlowLayoutPanel ? DockStyle.Top : DockStyle.Fill;
         control.Margin = new Padding(3, 3, 3, 6);
         form.Controls.Add(caption, 0, row); form.Controls.Add(control, 1, row);
