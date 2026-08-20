@@ -4,6 +4,7 @@ public sealed class AppConfiguration
 {
     public string Language { get; set; } = "auto";
     public bool RunAtLogin { get; set; }
+    public bool McpEnabled { get; set; } = true;
     public List<ServiceDefinition> Services { get; set; } = [];
 }
 

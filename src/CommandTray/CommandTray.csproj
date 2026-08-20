@@ -8,6 +8,11 @@
     <AssemblyName>CommandTray</AssemblyName>
     <RootNamespace>CommandTray</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\commandtray.ico</ApplicationIcon>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
   </PropertyGroup>
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="ModelContextProtocol.AspNetCore" Version="2.1.0" />
+  </ItemGroup>
 </Project>

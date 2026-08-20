@@ -9,6 +9,9 @@ public sealed class TrayApplicationContext : ApplicationContext
     private readonly ConfigurationStore _store;
     private readonly AppConfiguration _configuration;
     private readonly ProcessSupervisor _supervisor = new();
+    private readonly CommandTrayApi _api;
+    private readonly McpServerHost _mcpHost = new();
+    private readonly Icon _appIcon;
     private readonly NotifyIcon _tray;
     private readonly SettingsForm _settings;
     private readonly RegisteredWaitHandle _showRegistration;
@@ -18,18 +21,22 @@ public sealed class TrayApplicationContext : ApplicationContext
     {
         _store = store;
         _configuration = configuration;
+        _appIcon = Icon.ExtractAssociatedIcon(Application.ExecutablePath) ?? (Icon)SystemIcons.Application.Clone();
         _settings = new SettingsForm(configuration, store, _supervisor);
+        _api = new CommandTrayApi(configuration, store, _supervisor);
         // Create the UI handle before registering cross-thread callbacks. Without
         // it, a second instance can signal successfully while BeginInvoke fails,
         // leaving a background process with no reachable UI.
         _ = _settings.Handle;
         _settings.ConfigurationChanged += (_, _) => { SaveConfiguration(); RebuildMenu(); };
+        _settings.McpEnabledChanged += async (_, _) => await ApplyMcpStateAsync();
+        _api.ConfigurationChanged += (_, _) => RefreshAfterApiChange();
         _supervisor.StateChanged += (_, _) => RebuildMenuOnUiThread();
         _supervisor.Failure += (_, failure) => ShowFailure(failure.Service.Name, failure.Message);
 
         _tray = new NotifyIcon
         {
-            Icon = SystemIcons.Application,
+            Icon = _appIcon,
             Text = "CommandTray",
             Visible = true
         };
@@ -47,6 +54,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         }, null, Timeout.Infinite, false);
 
         _ = _supervisor.StartConfiguredServicesAsync(_configuration.Services);
+        _ = ApplyMcpStateAsync();
     }
 
     public void ShowSettings()
@@ -77,7 +85,9 @@ public sealed class TrayApplicationContext : ApplicationContext
         menu.Items.Add(header);
         menu.Items.Add(new ToolStripSeparator());
 
-        foreach (var service in _configuration.Services)
+        ServiceDefinition[] services;
+        lock (_configuration) services = _configuration.Services.ToArray();
+        foreach (var service in services)
         {
             var snapshot = _supervisor.GetSnapshot(service);
             var item = new ToolStripMenuItem($"{UiTheme.StateGlyph(snapshot.State)} {service.Name}");
@@ -105,7 +115,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         autoStart.CheckedChanged += (_, _) =>
         {
             AutoStartService.SetEnabled(autoStart.Checked);
-            _configuration.RunAtLogin = autoStart.Checked;
+            lock (_configuration) _configuration.RunAtLogin = autoStart.Checked;
             SaveConfiguration();
         };
         menu.Items.Add(autoStart);
@@ -127,6 +137,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         _exiting = true;
         Application.Idle -= EnsureTrayVisibleOnFirstIdle;
         _tray.Visible = false;
+        await _mcpHost.StopAsync();
         await _supervisor.StopAllAsync(_configuration.Services);
         await _supervisor.DisposeAsync();
         _showRegistration.Unregister(null);
@@ -137,8 +148,30 @@ public sealed class TrayApplicationContext : ApplicationContext
 
     private void SaveConfiguration()
     {
-        try { _store.Save(_configuration); }
+        try { lock (_configuration) _store.Save(_configuration); }
         catch (Exception ex) { ShowFailure("Configuration", ex.Message); }
+    }
+
+    private async Task ApplyMcpStateAsync()
+    {
+        try
+        {
+            bool enabled;
+            lock (_configuration) enabled = _configuration.McpEnabled;
+            if (enabled) await _mcpHost.StartAsync(_api);
+            else await _mcpHost.StopAsync();
+        }
+        catch (Exception ex) { ShowFailure("MCP server", ex.Message); }
+    }
+
+    private void RefreshAfterApiChange()
+    {
+        if (_settings.IsDisposed || !_settings.IsHandleCreated) return;
+        _settings.BeginInvoke(() =>
+        {
+            _settings.RefreshFromExternalChange();
+            RebuildMenu();
+        });
     }
 
     private void ShowFailure(string service, string message)
@@ -159,7 +192,12 @@ public sealed class TrayApplicationContext : ApplicationContext
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing) _tray.Dispose();
+        if (disposing)
+        {
+            _mcpHost.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            _tray.Dispose();
+            _appIcon.Dispose();
+        }
         base.Dispose(disposing);
     }
 }

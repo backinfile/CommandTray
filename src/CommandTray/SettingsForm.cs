@@ -8,6 +8,13 @@ public sealed class SettingsForm : Form
     private readonly AppConfiguration _configuration;
     private readonly ConfigurationStore _store;
     private readonly ProcessSupervisor _supervisor;
+    private readonly ToolTip _fieldHelp = new()
+    {
+        AutoPopDelay = 12000,
+        InitialDelay = 450,
+        ReshowDelay = 100,
+        ShowAlways = true
+    };
 
     // Left rail
     private readonly TextBox _search = new() { PlaceholderText = "Filter / 筛选…" };
@@ -21,6 +28,7 @@ public sealed class SettingsForm : Form
     };
     private readonly Button _add = UiTheme.CreatePrimaryButton("+ Add / 添加");
     private readonly Button _delete = UiTheme.CreateButton("Delete / 删除");
+    private readonly CheckBox _enableMcp = new() { Text = "Enable MCP / 启用 MCP", AutoSize = true };
 
     // Content header
     private readonly Panel _contentPanel = new() { Dock = DockStyle.Fill, BackColor = SystemColors.Window };
@@ -49,8 +57,10 @@ public sealed class SettingsForm : Form
     // Empty state
     private readonly Panel _emptyPanel = new() { Dock = DockStyle.Fill, BackColor = SystemColors.Window };
     private bool _allowExit;
+    private bool _updatingMcpPreference;
 
     public event EventHandler? ConfigurationChanged;
+    public event EventHandler? McpEnabledChanged;
 
     public SettingsForm(AppConfiguration configuration, ConfigurationStore store, ProcessSupervisor supervisor)
     {
@@ -62,8 +72,9 @@ public sealed class SettingsForm : Form
         StartPosition = FormStartPosition.CenterScreen;
         AutoScaleMode = AutoScaleMode.Dpi;
         MinimumSize = new Size(920, 640);
-        Size = new Size(1060, 740);
+        Size = new Size(1180, 840);
         BackColor = SystemColors.Window;
+        _enableMcp.Checked = _configuration.McpEnabled;
 
         var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = Padding.Empty };
         root.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 268));
@@ -92,6 +103,7 @@ public sealed class SettingsForm : Form
         _logs.Click += (_, _) => ViewLog();
         _import.Click += (_, _) => ImportConfiguration();
         _export.Click += (_, _) => ExportConfiguration();
+        _enableMcp.CheckedChanged += (_, _) => SaveMcpPreference();
         _supervisor.StateChanged += (_, snapshot) => BeginInvoke(() =>
         {
             ApplySnapshot(snapshot);
@@ -123,6 +135,21 @@ public sealed class SettingsForm : Form
         _search.Margin = new Padding(0, 0, 0, 10);
         _search.BorderStyle = BorderStyle.FixedSingle;
 
+        var mcpPanel = new FlowLayoutPanel
+        {
+            AutoSize = true,
+            FlowDirection = FlowDirection.TopDown,
+            WrapContents = false,
+            Margin = new Padding(2, 0, 0, 10)
+        };
+        var mcpEndpoint = UiTheme.CreateMutedLabel("AI control · 127.0.0.1:58629");
+        mcpEndpoint.Margin = new Padding(20, 0, 0, 0);
+        mcpPanel.Controls.Add(_enableMcp);
+        mcpPanel.Controls.Add(mcpEndpoint);
+        const string mcpHelp = "Starts a local MCP server for AI control at http://127.0.0.1:58629/mcp. Only apps on this computer can connect. / 启动供 AI 操作的本地 MCP 服务，仅本机应用可连接。";
+        _fieldHelp.SetToolTip(_enableMcp, mcpHelp);
+        _fieldHelp.SetToolTip(mcpEndpoint, mcpHelp);
+
         _services.Margin = Padding.Empty;
         _services.ItemHeight = (int)(Font.Height * 2.6);
         _services.DrawItem += DrawServiceItem;
@@ -138,13 +165,15 @@ public sealed class SettingsForm : Form
         rail.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // brand
         rail.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // sub
         rail.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // search
+        rail.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // MCP
         rail.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); // list
         rail.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // buttons
         rail.Controls.Add(brand, 0, 0);
         rail.Controls.Add(brandSub, 0, 1);
         rail.Controls.Add(_search, 0, 2);
-        rail.Controls.Add(_services, 0, 3);
-        rail.Controls.Add(railButtons, 0, 4);
+        rail.Controls.Add(mcpPanel, 0, 3);
+        rail.Controls.Add(_services, 0, 4);
+        rail.Controls.Add(railButtons, 0, 5);
 
         var wrapper = new Panel { Dock = DockStyle.Fill, Margin = Padding.Empty };
         wrapper.Controls.Add(rail);
@@ -193,20 +222,34 @@ public sealed class SettingsForm : Form
         stack.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         stack.Controls.Add(CreateCard("Service / 服务", grid =>
         {
-            AddRow(grid, "Name / 名称", _name);
-            AddRow(grid, "CMD command / 命令", _command);
-            AddRow(grid, "Working directory / 目录", WithBrowse(_cwd));
-            AddRow(grid, "Open URL / 网页", _url);
+            AddRow(grid, "Name / 名称", _name,
+                "The name shown in the service list and tray menu. / 显示在服务列表和托盘菜单中的名称。");
+            AddRow(grid, "CMD command / 命令", _command,
+                "The command CommandTray runs to start this service. / CommandTray 启动此服务时执行的命令。");
+            AddRow(grid, "Working directory / 目录", WithBrowse(_cwd),
+                "The folder used when running start and stop commands. Leave blank to use CommandTray's current folder. / 执行启动和停止命令时使用的目录；留空则使用 CommandTray 当前目录。");
+            AddRow(grid, "Open URL / 网页", _url,
+                "An optional HTTP or HTTPS address available from the tray menu while using this service. / 可选的 HTTP 或 HTTPS 地址，可从托盘菜单快速打开。");
         }));
         stack.Controls.Add(CreateCard("Shutdown / 停止", grid =>
         {
-            AddRow(grid, "Stop command / 停止命令", _stopCommand);
-            AddRow(grid, "Stop timeout / 超时秒", _timeout);
-            AddRow(grid, "Options / 选项", Stack(_startWithManager, _restart));
+            AddRow(grid, "Stop command / 停止命令", _stopCommand,
+                "An optional command run before CommandTray ends the process. Use ${PID} to insert the process ID. / 结束进程前可执行的命令；可用 ${PID} 代入进程 ID。");
+            AddRow(grid, "Stop timeout / 超时秒", _timeout,
+                "How many seconds to wait for a graceful stop before the process is ended. / 等待服务正常停止的秒数，超时后将结束进程。");
+
+            var options = Stack(_startWithManager, _restart);
+            AddRow(grid, "Options / 选项", options,
+                "Controls automatic startup and recovery behavior for this service. / 控制此服务的自动启动和异常恢复行为。");
+            _fieldHelp.SetToolTip(_startWithManager,
+                "Start this service automatically when CommandTray starts. / CommandTray 启动时自动启动此服务。");
+            _fieldHelp.SetToolTip(_restart,
+                "Start the service again if it exits unexpectedly; a manual stop will not trigger a restart. / 服务意外退出时自动重启；手动停止不会触发重启。");
         }));
         stack.Controls.Add(CreateCard("Environment / 环境变量", grid =>
         {
-            AddRow(grid, "", _environment);
+            AddRow(grid, "", _environment,
+                "Environment variables passed to the service, one NAME=value entry per line. Prefix a secret name with * so its stored value is protected. / 传给服务的环境变量，每行一项 NAME=value；敏感变量名前加 *，保存时会保护其值。");
             var hint = UiTheme.CreateMutedLabel("One NAME=value per line. Prefix secret names with * / 每行 NAME=value，敏感变量名前加 *");
             hint.Margin = new Padding(3, 4, 3, 0);
             AddRow(grid, "", hint);
@@ -226,6 +269,8 @@ public sealed class SettingsForm : Form
         footer.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         var leftHint = UiTheme.CreateMutedLabel("Changes are saved per service / 修改按服务保存");
         leftHint.Anchor = AnchorStyles.Left;
+        leftHint.AutoEllipsis = false;
+        leftHint.MaximumSize = Size.Empty;
         leftHint.Margin = new Padding(0, 8, 0, 0);
         var footerButtons = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, WrapContents = false, AutoSize = true, Anchor = AnchorStyles.Right };
         _save.Margin = new Padding(0);
@@ -305,6 +350,27 @@ public sealed class SettingsForm : Form
 
     public void AllowExit() => _allowExit = true;
 
+    public void RefreshFromExternalChange()
+    {
+        if (InvokeRequired)
+        {
+            BeginInvoke(RefreshFromExternalChange);
+            return;
+        }
+        var selectedId = Selected?.Id;
+        ServiceDefinition? select;
+        lock (_configuration)
+            select = _configuration.Services.FirstOrDefault(service => service.Id == selectedId);
+        RefreshServiceList(select);
+        LoadSelected();
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing) _fieldHelp.Dispose();
+        base.Dispose(disposing);
+    }
+
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
         if (!_allowExit && e.CloseReason == CloseReason.UserClosing)
@@ -320,9 +386,11 @@ public sealed class SettingsForm : Form
     private void RefreshServiceList(ServiceDefinition? select = null)
     {
         var filter = _search.Text.Trim();
-        var items = _configuration.Services
-            .Where(s => filter.Length == 0 || s.Name.Contains(filter, StringComparison.OrdinalIgnoreCase))
-            .ToList();
+        List<ServiceDefinition> items;
+        lock (_configuration)
+            items = _configuration.Services
+                .Where(s => filter.Length == 0 || s.Name.Contains(filter, StringComparison.OrdinalIgnoreCase))
+                .ToList();
         _services.DataSource = null;
         _services.DataSource = items;
         if (select is not null && items.Contains(select)) _services.SelectedItem = select;
@@ -342,16 +410,19 @@ public sealed class SettingsForm : Form
     {
         UpdateEmptyState();
         if (Selected is not { } item) return;
-        _title.Text = item.Name;
-        _name.Text = item.Name;
-        _command.Text = item.Command;
-        _cwd.Text = item.WorkingDirectory;
-        _url.Text = item.OpenUrl;
-        _stopCommand.Text = item.StopCommand;
-        _timeout.Value = Math.Clamp(item.StopTimeoutSeconds, 1, 300);
-        _startWithManager.Checked = item.StartWithManager;
-        _restart.Checked = item.RestartOnUnexpectedExit;
-        _environment.Lines = item.Environment.Select(x => $"{(x.IsSecret ? "*" : "")}{x.Name}={x.Value}").ToArray();
+        lock (_configuration)
+        {
+            _title.Text = item.Name;
+            _name.Text = item.Name;
+            _command.Text = item.Command;
+            _cwd.Text = item.WorkingDirectory;
+            _url.Text = item.OpenUrl;
+            _stopCommand.Text = item.StopCommand;
+            _timeout.Value = Math.Clamp(item.StopTimeoutSeconds, 1, 300);
+            _startWithManager.Checked = item.StartWithManager;
+            _restart.Checked = item.RestartOnUnexpectedExit;
+            _environment.Lines = item.Environment.Select(x => $"{(x.IsSecret ? "*" : "")}{x.Name}={x.Value}").ToArray();
+        }
         ApplySnapshot(_supervisor.GetSnapshot(item));
     }
 
@@ -360,11 +431,14 @@ public sealed class SettingsForm : Form
         if (Selected is not { } item) return;
         try
         {
-            item.Name = _name.Text.Trim(); item.Command = _command.Text.Trim(); item.WorkingDirectory = _cwd.Text.Trim();
-            item.OpenUrl = _url.Text.Trim(); item.StopCommand = _stopCommand.Text.Trim(); item.StopTimeoutSeconds = (int)_timeout.Value;
-            item.StartWithManager = _startWithManager.Checked; item.RestartOnUnexpectedExit = _restart.Checked;
-            item.Environment = ParseEnvironment(_environment.Lines);
-            _store.Save(_configuration);
+            lock (_configuration)
+            {
+                item.Name = _name.Text.Trim(); item.Command = _command.Text.Trim(); item.WorkingDirectory = _cwd.Text.Trim();
+                item.OpenUrl = _url.Text.Trim(); item.StopCommand = _stopCommand.Text.Trim(); item.StopTimeoutSeconds = (int)_timeout.Value;
+                item.StartWithManager = _startWithManager.Checked; item.RestartOnUnexpectedExit = _restart.Checked;
+                item.Environment = ParseEnvironment(_environment.Lines);
+                _store.Save(_configuration);
+            }
             _title.Text = item.Name;
             RefreshServiceList(item);
             ConfigurationChanged?.Invoke(this, EventArgs.Empty);
@@ -375,7 +449,7 @@ public sealed class SettingsForm : Form
     private void AddService()
     {
         var service = new ServiceDefinition { Name = "New service" };
-        _configuration.Services.Add(service);
+        lock (_configuration) _configuration.Services.Add(service);
         _search.Clear();
         RefreshServiceList(service);
     }
@@ -389,8 +463,11 @@ public sealed class SettingsForm : Form
             return;
         }
         if (MessageBox.Show(this, $"Delete '{item.Name}'?", "CommandTray", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
-        _configuration.Services.Remove(item);
-        _store.Save(_configuration);
+        lock (_configuration)
+        {
+            _configuration.Services.Remove(item);
+            _store.Save(_configuration);
+        }
         RefreshServiceList();
         ConfigurationChanged?.Invoke(this, EventArgs.Empty);
     }
@@ -429,9 +506,14 @@ public sealed class SettingsForm : Form
         try
         {
             var imported = _store.Import(dialog.FileName);
-            _configuration.Services = imported.Services;
-            _configuration.Language = imported.Language;
-            _store.Save(_configuration);
+            lock (_configuration)
+            {
+                _configuration.Services = imported.Services;
+                _configuration.Language = imported.Language;
+                _configuration.McpEnabled = imported.McpEnabled;
+                _store.Save(_configuration);
+                _enableMcp.Checked = _configuration.McpEnabled;
+            }
             _search.Clear();
             RefreshServiceList();
             ConfigurationChanged?.Invoke(this, EventArgs.Empty);
@@ -443,8 +525,32 @@ public sealed class SettingsForm : Form
     {
         using var dialog = new SaveFileDialog { Filter = "JSON (*.json)|*.json", FileName = "CommandTray-export.json" };
         if (dialog.ShowDialog(this) != DialogResult.OK) return;
-        try { _store.ExportWithoutSecrets(_configuration, dialog.FileName); }
+        try { lock (_configuration) _store.ExportWithoutSecrets(_configuration, dialog.FileName); }
         catch (Exception ex) { MessageBox.Show(this, ex.Message, "CommandTray", MessageBoxButtons.OK, MessageBoxIcon.Error); }
+    }
+
+    private void SaveMcpPreference()
+    {
+        if (_updatingMcpPreference) return;
+        bool previous;
+        lock (_configuration) previous = _configuration.McpEnabled;
+        try
+        {
+            lock (_configuration)
+            {
+                _configuration.McpEnabled = _enableMcp.Checked;
+                _store.Save(_configuration);
+            }
+            McpEnabledChanged?.Invoke(this, EventArgs.Empty);
+        }
+        catch (Exception ex)
+        {
+            lock (_configuration) _configuration.McpEnabled = previous;
+            _updatingMcpPreference = true;
+            try { _enableMcp.Checked = previous; }
+            finally { _updatingMcpPreference = false; }
+            MessageBox.Show(this, ex.Message, "CommandTray", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
     }
 
     private static List<EnvironmentEntry> ParseEnvironment(IEnumerable<string> lines)
@@ -491,7 +597,7 @@ public sealed class SettingsForm : Form
         panel.Controls.AddRange(controls); return panel;
     }
 
-    private static void AddRow(TableLayoutPanel form, string label, Control control)
+    private void AddRow(TableLayoutPanel form, string label, Control control, string? helpText = null)
     {
         var row = form.RowCount++;
         form.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -499,5 +605,18 @@ public sealed class SettingsForm : Form
         control.Dock = control is FlowLayoutPanel ? DockStyle.Top : DockStyle.Fill;
         control.Margin = new Padding(3, 3, 3, 6);
         form.Controls.Add(caption, 0, row); form.Controls.Add(control, 1, row);
+
+        if (!string.IsNullOrWhiteSpace(helpText))
+        {
+            _fieldHelp.SetToolTip(caption, helpText);
+            SetToolTipRecursively(control, helpText);
+        }
+    }
+
+    private void SetToolTipRecursively(Control control, string helpText)
+    {
+        _fieldHelp.SetToolTip(control, helpText);
+        foreach (Control child in control.Controls)
+            SetToolTipRecursively(child, helpText);
     }
 }

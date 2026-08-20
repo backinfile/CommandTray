@@ -50,6 +50,24 @@ public sealed class ConfigurationStoreTests : IDisposable
         Assert.Throws<InvalidDataException>(() => ConfigurationStore.Validate(config));
     }
 
+    [Fact]
+    public void ExistingConfigurationWithoutMcpSettingDefaultsToEnabled()
+    {
+        Directory.CreateDirectory(_directory);
+        var path = Path.Combine(_directory, "legacy.json");
+        File.WriteAllText(path, """
+        {
+          "language": "auto",
+          "runAtLogin": false,
+          "services": [
+            { "id": "11111111-1111-1111-1111-111111111111", "name": "Test", "command": "echo ok", "stopTimeoutSeconds": 5, "environment": [] }
+          ]
+        }
+        """);
+
+        Assert.True(new ConfigurationStore(path).Load().McpEnabled);
+    }
+
     private static AppConfiguration CreateConfiguration() => new()
     {
         Services = [new ServiceDefinition { Name = "Test", Command = "echo ok", WorkingDirectory = Path.GetTempPath() }]
