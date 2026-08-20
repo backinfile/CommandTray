@@ -13,15 +13,15 @@ $zip = Join-Path $portable "CommandTray-$Version-win-x64.zip"
 if (Test-Path -LiteralPath $zip) { Remove-Item -LiteralPath $zip }
 Compress-Archive -Path (Join-Path $publish '*') -DestinationPath $zip
 Get-FileHash -Algorithm SHA256 -LiteralPath $zip | Format-List
-# Chocolatey can expose more than one ISCC shim; invoke one resolved command.
-$iscc = Get-Command ISCC.exe -ErrorAction SilentlyContinue | Select-Object -First 1
-if (-not $iscc) {
+# Get-Command returns ApplicationInfo on the runner, whose executable path is Source rather than FullName.
+$isccCommand = Get-Command ISCC.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+$isccPath = if ($isccCommand) { $isccCommand.Source } else { $null }
+if (-not $isccPath) {
     $isccPath = @(
         (Join-Path $env:LOCALAPPDATA 'Programs\Inno Setup 6\ISCC.exe'),
         'C:\Program Files (x86)\Inno Setup 6\ISCC.exe',
         'C:\Program Files\Inno Setup 6\ISCC.exe'
     ) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
-    if ($isccPath) { $iscc = Get-Item -LiteralPath $isccPath }
 }
-if ($iscc) { & $iscc.FullName "/DAppVersion=$Version" (Join-Path $root 'packaging\CommandTray.iss') }
+if ($isccPath) { & $isccPath "/DAppVersion=$Version" (Join-Path $root 'packaging\CommandTray.iss') }
 else { Write-Warning 'Inno Setup was not found; portable package was created, installer was skipped.' }
