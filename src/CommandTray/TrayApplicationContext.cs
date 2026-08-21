@@ -15,9 +15,15 @@ public sealed class TrayApplicationContext : ApplicationContext
     private readonly NotifyIcon _tray;
     private readonly SettingsForm _settings;
     private readonly RegisteredWaitHandle _showRegistration;
+    private readonly RegisteredWaitHandle _shutdownRegistration;
+    private readonly ShutdownWindow _shutdownWindow;
     private bool _exiting;
 
-    public TrayApplicationContext(ConfigurationStore store, AppConfiguration configuration, EventWaitHandle showEvent)
+    public TrayApplicationContext(
+        ConfigurationStore store,
+        AppConfiguration configuration,
+        EventWaitHandle showEvent,
+        EventWaitHandle shutdownEvent)
     {
         _store = store;
         _configuration = configuration;
@@ -43,6 +49,8 @@ public sealed class TrayApplicationContext : ApplicationContext
         _tray.DoubleClick += (_, _) => ShowSettings();
         RebuildMenu();
 
+        _shutdownWindow = new ShutdownWindow(BeginExit);
+
         // Re-register once the WinForms message loop is actually pumping. This
         // keeps the running state aligned with a live notification-area icon.
         Application.Idle += EnsureTrayVisibleOnFirstIdle;
@@ -52,6 +60,8 @@ public sealed class TrayApplicationContext : ApplicationContext
             if (!_exiting && !_settings.IsDisposed)
                 _settings.BeginInvoke(ShowSettings);
         }, null, Timeout.Infinite, false);
+        _shutdownRegistration = ThreadPool.RegisterWaitForSingleObject(shutdownEvent, (_, _) =>
+            _shutdownWindow.RequestShutdown(), null, Timeout.Infinite, false);
 
         _ = _supervisor.StartConfiguredServicesAsync(_configuration.Services);
         _ = ApplyMcpStateAsync();
@@ -119,7 +129,8 @@ public sealed class TrayApplicationContext : ApplicationContext
             SaveConfiguration();
         };
         menu.Items.Add(autoStart);
-        menu.Items.Add(new ToolStripMenuItem(Localizer.T("Exit", "退出"), null, async (_, _) => await ExitAsync()));
+        menu.Items.Add(new ToolStripMenuItem(Localizer.T("Exit", "退出"), null, (_, _) =>
+            _shutdownWindow.RequestShutdown()));
         var old = _tray.ContextMenuStrip;
         _tray.ContextMenuStrip = menu;
         old?.Dispose();
@@ -131,19 +142,46 @@ public sealed class TrayApplicationContext : ApplicationContext
         catch (Exception ex) { ShowFailure("CommandTray", ex.Message); }
     }
 
-    private async Task ExitAsync()
+    private void BeginExit()
     {
         if (_exiting) return;
         _exiting = true;
+        _ = ExitAsync();
+    }
+
+    private async Task ExitAsync()
+    {
         Application.Idle -= EnsureTrayVisibleOnFirstIdle;
         _tray.Visible = false;
-        await _mcpHost.StopAsync();
-        await _supervisor.StopAllAsync(_configuration.Services);
-        await _supervisor.DisposeAsync();
-        _showRegistration.Unregister(null);
-        _settings.AllowExit();
-        _settings.Close();
-        ExitThread();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        try
+        {
+            try { await _mcpHost.StopAsync(timeout.Token); }
+            catch { /* shutdown must continue even if one component fails */ }
+
+            ServiceDefinition[] services;
+            lock (_configuration) services = _configuration.Services.ToArray();
+            try { await _supervisor.StopAllAsync(services, timeout.Token); }
+            catch { /* DisposeAsync force-terminates any remaining owned jobs */ }
+            try { await _supervisor.DisposeAsync(); }
+            catch { /* the application itself must still terminate */ }
+        }
+        finally
+        {
+            try
+            {
+                _showRegistration.Unregister(null);
+                _shutdownRegistration.Unregister(null);
+                _settings.AllowExit();
+                _settings.Close();
+            }
+            finally
+            {
+                // A cleanup or window-disposal failure must never leave the
+                // tray process alive after the user requested Exit.
+                ExitThread();
+            }
+        }
     }
 
     private void SaveConfiguration()
@@ -195,6 +233,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         if (disposing)
         {
             _mcpHost.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            _shutdownWindow.Dispose();
             _tray.Dispose();
             _appIcon.Dispose();
         }

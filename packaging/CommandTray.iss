@@ -18,6 +18,7 @@ SolidCompression=yes
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 UninstallDisplayIcon={app}\CommandTray.exe
+CloseApplications=force
 
 [Files]
 Source: "{#PublishDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -31,3 +32,39 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription:
 
 [Run]
 Filename: "{app}\CommandTray.exe"; Description: "Launch CommandTray"; Flags: nowait postinstall skipifsilent
+
+[Code]
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  OldExecutable: String;
+  ResultCode: Integer;
+  Attempt: Integer;
+begin
+  Result := '';
+  OldExecutable := ExpandConstant('{app}\CommandTray.exe');
+  if not FileExists(OldExecutable) then
+    Exit;
+
+  { New versions understand --shutdown and stop their owned background jobs.
+    Older versions ignored the argument, so use a bounded wait and taskkill
+    fallback to prevent Setup hanging forever at "Closing applications". }
+  Exec(OldExecutable, '--shutdown', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  for Attempt := 1 to 50 do
+  begin
+    if not CheckForMutexes('Local\CommandTray.SingleInstance') then
+      Exit;
+    Sleep(100);
+  end;
+
+  Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /T /IM CommandTray.exe', '',
+    SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  for Attempt := 1 to 20 do
+  begin
+    if not CheckForMutexes('Local\CommandTray.SingleInstance') then
+      Exit;
+    Sleep(100);
+  end;
+
+  if CheckForMutexes('Local\CommandTray.SingleInstance') then
+    Result := 'CommandTray could not be closed. Please end CommandTray.exe and retry.';
+end;

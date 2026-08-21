@@ -159,12 +159,14 @@ public sealed class ProcessSupervisor : IAsyncDisposable
         }
     }
 
-    public async Task StopAllAsync(IEnumerable<ServiceDefinition> services)
+    public async Task StopAllAsync(
+        IEnumerable<ServiceDefinition> services,
+        CancellationToken cancellationToken = default)
     {
         _shuttingDown = true;
         foreach (var service in services)
         {
-            try { await StopAsync(service); }
+            try { await StopAsync(service, cancellationToken); }
             catch { /* continue cleaning remaining owned jobs */ }
         }
     }

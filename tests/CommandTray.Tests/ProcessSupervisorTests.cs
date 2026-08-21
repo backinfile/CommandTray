@@ -49,6 +49,20 @@ public sealed class ProcessSupervisorTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task ActiveApplicationExitStopsAllOwnedBackgroundProcesses()
+    {
+        Assert.False(await CanConnectAsync(58628));
+        var service = CreateService();
+        await _supervisor!.StartAsync(service);
+        await WaitUntilAsync(() => CanConnectAsync(58628), TimeSpan.FromSeconds(10));
+
+        await _supervisor.StopAllAsync([service]);
+
+        await WaitUntilAsync(async () => !await CanConnectAsync(58628), TimeSpan.FromSeconds(10));
+        Assert.Equal(ServiceState.Stopped, _supervisor.GetSnapshot(service).State);
+    }
+
+    [Fact]
     public async Task MissingWorkingDirectoryFailsWithoutStartingAnything()
     {
         var service = CreateService();

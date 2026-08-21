@@ -6,6 +6,7 @@ internal static class Program
 {
     private const string MutexName = @"Local\CommandTray.SingleInstance";
     private const string ShowEventName = @"Local\CommandTray.ShowSettings";
+    private const string ShutdownEventName = @"Local\CommandTray.Shutdown";
 
     [STAThread]
     private static void Main(string[] args)
@@ -18,6 +19,12 @@ internal static class Program
 
         using var mutex = new Mutex(true, MutexName, out var firstInstance);
         using var showEvent = new EventWaitHandle(false, EventResetMode.AutoReset, ShowEventName);
+        using var shutdownEvent = new EventWaitHandle(false, EventResetMode.AutoReset, ShutdownEventName);
+        if (args is ["--shutdown"])
+        {
+            shutdownEvent.Set();
+            return;
+        }
         if (!firstInstance)
         {
             showEvent.Set();
@@ -28,7 +35,7 @@ internal static class Program
         Application.SetColorMode(SystemColorMode.System);
         var store = new ConfigurationStore();
         AppConfigurationSafeLoad(store, out var configuration);
-        using var context = new TrayApplicationContext(store, configuration, showEvent);
+        using var context = new TrayApplicationContext(store, configuration, showEvent, shutdownEvent);
         Application.Run(context);
     }
 
