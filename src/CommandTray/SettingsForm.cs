@@ -28,7 +28,19 @@ public sealed class SettingsForm : Form
     };
     private readonly Button _add = UiTheme.CreatePrimaryButton("+ Add / 添加");
     private readonly Button _delete = UiTheme.CreateButton("Delete / 删除");
-    private readonly CheckBox _enableMcp = new() { Text = "Enable MCP / 启用 MCP", AutoSize = true };
+    private readonly ToggleSwitch _enableMcp = new() { AccessibleName = "Enable MCP / 启用 MCP" };
+    private readonly Label _mcpStatus = UiTheme.CreateMutedLabel("");
+    private readonly TextBox _mcpEndpoint = new()
+    {
+        ReadOnly = true,
+        Text = McpServerHost.Endpoint,
+        Font = UiTheme.Monospace,
+        BorderStyle = BorderStyle.FixedSingle,
+        BackColor = SystemColors.Window,
+        TabStop = true,
+        AccessibleName = "MCP endpoint / MCP 地址"
+    };
+    private readonly Button _copyMcpEndpoint = UiTheme.CreateCompactButton("Copy / 复制");
 
     // Content header
     private readonly Panel _contentPanel = new() { Dock = DockStyle.Fill, BackColor = SystemColors.Window };
@@ -75,6 +87,7 @@ public sealed class SettingsForm : Form
         Size = new Size(1180, 840);
         BackColor = SystemColors.Window;
         _enableMcp.Checked = _configuration.McpEnabled;
+        _copyMcpEndpoint.AccessibleName = "Copy MCP endpoint / 复制 MCP 地址";
 
         var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = Padding.Empty };
         root.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 268));
@@ -104,6 +117,7 @@ public sealed class SettingsForm : Form
         _import.Click += (_, _) => ImportConfiguration();
         _export.Click += (_, _) => ExportConfiguration();
         _enableMcp.CheckedChanged += (_, _) => SaveMcpPreference();
+        _copyMcpEndpoint.Click += (_, _) => CopyMcpEndpoint();
         _supervisor.StateChanged += (_, snapshot) => BeginInvoke(() =>
         {
             ApplySnapshot(snapshot);
@@ -127,28 +141,66 @@ public sealed class SettingsForm : Form
         };
         rail.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
 
-        var brand = new Label { Text = "CommandTray", Font = UiTheme.Title, AutoSize = true, Margin = new Padding(2, 0, 0, 0) };
-        var brandSub = UiTheme.CreateMutedLabel("Services / 服务");
-        brandSub.Margin = new Padding(2, 0, 0, 12);
+        var brand = new Label { Text = "CommandTray", Font = UiTheme.Title, AutoSize = true, Margin = new Padding(2, 0, 0, 12) };
+        var servicesTitle = new Label
+        {
+            Text = "Services / 服务",
+            Font = UiTheme.Bold,
+            AutoSize = true,
+            Margin = new Padding(2, 0, 0, 6)
+        };
 
         _search.Dock = DockStyle.Top;
-        _search.Margin = new Padding(0, 0, 0, 10);
+        _search.Margin = new Padding(0, 0, 0, 8);
         _search.BorderStyle = BorderStyle.FixedSingle;
 
-        var mcpPanel = new FlowLayoutPanel
+        var mcpPanel = new TableLayoutPanel
         {
+            Dock = DockStyle.Top,
             AutoSize = true,
-            FlowDirection = FlowDirection.TopDown,
-            WrapContents = false,
-            Margin = new Padding(2, 0, 0, 10)
+            ColumnCount = 2,
+            RowCount = 4,
+            Margin = new Padding(2, 0, 0, 0),
+            Padding = Padding.Empty
         };
-        var mcpEndpoint = UiTheme.CreateMutedLabel("AI control · 127.0.0.1:58629");
-        mcpEndpoint.Margin = new Padding(20, 0, 0, 0);
-        mcpPanel.Controls.Add(_enableMcp);
-        mcpPanel.Controls.Add(mcpEndpoint);
+        mcpPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        mcpPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+
+        var mcpTitle = new Label
+        {
+            Text = "MCP / MCP 服务",
+            AutoSize = true,
+            Font = UiTheme.Bold,
+            Anchor = AnchorStyles.Left,
+            Margin = new Padding(0, 2, 8, 2)
+        };
+        _enableMcp.Anchor = AnchorStyles.Right;
+        _enableMcp.Margin = new Padding(0);
+        _mcpStatus.Margin = new Padding(0, 3, 0, 7);
+        _mcpStatus.Anchor = AnchorStyles.Left;
+
+        _mcpEndpoint.Dock = DockStyle.Fill;
+        _mcpEndpoint.Margin = new Padding(0, 0, 0, 5);
+        _copyMcpEndpoint.Anchor = AnchorStyles.Right;
+        _copyMcpEndpoint.Margin = Padding.Empty;
+
+        mcpPanel.Controls.Add(mcpTitle, 0, 0);
+        mcpPanel.Controls.Add(_enableMcp, 1, 0);
+        mcpPanel.Controls.Add(_mcpStatus, 0, 1);
+        mcpPanel.SetColumnSpan(_mcpStatus, 2);
+        mcpPanel.Controls.Add(_mcpEndpoint, 0, 2);
+        mcpPanel.SetColumnSpan(_mcpEndpoint, 2);
+        mcpPanel.Controls.Add(_copyMcpEndpoint, 1, 3);
         const string mcpHelp = "Starts a local MCP server for AI control at http://127.0.0.1:58629/mcp. Only apps on this computer can connect. / 启动供 AI 操作的本地 MCP 服务，仅本机应用可连接。";
+        _fieldHelp.SetToolTip(mcpTitle, mcpHelp);
         _fieldHelp.SetToolTip(_enableMcp, mcpHelp);
-        _fieldHelp.SetToolTip(mcpEndpoint, mcpHelp);
+        _fieldHelp.SetToolTip(_mcpStatus, mcpHelp);
+        _fieldHelp.SetToolTip(_mcpEndpoint, "MCP endpoint. Select the text or use Copy. / MCP 地址，可选择文本或使用复制按钮。");
+        _fieldHelp.SetToolTip(_copyMcpEndpoint, "Copy the MCP endpoint. / 复制 MCP 地址。");
+        UpdateMcpPresentation();
+
+        var sectionSeparator = UiTheme.CreateSeparator(DockStyle.Top);
+        sectionSeparator.Margin = new Padding(2, 14, 0, 12);
 
         _services.Margin = Padding.Empty;
         _services.ItemHeight = (int)(Font.Height * 2.6);
@@ -163,17 +215,19 @@ public sealed class SettingsForm : Form
         railButtons.Controls.Add(_delete, 1, 0);
 
         rail.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // brand
-        rail.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // sub
-        rail.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // search
         rail.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // MCP
+        rail.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // section separator
+        rail.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // services title
+        rail.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // search
         rail.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); // list
         rail.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // buttons
         rail.Controls.Add(brand, 0, 0);
-        rail.Controls.Add(brandSub, 0, 1);
-        rail.Controls.Add(_search, 0, 2);
-        rail.Controls.Add(mcpPanel, 0, 3);
-        rail.Controls.Add(_services, 0, 4);
-        rail.Controls.Add(railButtons, 0, 5);
+        rail.Controls.Add(mcpPanel, 0, 1);
+        rail.Controls.Add(sectionSeparator, 0, 2);
+        rail.Controls.Add(servicesTitle, 0, 3);
+        rail.Controls.Add(_search, 0, 4);
+        rail.Controls.Add(_services, 0, 5);
+        rail.Controls.Add(railButtons, 0, 6);
 
         var wrapper = new Panel { Dock = DockStyle.Fill, Margin = Padding.Empty };
         wrapper.Controls.Add(rail);
@@ -541,6 +595,7 @@ public sealed class SettingsForm : Form
                 _configuration.McpEnabled = _enableMcp.Checked;
                 _store.Save(_configuration);
             }
+            UpdateMcpPresentation();
             McpEnabledChanged?.Invoke(this, EventArgs.Empty);
         }
         catch (Exception ex)
@@ -549,7 +604,40 @@ public sealed class SettingsForm : Form
             _updatingMcpPreference = true;
             try { _enableMcp.Checked = previous; }
             finally { _updatingMcpPreference = false; }
+            UpdateMcpPresentation();
             MessageBox.Show(this, ex.Message, "CommandTray", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    private void UpdateMcpPresentation()
+    {
+        _mcpStatus.Text = _enableMcp.Checked
+            ? "On · Local only / 已开启 · 仅本机"
+            : "Off / 已关闭";
+        _mcpStatus.ForeColor = _enableMcp.Checked
+            ? UiTheme.StateColor(ServiceState.Running)
+            : UiTheme.MutedText;
+    }
+
+    private async void CopyMcpEndpoint()
+    {
+        try
+        {
+            Clipboard.SetText(_mcpEndpoint.Text);
+            _copyMcpEndpoint.Text = "Copied / 已复制";
+            _copyMcpEndpoint.AccessibleName = "MCP endpoint copied / MCP 地址已复制";
+            _copyMcpEndpoint.Enabled = false;
+            await Task.Delay(1600);
+            if (IsDisposed) return;
+            _copyMcpEndpoint.Text = "Copy / 复制";
+            _copyMcpEndpoint.AccessibleName = "Copy MCP endpoint / 复制 MCP 地址";
+            _copyMcpEndpoint.Enabled = true;
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this,
+                $"Could not copy the MCP endpoint. Try selecting the address and press Ctrl+C.\n\n无法复制 MCP 地址，请选择地址后按 Ctrl+C。\n\n{ex.Message}",
+                "CommandTray", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
     }
 

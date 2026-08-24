@@ -88,6 +88,19 @@ internal static class UiTheme
         return button;
     }
 
+    /// <summary>Compact secondary action used beside a field.</summary>
+    public static Button CreateCompactButton(string text)
+    {
+        return new Button
+        {
+            Text = text,
+            AutoSize = true,
+            MinimumSize = new Size(72, 27),
+            Margin = Padding.Empty,
+            Padding = new Padding(4, 0, 4, 0)
+        };
+    }
+
     /// <summary>Muted secondary label (hints, captions).</summary>
     public static Label CreateMutedLabel(string text)
     {
@@ -117,6 +130,41 @@ internal static class UiTheme
         path.AddArc(bounds.X, bounds.Bottom - diameter, diameter, diameter, 90, 90);
         path.CloseFigure();
         return path;
+    }
+}
+
+/// <summary>Keyboard-accessible switch with a native checkbox accessibility role.</summary>
+internal sealed class ToggleSwitch : CheckBox
+{
+    public ToggleSwitch()
+    {
+        SetStyle(ControlStyles.UserPaint | ControlStyles.ResizeRedraw | ControlStyles.OptimizedDoubleBuffer, true);
+        AutoSize = false;
+        Size = new Size(42, 22);
+        Cursor = Cursors.Hand;
+        Text = string.Empty;
+    }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+        var trackBounds = new Rectangle(0, 2, Width - 1, Height - 5);
+        var trackColor = Checked ? UiTheme.Accent : Color.FromArgb(128, 128, 128);
+        using (var track = UiTheme.RoundedRectangle(trackBounds, trackBounds.Height / 2))
+        using (var trackBrush = new SolidBrush(trackColor))
+            e.Graphics.FillPath(trackBrush, track);
+
+        var thumbSize = trackBounds.Height - 4;
+        var thumbX = Checked ? trackBounds.Right - thumbSize - 2 : trackBounds.Left + 2;
+        using (var thumbBrush = new SolidBrush(Color.White))
+            e.Graphics.FillEllipse(thumbBrush, thumbX, trackBounds.Top + 2, thumbSize, thumbSize);
+
+        if (Focused && ShowFocusCues)
+        {
+            var focusBounds = ClientRectangle;
+            focusBounds.Inflate(-1, -1);
+            ControlPaint.DrawFocusRectangle(e.Graphics, focusBounds);
+        }
     }
 }
 

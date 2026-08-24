@@ -117,7 +117,7 @@ public sealed class TrayApplicationContext : ApplicationContext
 
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(Localizer.T("Settings…", "设置…"), null, (_, _) => ShowSettings());
-        var autoStart = new ToolStripMenuItem(Localizer.T("Start with Windows", "登录时启动"))
+        var autoStart = new ToolStripMenuItem(Localizer.T("Start with Windows", "开机自启"))
         {
             Checked = AutoStartService.IsEnabled(),
             CheckOnClick = true
