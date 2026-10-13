@@ -48,6 +48,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         };
         _tray.DoubleClick += (_, _) => ShowSettings();
         RebuildMenu();
+        Localizer.LanguageChanged += OnLanguageChanged;
 
         _shutdownWindow = new ShutdownWindow(BeginExit);
 
@@ -88,6 +89,8 @@ public sealed class TrayApplicationContext : ApplicationContext
         if (_settings.IsHandleCreated) _settings.BeginInvoke(RebuildMenu);
     }
 
+    private void OnLanguageChanged(object? sender, EventArgs e) => RebuildMenuOnUiThread();
+
     private void RebuildMenu()
     {
         var menu = new ContextMenuStrip();
@@ -116,7 +119,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         }
 
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add(Localizer.T("Settings…", "设置…"), null, (_, _) => ShowSettings());
+        menu.Items.Add(Localizer.T("Manage services…", "管理服务…"), null, (_, _) => ShowSettings());
         var autoStart = new ToolStripMenuItem(Localizer.T("Start with Windows", "开机自启"))
         {
             Checked = AutoStartService.IsEnabled(),
@@ -219,7 +222,8 @@ public sealed class TrayApplicationContext : ApplicationContext
             _settings.BeginInvoke(() => ShowFailure(service, message));
             return;
         }
-        _tray.ShowBalloonTip(5000, $"{service} - {Localizer.T("failed", "发生故障")}", message, ToolTipIcon.Error);
+        _tray.ShowBalloonTip(5000, $"{service} - {Localizer.T("failed", "发生故障")}",
+            Localizer.T(message, Localizer.ChineseError(message)), ToolTipIcon.Error);
     }
 
     private static void OpenUrl(string url)
@@ -232,6 +236,7 @@ public sealed class TrayApplicationContext : ApplicationContext
     {
         if (disposing)
         {
+            Localizer.LanguageChanged -= OnLanguageChanged;
             _mcpHost.DisposeAsync().AsTask().GetAwaiter().GetResult();
             _shutdownWindow.Dispose();
             _tray.Dispose();

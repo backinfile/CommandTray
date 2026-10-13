@@ -1,33 +1,40 @@
+using System.Net;
 using System.Net.Sockets;
 using CommandTray.Models;
 using CommandTray.Services;
 
 namespace CommandTray.Tests;
 
-[CollectionDefinition("Port58628", DisableParallelization = true)]
-public sealed class Port58628Collection;
+[CollectionDefinition("Process supervisor", DisableParallelization = true)]
+public sealed class ProcessSupervisorCollection;
 
-[Collection("Port58628")]
+[Collection("Process supervisor")]
 public sealed class ProcessSupervisorTests : IAsyncLifetime
 {
     private readonly string _directory = Path.Combine(Path.GetTempPath(), $"CommandTray-http-{Guid.NewGuid():N}");
     private ProcessSupervisor? _supervisor;
+    private int _port;
 
     public Task InitializeAsync()
     {
         Directory.CreateDirectory(_directory);
         _supervisor = new ProcessSupervisor(Path.Combine(_directory, "logs"));
+        // A fixed port collides with services already managed by the desktop
+        // client. Use an OS-assigned port so tests leave those services alone.
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        _port = ((IPEndPoint)listener.LocalEndpoint).Port;
         return Task.CompletedTask;
     }
 
     [Fact]
-    public async Task StartsAndStopsOwnedPythonHttpServerOn58628()
+    public async Task StartsAndStopsOwnedPythonHttpServer()
     {
-        Assert.False(await CanConnectAsync(58628));
+        Assert.False(await CanConnectAsync(_port));
         var service = CreateService();
 
         await _supervisor!.StartAsync(service);
-        try { await WaitUntilAsync(() => CanConnectAsync(58628), TimeSpan.FromSeconds(10)); }
+        try { await WaitUntilAsync(() => CanConnectAsync(_port), TimeSpan.FromSeconds(10)); }
         catch
         {
             var snapshot = _supervisor.GetSnapshot(service);
@@ -39,11 +46,11 @@ public sealed class ProcessSupervisorTests : IAsyncLifetime
         Assert.True(_supervisor.GetSnapshot(service).ProcessId > 0);
 
         using var client = new HttpClient();
-        var response = await client.GetAsync("http://127.0.0.1:58628/");
+        var response = await client.GetAsync($"http://127.0.0.1:{_port}/");
         Assert.True(response.IsSuccessStatusCode);
 
         await _supervisor.StopAsync(service);
-        await WaitUntilAsync(async () => !await CanConnectAsync(58628), TimeSpan.FromSeconds(10));
+        await WaitUntilAsync(async () => !await CanConnectAsync(_port), TimeSpan.FromSeconds(10));
         Assert.Equal(ServiceState.Stopped, _supervisor.GetSnapshot(service).State);
         Assert.Contains("Started PID", await ReadSharedAsync(_supervisor.GetLogPath(service)));
     }
@@ -51,14 +58,14 @@ public sealed class ProcessSupervisorTests : IAsyncLifetime
     [Fact]
     public async Task ActiveApplicationExitStopsAllOwnedBackgroundProcesses()
     {
-        Assert.False(await CanConnectAsync(58628));
+        Assert.False(await CanConnectAsync(_port));
         var service = CreateService();
         await _supervisor!.StartAsync(service);
-        await WaitUntilAsync(() => CanConnectAsync(58628), TimeSpan.FromSeconds(10));
+        await WaitUntilAsync(() => CanConnectAsync(_port), TimeSpan.FromSeconds(10));
 
         await _supervisor.StopAllAsync([service]);
 
-        await WaitUntilAsync(async () => !await CanConnectAsync(58628), TimeSpan.FromSeconds(10));
+        await WaitUntilAsync(async () => !await CanConnectAsync(_port), TimeSpan.FromSeconds(10));
         Assert.Equal(ServiceState.Stopped, _supervisor.GetSnapshot(service).State);
     }
 
@@ -74,9 +81,9 @@ public sealed class ProcessSupervisorTests : IAsyncLifetime
     private ServiceDefinition CreateService() => new()
     {
         Name = "Python one-line server",
-        Command = "python -c \"from http.server import ThreadingHTTPServer,SimpleHTTPRequestHandler; ThreadingHTTPServer(('127.0.0.1',58628),SimpleHTTPRequestHandler).serve_forever()\"",
+        Command = $"python -c \"from http.server import ThreadingHTTPServer,SimpleHTTPRequestHandler; ThreadingHTTPServer(('127.0.0.1',{_port}),SimpleHTTPRequestHandler).serve_forever()\"",
         WorkingDirectory = _directory,
-        OpenUrl = "http://127.0.0.1:58628/",
+        OpenUrl = $"http://127.0.0.1:{_port}/",
         StopTimeoutSeconds = 1
     };
 

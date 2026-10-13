@@ -32,9 +32,12 @@ internal static class Program
         }
 
         ApplicationConfiguration.Initialize();
-        Application.SetColorMode(SystemColorMode.System);
+        // Keep native inputs consistent with the light workspace; automatic
+        // dark controls otherwise mix dark text surfaces with custom white UI.
+        Application.SetColorMode(SystemColorMode.Classic);
         var store = new ConfigurationStore();
         AppConfigurationSafeLoad(store, out var configuration);
+        Localizer.Configure(configuration.Language);
         using var context = new TrayApplicationContext(store, configuration, showEvent, shutdownEvent);
         Application.Run(context);
     }
@@ -44,7 +47,7 @@ internal static class Program
         try { configuration = store.Load(); }
         catch (Exception ex)
         {
-            MessageBox.Show($"Configuration could not be loaded:\n{ex.Message}", "CommandTray",
+            MessageBox.Show(Localizer.T($"Configuration could not be loaded:\n{ex.Message}", $"无法加载配置：\n{ex.Message}"), "CommandTray",
                 MessageBoxButtons.OK, MessageBoxIcon.Error);
             configuration = new Models.AppConfiguration();
         }
