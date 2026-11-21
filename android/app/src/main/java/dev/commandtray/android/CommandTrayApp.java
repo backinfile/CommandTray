@@ -2,9 +2,11 @@ package dev.commandtray.android;
 
 import android.app.Application;
 import android.content.ClipData;
+import android.content.ClipDescription;
 import android.content.ClipboardManager;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.PersistableBundle;
 
 import java.util.concurrent.Callable;
 import java.util.concurrent.FutureTask;
@@ -76,9 +78,19 @@ public final class CommandTrayApp extends Application {
     }
 
     void writeClipboard(String text) throws Exception {
+        writeClipboard(text, false);
+    }
+
+    void writeClipboard(String text, boolean sensitive) throws Exception {
         onMain(() -> {
             requireClipboardFocus();
-            getSystemService(ClipboardManager.class).setPrimaryClip(ClipData.newPlainText("CommandTray", text));
+            ClipData data = ClipData.newPlainText("CommandTray", text);
+            if (sensitive) {
+                PersistableBundle extras = new PersistableBundle();
+                extras.putBoolean(ClipDescription.EXTRA_IS_SENSITIVE, true);
+                data.getDescription().setExtras(extras);
+            }
+            getSystemService(ClipboardManager.class).setPrimaryClip(data);
             return null;
         });
     }

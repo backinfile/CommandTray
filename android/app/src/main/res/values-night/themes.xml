@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.CommandTray" parent="android:style/Theme.Material.NoActionBar">
+        <item name="android:colorAccent">@color/tray_primary</item>
+        <item name="android:windowBackground">@color/tray_canvas</item>
+        <item name="android:colorBackgroundFloating">@color/tray_surface</item>
+        <item name="android:windowActionModeOverlay">true</item>
+        <item name="android:windowSoftInputMode">adjustResize</item>
+    </style>
+</resources>

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="tray_canvas">#F5F6F0</color>
+    <color name="tray_surface">#FFFFFF</color>
+    <color name="tray_text">#1D2C24</color>
+    <color name="tray_muted">#55645B</color>
+    <color name="tray_outline">#D5DDD1</color>
+    <color name="tray_tonal">#E7EDE2</color>
+    <color name="tray_primary">#315545</color>
+    <color name="tray_on_primary">#FFFFFF</color>
+    <color name="tray_selected">#D9E9C6</color>
+    <color name="tray_panel">#243E34</color>
+    <color name="tray_panel_raised">#39564A</color>
+    <color name="tray_panel_text">#F4F8EC</color>
+    <color name="tray_panel_muted">#C5D7C9</color>
+    <color name="tray_signal">#D9F0A1</color>
+    <color name="tray_signal_text">#253B26</color>
+    <color name="tray_note">#F7EBDD</color>
+    <color name="tray_note_text">#4B3825</color>
+    <color name="tray_board">#FFFFFF</color>
+    <color name="tray_error">#9E3833</color>
+</resources>
