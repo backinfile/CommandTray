@@ -1,0 +1,14 @@
+[Unit]
+Description=CommandTray managed commands
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/commandtray daemon
+Restart=on-failure
+RestartSec=2s
+TimeoutStopSec=130s
+KillMode=control-group
+UMask=0077
+
+[Install]
+WantedBy=default.target

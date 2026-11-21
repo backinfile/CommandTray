@@ -1,4 +1,4 @@
-param([string]$Version = "0.1.0")
+param([string]$Version = "0.1.0", [switch]$SkipTests, [string]$InnoSetup)
 $ErrorActionPreference = 'Stop'
 if ($Version -notmatch '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$') {
     throw "Version must use X.Y.Z without a leading v: $Version"
@@ -6,10 +6,11 @@ if ($Version -notmatch '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$') {
 $root = Split-Path -Parent $PSScriptRoot
 $publish = Join-Path $root 'artifacts\publish\win-x64'
 $portable = Join-Path $root 'artifacts\portable'
-dotnet test (Join-Path $root 'CommandTray.slnx') -c Release
-# PowerShell's ErrorActionPreference does not catch native exit codes. Never
-# package a stale build after tests, publishing, or installer compilation fail.
-if ($LASTEXITCODE -ne 0) { throw "Tests failed with exit code $LASTEXITCODE" }
+# Preserve regular release verification. The suite packager can consume a focused, already-verified build.
+if (!$SkipTests) {
+    dotnet test (Join-Path $root 'CommandTray.slnx') -c Release
+    if ($LASTEXITCODE -ne 0) { throw "Tests failed with exit code $LASTEXITCODE" }
+}
 # Without Version, the installed executable reported 1.0.0 for every release.
 dotnet publish (Join-Path $root 'src\CommandTray\CommandTray.csproj') -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:DebugType=None "-p:Version=$Version" -o $publish
 if ($LASTEXITCODE -ne 0) { throw "Publishing failed with exit code $LASTEXITCODE" }
@@ -20,9 +21,12 @@ Compress-Archive -Path (Join-Path $publish '*') -DestinationPath $zip
 Get-FileHash -Algorithm SHA256 -LiteralPath $zip | Format-List
 # Get-Command returns ApplicationInfo on the runner, whose executable path is Source rather than FullName.
 $isccCommand = Get-Command ISCC.exe -ErrorAction SilentlyContinue | Select-Object -First 1
-$isccPath = if ($isccCommand) { $isccCommand.Source } else { $null }
+$isccPath = if ($InnoSetup) { (Resolve-Path -LiteralPath $InnoSetup).Path } elseif ($isccCommand) { $isccCommand.Source } else { $null }
 if (-not $isccPath) {
     $isccPath = @(
+        (Join-Path $env:LOCALAPPDATA 'Programs\Inno Setup 7\ISCC.exe'),
+        'C:\Program Files\Inno Setup 7\ISCC.exe',
+        'C:\Program Files (x86)\Inno Setup 7\ISCC.exe',
         (Join-Path $env:LOCALAPPDATA 'Programs\Inno Setup 6\ISCC.exe'),
         'C:\Program Files (x86)\Inno Setup 6\ISCC.exe',
         'C:\Program Files\Inno Setup 6\ISCC.exe'

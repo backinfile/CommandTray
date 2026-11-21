@@ -4,7 +4,14 @@
 
 [![Release](https://github.com/backinfile/CommandTray/actions/workflows/release.yml/badge.svg)](https://github.com/backinfile/CommandTray/actions/workflows/release.yml)
 
-CommandTray 是一个适用于 Windows 10/11 x64 的轻量系统托盘工具，用来启动、停止和监控需要长期运行的命令行服务。
+CommandTray 在 Windows 用本机窗口和系统托盘管理命令、多个空间、文件与终端。Linux CLI 可以在没有桌面的机器上管理命令和同步数据。Android 应用用于剪贴板、共享文件、待办、便签和设备配对。
+
+| 入口 | 使用方式 |
+| --- | --- |
+| Windows | 从托盘打开命令管理、工作区、共享文件、捕获、剪贴板、SSH 和本地设置。空间中可新建目录栏、终端和组件，再拖动、调整大小。 |
+| Linux | 解压后运行 `commandtray --help`。后台进程、终端、同步和 MCP 说明见 [Linux CLI](packaging/linux/README.md)。 |
+| Android | 安装 APK 后在本地设置配对。构建与签名见 [Android](android/README.md)。 |
+| 自部署中转 | 使用镜像和 Compose 配置。配对后的设备可共享文件、文本剪贴板和工作区。见 [部署说明](deploy/relay/README.md)。 |
 
 ## 功能亮点
 
@@ -19,6 +26,8 @@ CommandTray 是一个适用于 Windows 10/11 x64 的轻量系统托盘工具，�
 - 自动记录标准输出和错误输出，并滚动保存日志。
 - 使用当前 Windows 用户的 DPAPI 加密标记为敏感的环境变量。
 - 内置本地 MCP 服务，让受信任的 AI 客户端管理服务。
+
+Windows 截图和贴图可直接使用。录屏使用 PATH 上的 ffmpeg，OCR 使用 PATH 上的 tesseract 和相应语言数据。设备配对后，可在工作区推送和拉取空间；同步冲突时保留本地数据。
 
 ## 下载与安装
 
@@ -60,7 +69,7 @@ CommandTray 是一个适用于 Windows 10/11 x64 的轻量系统托盘工具，�
 
 ## AI / MCP 接入
 
-MCP 默认开启，可在 **“应用设置 → AI 连接 · MCP”** 中切换 **“启用本地 MCP 服务”**，并一键复制连接地址。Streamable HTTP 地址为：
+MCP 默认开启。可在本地设置中启停服务、复制连接地址和本机 MCP 凭据。Windows 的 Streamable HTTP 默认地址为：
 
 ```text
 http://127.0.0.1:58629/mcp
@@ -72,13 +81,14 @@ http://127.0.0.1:58629/mcp
 {
   "mcpServers": {
     "commandtray": {
-      "url": "http://127.0.0.1:58629/mcp"
+      "url": "http://127.0.0.1:58629/mcp",
+      "headers": {"Authorization": "Bearer <本机 MCP 凭据>"}
     }
   }
 }
 ```
 
-MCP 仅监听本机 `127.0.0.1`，可查询、创建、修改、删除、启动、停止和重启服务，也能读取日志。敏感环境变量不会返回明文，但服务日志可能包含命令自身输出的敏感信息。AI 可以通过这些工具执行你配置的命令，请只连接可信的 MCP 客户端。
+MCP 仅监听本机 `127.0.0.1`。通过 `tools/list` 查看命令、空间与组件、终端、文件、剪贴板、捕获、SSH、同步及本地设置可用的工具。敏感环境变量的值不会作为配置返回；命令自己输出的内容仍会出现在日志里。Linux 可使用 `commandtray mcp serve --stdio`，Android 可在应用设置中开启同设备连接。
 
 ## 数据与日志
 
@@ -112,6 +122,16 @@ dotnet run --project .\src\CommandTray\CommandTray.csproj
 ```
 
 贡献与发布规则见 [`AGENTS.md`](AGENTS.md)。
+
+## 构建跨平台发布包
+
+PowerShell 7 中运行下列命令。Windows 安装包需要 Inno Setup；Android Release 需要配置固定签名密钥；`-RelayImage` 使用本机 Docker 构建和导出镜像。
+
+```powershell
+.\scripts\package-suite.ps1 -Version 0.3.0 -RelayImage
+```
+
+用 `-Target windows`、`-Target linux`、`-Target relay` 或 `-Target android` 构建单个平台。没有发布签名时可用 `-Target android -AndroidVariant Debug` 构建可安装的调试 APK。产物和 SHA-256 校验文件位于 `artifacts/suite/<版本>/`。
 
 ## 许可证与项目政策
 

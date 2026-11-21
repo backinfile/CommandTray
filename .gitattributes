@@ -1,0 +1,5 @@
+android/gradlew text eol=lf
+packaging/linux/*.sh text eol=lf
+packaging/linux/*.service text eol=lf
+packaging/linux/*.py text eol=lf
+deploy/relay/Dockerfile text eol=lf

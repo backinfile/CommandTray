@@ -72,7 +72,8 @@ A typical MCP client configuration looks like this; consult your client's docume
 {
   "mcpServers": {
     "commandtray": {
-      "url": "http://127.0.0.1:58629/mcp"
+      "url": "http://127.0.0.1:58629/mcp",
+      "headers": {"Authorization": "Bearer <local MCP credential>"}
     }
   }
 }

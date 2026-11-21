@@ -10,7 +10,7 @@ namespace CommandTray;
 // STORY: Find a service, understand its state, act, then edit and save with explicit feedback.
 // FIRST VIEWPORT: Service rail; title/status and actions; tabbed editor; persistent save bar.
 // FORM: Windows service workspace, pinned by the confirmed desktop scope and language support.
-public sealed class SettingsForm : Form
+public sealed partial class SettingsForm : Form
 {
     private readonly AppConfiguration _configuration;
     private readonly ConfigurationStore _store;
@@ -82,8 +82,11 @@ public sealed class SettingsForm : Form
     public event EventHandler? McpEnabledChanged;
 
     public SettingsForm(AppConfiguration configuration, ConfigurationStore store, ProcessSupervisor supervisor)
+        : this(configuration, store, supervisor, null, null) { }
+
+    internal SettingsForm(AppConfiguration configuration, ConfigurationStore store, ProcessSupervisor supervisor, DesktopRuntime? desktop, CommandTrayApi? api)
     {
-        _configuration = configuration; _store = store; _supervisor = supervisor;
+        _configuration = configuration; _store = store; _supervisor = supervisor; _desktop = desktop;
         Localizer.Bind(this, "CommandTray · Service manager", "CommandTray · 服务管理");
         Font = UiTheme.Regular; ForeColor = UiTheme.Text; BackColor = UiTheme.Surface;
         StartPosition = FormStartPosition.CenterScreen; AutoScaleMode = AutoScaleMode.Dpi;
@@ -97,7 +100,9 @@ public sealed class SettingsForm : Form
         root.Controls.Add(BuildRail(), 0, 0);
         BuildEditor(); BuildEmpty(); BuildGlobalSettings();
         _workspace.Controls.AddRange([_editor, _empty, _global]);
-        root.Controls.Add(_workspace, 1, 0); Controls.Add(root);
+        root.Controls.Add(_workspace, 1, 0);
+        if (desktop is null || api is null) Controls.Add(root);
+        else BuildDesktopPages(root, desktop, api);
         _dpiFonts = new DpiFontScope(this, () =>
         {
             _tabs.PerformLayout();
@@ -348,6 +353,7 @@ public sealed class SettingsForm : Form
         body.Controls.Add(endpointRow);
         var mcpHint = UiTheme.CreateMutedLabel("Listens on 127.0.0.1 only. Connect clients you trust; they can run your configured commands.", "仅监听 127.0.0.1。请只连接可信客户端；客户端能够执行已配置的命令。");
         mcpHint.Dock = DockStyle.Top; mcpHint.Margin = new Padding(0, 0, 0, 12); body.Controls.Add(mcpHint);
+        AddDesktopSettings(body);
         AddSection(body, "Configuration files", "配置文件", "Import replaces your service list. Exports do not include secret values.", "导入会替换服务列表；导出的配置不包含敏感值。");
         var import = UiTheme.CreateButton("Import configuration…", "导入配置…");
         var export = UiTheme.CreateButton("Export configuration…", "导出配置…");
@@ -498,6 +504,7 @@ public sealed class SettingsForm : Form
 
     protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
     {
+        if (_desktopPage is not (DesktopPage.Commands or DesktopPage.Settings)) return base.ProcessCmdKey(ref msg, keyData);
         if (!_showingSettings && _editing is not null && keyData is (Keys.Control | Keys.Tab) or (Keys.Control | Keys.Shift | Keys.Tab))
         {
             _tabs.Cycle(keyData.HasFlag(Keys.Shift) ? -1 : 1); return true;
@@ -567,7 +574,9 @@ public sealed class SettingsForm : Form
         else if (_editing is not null) _editor.BringToFront();
         else _empty.BringToFront();
         _save.Enabled = _reset.Enabled = _dirty && !_busy;
-        AcceptButton = _showingSettings ? null : _save;
+        AcceptButton = _showingSettings || _desktopPage != DesktopPage.Commands ? null : _save;
+        foreach (var (id, button) in _desktopButtons)
+            ((WorkspaceButton)button).Selected = id == (_showingSettings ? DesktopPage.Settings : _desktopPage == DesktopPage.Settings ? DesktopPage.Commands : _desktopPage);
         ((WorkspaceButton)_settings).Selected = _showingSettings;
     }
 

@@ -6,15 +6,17 @@ on:
       - "v*.*.*"
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  release:
-    name: Build and publish Windows release
+  windows:
+    name: Package Windows client
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     runs-on: windows-latest
     timeout-minutes: 30
 
@@ -60,35 +62,117 @@ jobs:
         with:
           dotnet-version: "10.0.x"
 
-      - name: Set up Python test dependency
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: "3.13"
-
       - name: Install Inno Setup
         shell: pwsh
         run: choco install innosetup --no-progress --yes
 
-      - name: Test, publish, and package
+      - name: Package Windows installer and portable build
         shell: pwsh
-        run: .\scripts\publish.ps1 -Version $env:VERSION
+        run: .\scripts\package-suite.ps1 -Version $env:VERSION -Target windows
 
-      - name: Generate SHA-256 checksums
+      - name: Upload Windows packages
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: commandtray-windows
+          if-no-files-found: error
+          path: |
+            artifacts/suite/${{ env.VERSION }}/CommandTray-${{ steps.version.outputs.version }}-win-x64.zip
+            artifacts/suite/${{ env.VERSION }}/CommandTray-${{ steps.version.outputs.version }}-win-x64-setup.exe
+
+  linux-relay:
+    name: Package Linux CLI and relay
+    needs: windows
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      VERSION: ${{ needs.windows.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: "10.0.x"
+      - name: Build Linux and relay packages
         shell: pwsh
+        run: ./scripts/package-suite.ps1 -Version $env:VERSION -Target linux,relay -RelayImage
+      - name: Upload Linux and relay packages
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: commandtray-linux-relay
+          if-no-files-found: error
+          path: |
+            artifacts/suite/${{ env.VERSION }}/*.tar.gz
+            artifacts/suite/${{ env.VERSION }}/*-image.tar
+
+  android:
+    name: Package signed APK
+    needs: windows
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      VERSION: ${{ needs.windows.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-java@f2beeb24e141e01a676f977032f5a29d81c9e27e # v5.1.0
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Prepare Android SDK
+        run: sdkmanager "platforms;android-36" "build-tools;35.0.0"
+      - name: Build signed APK
+        env:
+          ANDROID_KEYSTORE_B64: ${{ secrets.COMMANDTRAY_ANDROID_KEYSTORE_B64 }}
+          COMMANDTRAY_ANDROID_STORE_PASSWORD: ${{ secrets.COMMANDTRAY_ANDROID_STORE_PASSWORD }}
+          COMMANDTRAY_ANDROID_KEY_ALIAS: ${{ secrets.COMMANDTRAY_ANDROID_KEY_ALIAS }}
+          COMMANDTRAY_ANDROID_KEY_PASSWORD: ${{ secrets.COMMANDTRAY_ANDROID_KEY_PASSWORD }}
         run: |
-          $assets = @(
-            "artifacts/portable/CommandTray-$env:VERSION-win-x64.zip",
-            "artifacts/installer/CommandTray-$env:VERSION-win-x64-setup.exe"
-          )
-          foreach ($asset in $assets) {
-            if (-not (Test-Path -LiteralPath $asset)) { throw "Missing release asset: $asset" }
-          }
-          $lines = foreach ($asset in $assets) {
-            $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $asset).Hash.ToLowerInvariant()
-            "$hash  $([IO.Path]::GetFileName($asset))"
-          }
-          $lines | Set-Content -LiteralPath "artifacts/SHA256SUMS.txt" -Encoding ascii
+          set -euo pipefail
+          test -n "$ANDROID_KEYSTORE_B64"
+          umask 077
+          export COMMANDTRAY_ANDROID_KEYSTORE="$RUNNER_TEMP/commandtray-release.jks"
+          trap 'rm -f "$COMMANDTRAY_ANDROID_KEYSTORE"' EXIT
+          printf '%s' "$ANDROID_KEYSTORE_B64" | base64 --decode > "$COMMANDTRAY_ANDROID_KEYSTORE"
+          chmod +x android/gradlew
+          pwsh -NoProfile -File scripts/package-suite.ps1 -Version "$VERSION" -Target android
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify "artifacts/suite/$VERSION/CommandTray-$VERSION-android-release.apk"
+      - name: Upload signed APK
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: commandtray-android
+          if-no-files-found: error
+          path: artifacts/suite/${{ env.VERSION }}/*-android-release.apk
 
+  publish:
+    name: Publish combined release
+    needs: [windows, linux-relay, android]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.windows.outputs.version }}
+    steps:
+      - name: Download packages
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: commandtray-*
+          merge-multiple: true
+          path: packages
+      - name: Validate packages and generate checksums
+        working-directory: packages
+        run: |
+          set -euo pipefail
+          assets=(
+            "CommandTray-$VERSION-win-x64.zip"
+            "CommandTray-$VERSION-win-x64-setup.exe"
+            "CommandTray-$VERSION-linux-x64.tar.gz"
+            "CommandTray-$VERSION-linux-arm64.tar.gz"
+            "CommandTray-Relay-$VERSION-linux-x64.tar.gz"
+            "CommandTray-Relay-$VERSION-linux-arm64.tar.gz"
+            "CommandTray-Relay-$VERSION-compose.tar.gz"
+            "CommandTray-Relay-$VERSION-image.tar"
+            "CommandTray-$VERSION-android-release.apk"
+          )
+          for asset in "${assets[@]}"; do test -s "$asset"; done
+          sha256sum "${assets[@]}" > SHA256SUMS.txt
       - name: Create GitHub Release
         uses: softprops/action-gh-release@fe965f7af51af5f2602596916f38a38df2e33de0 # v3.0.2
         with:
@@ -96,7 +180,4 @@ jobs:
           generate_release_notes: true
           fail_on_unmatched_files: true
           make_latest: true
-          files: |
-            artifacts/portable/CommandTray-${{ steps.version.outputs.version }}-win-x64.zip
-            artifacts/installer/CommandTray-${{ steps.version.outputs.version }}-win-x64-setup.exe
-            artifacts/SHA256SUMS.txt
+          files: packages/*

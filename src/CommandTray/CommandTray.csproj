@@ -12,6 +12,7 @@
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
   </PropertyGroup>
   <ItemGroup>
+    <ProjectReference Include="../CommandTray.Sync/CommandTray.Sync.csproj" />
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <PackageReference Include="ModelContextProtocol.AspNetCore" Version="2.1.0" />
   </ItemGroup>

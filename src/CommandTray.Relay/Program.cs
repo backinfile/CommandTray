@@ -1,0 +1,160 @@
+using System.Net.Http.Headers;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
+using System.Threading.RateLimiting;
+using CommandTray.Relay;
+using Microsoft.AspNetCore.Http.Features;
+using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.Extensions.DependencyInjection;
+
+var directory = RelayDirectory.FromEnvironment();
+var admin = new RelayAdmin(directory);
+
+if (args is ["mcp", "--stdio"])
+{
+    var mcp = Host.CreateApplicationBuilder();
+    mcp.Logging.ClearProviders();
+    mcp.Services.AddMcpServer().WithStdioServerTransport().WithTools(admin);
+    await mcp.Build().RunAsync();
+    return;
+}
+
+if (args is ["admin", .. var operation])
+{
+    object result = operation switch
+    {
+        ["status"] => admin.Status(),
+        ["devices"] => admin.Devices(),
+        ["revoke", var id] => await admin.Revoke(id, CancellationToken.None),
+        ["backups"] => admin.Backups(),
+        ["backup"] => admin.Backup(),
+        ["restore", var id] => admin.Restore(id),
+        _ => throw new ArgumentException("Use admin status, devices, revoke <device-id>, backups, backup, or restore <backup-id>.")
+    };
+    Console.WriteLine(JsonSerializer.Serialize(result, RelayData.Json));
+    return;
+}
+
+var pairing = Environment.GetEnvironmentVariable("COMMANDTRAY_PAIRING_CODE");
+if (pairing is not { Length: >= 16 and <= 512 })
+    throw new InvalidOperationException("Set COMMANDTRAY_PAIRING_CODE to a unique value of at least 16 characters.");
+var pairingHash = SHA256.HashData(Encoding.UTF8.GetBytes(pairing));
+
+var builder = WebApplication.CreateBuilder(args);
+if (string.IsNullOrWhiteSpace(builder.Configuration["urls"]))
+    builder.WebHost.UseUrls("http://127.0.0.1:58630");
+builder.WebHost.ConfigureKestrel(server => server.Limits.MaxRequestBodySize = RelayData.FileLimit);
+builder.Services.AddSingleton<RelayStore>(_ => new(directory));
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.AddFixedWindowLimiter("pair", limiter =>
+    {
+        limiter.PermitLimit = 20;
+        limiter.Window = TimeSpan.FromMinutes(1);
+        limiter.QueueLimit = 0;
+    });
+});
+
+await using var app = builder.Build();
+_ = app.Services.GetRequiredService<RelayStore>();
+app.Use(async (context, next) =>
+{
+    var requestLimit = context.Features.Get<IHttpMaxRequestBodySizeFeature>();
+    if (!context.Request.Path.Equals("/v1/files") && requestLimit is { IsReadOnly: false })
+        requestLimit.MaxRequestBodySize = RelayData.WorkspaceLimit;
+    await next(context);
+});
+app.UseRateLimiter();
+app.MapGet("/healthz", () => Results.Ok(new { ready = true, protocol = 1 }));
+app.MapPost("/v1/devices/pair", async (PairInput input, RelayStore store, CancellationToken cancellation) =>
+{
+    string name = input.DeviceName?.Trim() ?? "";
+    if (name.Length is < 1 or > 120 || name.Any(char.IsControl))
+        return Results.BadRequest(new { error = "A device name between 1 and 120 characters is required." });
+    var supplied = input.PairingCode;
+    if (supplied is not { Length: >= 16 and <= 512 } ||
+        !CryptographicOperations.FixedTimeEquals(pairingHash, SHA256.HashData(Encoding.UTF8.GetBytes(supplied))))
+        return Results.Json(new { error = "The pairing code is invalid." }, statusCode: StatusCodes.Status401Unauthorized);
+    try
+    {
+        var paired = await store.PairAsync(name, cancellation);
+        return Results.Ok(new { deviceId = paired.Device.Id, token = paired.Token });
+    }
+    catch (InvalidDataException error)
+    {
+        return Results.Json(new { error = error.Message }, statusCode: StatusCodes.Status409Conflict);
+    }
+}).RequireRateLimiting("pair");
+
+var endpoints = app.MapGroup("/v1");
+endpoints.AddEndpointFilter((context, next) =>
+{
+    var request = context.HttpContext.Request;
+    var store = context.HttpContext.RequestServices.GetRequiredService<RelayStore>();
+    if (!AuthenticationHeaderValue.TryParse(request.Headers.Authorization, out var header) ||
+        !header.Scheme.Equals("Bearer", StringComparison.OrdinalIgnoreCase) ||
+        store.Authenticate(header.Parameter) is not { } device)
+        return ValueTask.FromResult<object?>(Results.Unauthorized());
+    context.HttpContext.Items[typeof(DeviceRecord)] = device;
+    return next(context);
+});
+
+endpoints.MapGet("/devices", (RelayStore store) => Results.Ok(new
+{
+    devices = store.State.Devices.Select(device => new RelayDeviceView(device.Id, device.Name, device.PairedAt))
+}));
+endpoints.MapDelete("/devices/{id}", async (string id, HttpContext context, RelayStore store, CancellationToken cancellation) =>
+{
+    if (CurrentDevice(context).Id != id) return Results.StatusCode(StatusCodes.Status403Forbidden);
+    return await store.DeleteDeviceAsync(id, cancellation) ? Results.NoContent() : Results.NotFound();
+});
+
+endpoints.MapGet("/workspace", (RelayStore store) => Results.Ok(store.State.Workspace));
+endpoints.MapPut("/workspace", async (WorkspaceInput input, RelayStore store, CancellationToken cancellation) =>
+{
+    if (input.BaseRevision < 0 || !RelayData.IsWorkspace(input.Document))
+        return Results.BadRequest(new { error = "Expected a base revision and a schemaVersion 1 workspace document with a spaces array." });
+    var result = await store.PutWorkspaceAsync(input, cancellation);
+    return result.Accepted ? Results.Ok(result.Value) : Results.Conflict(result.Value);
+});
+
+endpoints.MapGet("/clipboard", (RelayStore store) => Results.Ok(store.State.Clipboard));
+endpoints.MapPut("/clipboard", async (ClipboardInput input, HttpContext context, RelayStore store, CancellationToken cancellation) =>
+{
+    if (input.Text is not { Length: <= 1_000_000 })
+        return Results.BadRequest(new { error = "Clipboard text must be at most 1,000,000 characters." });
+    return Results.Ok(await store.PutClipboardAsync(input.Text, CurrentDevice(context).Id, cancellation));
+});
+
+endpoints.MapGet("/files", (RelayStore store) => Results.Ok(new { files = store.State.Files }));
+endpoints.MapPost("/files", async (string name, string? folder, HttpContext context, RelayStore store, CancellationToken cancellation) =>
+{
+    folder ??= "";
+    if (!RelayData.IsFileName(name) || !RelayData.IsFolder(folder))
+        return Results.BadRequest(new { error = "Use a plain file name and a slash-delimited relative folder." });
+    if (context.Request.ContentLength > RelayData.FileLimit)
+        return Results.StatusCode(StatusCodes.Status413PayloadTooLarge);
+    try
+    {
+        var file = await store.UploadAsync(name, folder, context.Request.Body, CurrentDevice(context).Id, cancellation);
+        return Results.Created("files/" + file.Id, file);
+    }
+    catch (FileLimitException)
+    {
+        return Results.StatusCode(StatusCodes.Status413PayloadTooLarge);
+    }
+});
+endpoints.MapGet("/files/{id}", (string id, RelayStore store) =>
+{
+    var file = store.OpenFile(id);
+    return file is null ? Results.NotFound() : Results.File(file.Value.Data, "application/octet-stream", file.Value.Entry.Name,
+        lastModified: file.Value.Entry.ModifiedAt, enableRangeProcessing: true);
+});
+endpoints.MapDelete("/files/{id}", async (string id, RelayStore store, CancellationToken cancellation) =>
+    await store.DeleteFileAsync(id, cancellation) ? Results.NoContent() : Results.NotFound());
+
+await app.RunAsync();
+
+static DeviceRecord CurrentDevice(HttpContext context) => (DeviceRecord)context.Items[typeof(DeviceRecord)]!;

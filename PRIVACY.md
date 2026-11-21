@@ -15,13 +15,14 @@ CommandTray 是本地运行的开源工具，不包含遥测、行为分析、�
 
 ### 网络与本地接口
 
-- MCP 服务默认开启，仅监听 `127.0.0.1:58629`。受信任的本地客户端可通过它查看或修改服务、启动或停止命令并读取日志；可在设置中关闭 MCP。
+- Windows 的 MCP 默认开启，仅监听本机回环地址，使用本机凭据验证调用者，可在设置中关闭。Linux 支持本地命令或回环地址，Android 的回环监听可在设置中启用。
+- 配对并操作同步后，数据将发送到用户配置的中转服务器。内容包括工作区、共享文件和主动发送的剪贴板文本。SSH 私钥用设备上的口令加密后同步。
 - “打开地址”功能会把用户配置的 URL 交给系统默认浏览器。
 - 用户配置并由 CommandTray 启动的命令可能自行访问网络，其数据处理行为由该命令和相关服务决定，不属于 CommandTray 的数据收集。
 
 ### 保存与删除
 
-数据会一直保留在本机，直到用户删除。卸载程序会移除应用文件，但可能保留 `%LOCALAPPDATA%\CommandTray` 中的配置和日志；如不再需要，可手动删除该目录。
+数据会一直保留在本机，直到用户删除。卸载程序会移除应用文件，但可能保留 `%LOCALAPPDATA%\CommandTray` 中的配置和日志；如不再需要，可手动删除该目录。已经同步的文件和文档由自部署中转服务保留，删除本机数据后仍可在服务器备份中找到。
 
 一般问题可通过 [GitHub Issues](https://github.com/backinfile/CommandTray/issues) 反馈。安全问题请按 [SECURITY.md](SECURITY.md) 私下报告。
 
@@ -42,12 +43,13 @@ Environment variables marked as sensitive are stored using Windows DPAPI encrypt
 
 ### Network and local interfaces
 
-- The MCP server is enabled by default and listens only on `127.0.0.1:58629`. Trusted local clients can use it to inspect or modify services, start or stop commands, and read logs. MCP can be disabled in Settings.
+- Windows MCP is enabled by default, listens on loopback, and uses a local credential. You can disable it in Settings. Linux supports local stdio or loopback, and Android provides an opt-in loopback listener.
+- Pairing and synchronization transfer data to your configured relay. This includes workspaces, shared files, and clipboard text you send. SSH private keys are encrypted on the device with a vault passphrase before synchronization.
 - The Open URL action passes a user-configured URL to the system's default browser.
 - Commands configured and launched by the user may access the network themselves. Their data handling is determined by those commands and related services, not by CommandTray data collection.
 
 ### Retention and deletion
 
-Data remains on the local device until the user deletes it. Uninstalling removes application files but may leave configuration and logs under `%LOCALAPPDATA%\CommandTray`; delete that directory manually if the data is no longer needed.
+Data remains on the local device until the user deletes it. Uninstalling removes application files but may leave configuration and logs under `%LOCALAPPDATA%\CommandTray`; delete that directory manually if the data is no longer needed. Synced files and documents are retained by your relay and its backups.
 
 Use [GitHub Issues](https://github.com/backinfile/CommandTray/issues) for general questions. Report security issues privately as described in [SECURITY.md](SECURITY.md).

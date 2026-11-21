@@ -10,6 +10,8 @@ public sealed class TrayApplicationContext : ApplicationContext
     private readonly AppConfiguration _configuration;
     private readonly ProcessSupervisor _supervisor = new();
     private readonly CommandTrayApi _api;
+    private readonly DesktopRuntime _desktop;
+    private DesktopPetForm? _pet;
     private readonly McpServerHost _mcpHost = new();
     private readonly Icon _appIcon;
     private readonly NotifyIcon _tray;
@@ -28,8 +30,12 @@ public sealed class TrayApplicationContext : ApplicationContext
         _store = store;
         _configuration = configuration;
         _appIcon = Icon.ExtractAssociatedIcon(Application.ExecutablePath) ?? (Icon)SystemIcons.Application.Clone();
-        _settings = new SettingsForm(configuration, store, _supervisor);
         _api = new CommandTrayApi(configuration, store, _supervisor);
+        _desktop = new DesktopRuntime(Path.GetDirectoryName(store.PathName)!);
+        _settings = new SettingsForm(configuration, store, _supervisor, _desktop, _api);
+        _desktop.AttachWindow(_settings);
+        _desktop.SetPetVisible = SetPetVisible;
+        _desktop.Notification += (_, message) => ShowNotice(message);
         // Create the UI handle before registering cross-thread callbacks. Without
         // it, a second instance can signal successfully while BeginInvoke fails,
         // leaving a background process with no reachable UI.
@@ -76,6 +82,51 @@ public sealed class TrayApplicationContext : ApplicationContext
         _settings.BringToFront();
     }
 
+    private void ShowPage(DesktopPage page)
+    {
+        _settings.ShowDesktopPage(page);
+        ShowSettings();
+    }
+
+    private bool SetPetVisible(bool visible)
+    {
+        if (_exiting) return false;
+        if (visible && _pet is null)
+        {
+            _pet = new DesktopPetForm(() => ShowPage(DesktopPage.Workspace));
+            _pet.FormClosed += (_, _) => { _pet = null; if (!_exiting) RebuildMenu(); };
+            _pet.ContextMenuStrip = _tray.ContextMenuStrip;
+            _pet.Show();
+        }
+        else if (!visible) _pet?.Close();
+        RebuildMenu();
+        return _pet is { Visible: true };
+    }
+
+    private void ShowNotice(string message) => ShowNotice(new DesktopNotice(message));
+
+    private void ShowNotice(DesktopNotice notice)
+    {
+        if (_exiting || _settings.IsDisposed) return;
+        if (_settings.InvokeRequired)
+        {
+            _settings.BeginInvoke(() => ShowNotice(notice));
+            return;
+        }
+        if (_pet is { Visible: true } pet)
+        {
+            Action? openSource = notice.SpaceId is { } spaceId && notice.ItemId is { } itemId
+                ? () =>
+                {
+                    ShowPage(DesktopPage.Workspace);
+                    _settings.RevealWorkspaceComponent(spaceId, itemId);
+                }
+                : null;
+            pet.Notice(notice.Message, openSource);
+        }
+        else _tray.ShowBalloonTip(4500, "CommandTray", notice.Message, ToolTipIcon.Info);
+    }
+
     private void EnsureTrayVisibleOnFirstIdle(object? sender, EventArgs e)
     {
         Application.Idle -= EnsureTrayVisibleOnFirstIdle;
@@ -119,7 +170,23 @@ public sealed class TrayApplicationContext : ApplicationContext
         }
 
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add(Localizer.T("Manage services…", "管理服务…"), null, (_, _) => ShowSettings());
+        menu.Items.Add(Localizer.T("Commands", "命令管理"), null, (_, _) => ShowPage(DesktopPage.Commands));
+        menu.Items.Add(Localizer.T("Files & terminal", "文件与终端"), null, (_, _) => ShowPage(DesktopPage.Workspace));
+        menu.Items.Add(Localizer.T("Shared files", "文件共享"), null, (_, _) => ShowPage(DesktopPage.SharedFiles));
+        menu.Items.Add(Localizer.T("Clipboard", "剪贴板"), null, (_, _) => ShowPage(DesktopPage.Clipboard));
+        menu.Items.Add(Localizer.T("Capture history", "捕获历史"), null, (_, _) => ShowPage(DesktopPage.Captures));
+        menu.Items.Add(Localizer.T("Screenshot", "截图"), null, (_, _) =>
+        {
+            try
+            {
+                using var image = Image.FromFile(_desktop.Media.Screenshot());
+                Clipboard.SetImage(image);
+                ShowNotice(Localizer.T("Screenshot saved and copied", "截图已保存并复制"));
+            }
+            catch (Exception ex) { ShowFailure("CommandTray", ex.Message); }
+        });
+        menu.Items.Add(Localizer.T("Desktop pet", "桌面宠物"), null, (_, _) => SetPetVisible(_pet is null));
+        menu.Items.Add(Localizer.T("Settings", "设置"), null, (_, _) => ShowPage(DesktopPage.Settings));
         var autoStart = new ToolStripMenuItem(Localizer.T("Start with Windows", "开机自启"))
         {
             Checked = AutoStartService.IsEnabled(),
@@ -136,6 +203,7 @@ public sealed class TrayApplicationContext : ApplicationContext
             _shutdownWindow.RequestShutdown()));
         var old = _tray.ContextMenuStrip;
         _tray.ContextMenuStrip = menu;
+        if (_pet is not null) _pet.ContextMenuStrip = menu;
         old?.Dispose();
     }
 
@@ -175,6 +243,7 @@ public sealed class TrayApplicationContext : ApplicationContext
             {
                 _showRegistration.Unregister(null);
                 _shutdownRegistration.Unregister(null);
+                _pet?.Close();
                 _settings.AllowExit();
                 _settings.Close();
             }
@@ -199,7 +268,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         {
             bool enabled;
             lock (_configuration) enabled = _configuration.McpEnabled;
-            if (enabled) await _mcpHost.StartAsync(_api);
+            if (enabled) await _mcpHost.StartDesktopAsync(_api, _desktop);
             else await _mcpHost.StopAsync();
         }
         catch (Exception ex) { ShowFailure("MCP server", ex.Message); }
@@ -238,6 +307,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         {
             Localizer.LanguageChanged -= OnLanguageChanged;
             _mcpHost.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            _desktop.Dispose();
             _shutdownWindow.Dispose();
             _tray.Dispose();
             _appIcon.Dispose();

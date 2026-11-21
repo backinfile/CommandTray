@@ -17,9 +17,9 @@ internal static class Program
             return;
         }
 
-        using var mutex = new Mutex(true, MutexName, out var firstInstance);
-        using var showEvent = new EventWaitHandle(false, EventResetMode.AutoReset, ShowEventName);
-        using var shutdownEvent = new EventWaitHandle(false, EventResetMode.AutoReset, ShutdownEventName);
+        using var mutex = new Mutex(true, MutexName + AppPaths.InstanceSuffix, out var firstInstance);
+        using var showEvent = new EventWaitHandle(false, EventResetMode.AutoReset, ShowEventName + AppPaths.InstanceSuffix);
+        using var shutdownEvent = new EventWaitHandle(false, EventResetMode.AutoReset, ShutdownEventName + AppPaths.InstanceSuffix);
         if (args is ["--shutdown"])
         {
             shutdownEvent.Set();
