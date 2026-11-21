@@ -27,7 +27,6 @@ import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.FrameLayout;
-import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.PopupMenu;
 import android.widget.ProgressBar;
@@ -56,8 +55,8 @@ import static dev.commandtray.android.TrayUi.Icon.*;
 import static dev.commandtray.android.TrayUi.Style.*;
 
 /*
- * Space and transfer content lead each screen. Dark green identifies the active space and
- * shared text. Bottom navigation and the wider-screen rail give tools a stable location.
+ * A single toolbar identifies the current space or page and holds its actions.
+ * Notes, tasks, files and clipboard text begin directly beneath it.
  */
 public final class MainActivity extends Activity {
     private static final int PICK_UPLOAD = 10;
@@ -71,11 +70,9 @@ public final class MainActivity extends Activity {
     private final TrayUi.Destination[] navigation = new TrayUi.Destination[4];
     private CommandTrayApp app;
     private TrayUi ui;
+    private LinearLayout toolbar;
     private LinearLayout page;
     private ScrollView scroll;
-    private TextView appBarTitle;
-    private TextView pairingStatus;
-    private View newSpaceButton;
     private TextView feedback;
     private ProgressBar progress;
     private int selection;
@@ -106,7 +103,11 @@ public final class MainActivity extends Activity {
         LinearLayout navigationBar = createNavigation(rail);
         LinearLayout root = ui.column();
         root.setBackgroundColor(ui.color(tray_canvas));
-        root.addView(createAppBar());
+        toolbar = ui.row();
+        toolbar.setMinimumHeight(dp(48));
+        toolbar.setPadding(dp(16), 0, dp(8), 0);
+        root.addView(toolbar);
+        ui.rule(root);
         progress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
         progress.setIndeterminate(true);
         progress.setIndeterminateTintList(ColorStateList.valueOf(ui.color(tray_primary)));
@@ -119,7 +120,7 @@ public final class MainActivity extends Activity {
         scroll.setClipToPadding(false);
         scroll.setVerticalScrollBarEnabled(false);
         page = ui.column();
-        page.setPadding(dp(20), dp(12), dp(20), dp(24));
+        page.setPadding(dp(16), dp(8), dp(16), dp(16));
         int contentWidth = rail ? dp(Math.min(620, getResources().getConfiguration().screenWidthDp - 104)) : -1;
         scroll.addView(page, new FrameLayout.LayoutParams(contentWidth, -2, Gravity.TOP | Gravity.CENTER_HORIZONTAL));
         content.addView(scroll, new FrameLayout.LayoutParams(-1, -1));
@@ -151,39 +152,16 @@ public final class MainActivity extends Activity {
         switchPage(selection);
     }
 
-    private LinearLayout createAppBar() {
-        LinearLayout bar = ui.row();
-        bar.setMinimumHeight(dp(56));
-        bar.setPadding(dp(20), dp(4), dp(20), dp(4));
-        ImageView mark = new ImageView(this);
-        mark.setImageResource(R.drawable.tray_mark);
-        mark.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-        bar.addView(mark, new LinearLayout.LayoutParams(dp(24), dp(24)));
-        ui.gap(bar, 8);
-        appBarTitle = ui.heading("", 20, tray_text);
-        appBarTitle.setSingleLine(true);
-        appBarTitle.setEllipsize(TextUtils.TruncateAt.END);
-        ui.stretch(bar, appBarTitle);
-        ui.gap(bar, 8);
-        pairingStatus = ui.status("", false);
-        bar.addView(pairingStatus);
-        newSpaceButton = ui.iconButton("新建空间", PLUS, tray_primary, this::createSpace);
-        newSpaceButton.setBackground(ui.ripple(tray_tonal, 14, tray_primary));
-        LinearLayout.LayoutParams newSpaceLayout = (LinearLayout.LayoutParams) newSpaceButton.getLayoutParams();
-        newSpaceLayout.setMarginStart(dp(8));
-        bar.addView(newSpaceButton, newSpaceLayout);
-        return bar;
-    }
-
     private LinearLayout createNavigation(boolean rail) {
         LinearLayout bar = rail ? ui.column() : ui.row();
         bar.setBackgroundColor(ui.color(tray_surface));
-        bar.setPadding(dp(8), dp(rail ? 10 : 2), dp(8), dp(4));
+        bar.setPadding(dp(4), dp(rail ? 8 : 2), dp(4), dp(2));
+        boolean stacked = rail || getResources().getConfiguration().fontScale >= 1.3f;
         String[] names = {"空间", "文件", "剪贴板", "设置"};
         TrayUi.Icon[] icons = {TrayUi.Icon.SPACE, FOLDER, TrayUi.Icon.CLIPBOARD, TrayUi.Icon.SETTINGS};
         for (int i = 0; i < names.length; i++) {
             int target = i;
-            navigation[i] = ui.new Destination(names[i], icons[i], () -> switchPage(target));
+            navigation[i] = ui.new Destination(names[i], icons[i], stacked, () -> switchPage(target));
             if (rail) bar.addView(navigation[i], new LinearLayout.LayoutParams(-1, -2));
             else ui.stretch(bar, navigation[i]);
         }
@@ -254,8 +232,6 @@ public final class MainActivity extends Activity {
     private void switchPage(int target) {
         if (selection != target) scroll.scrollTo(0, 0);
         selection = target;
-        appBarTitle.setText(PAGE_TITLES[target]);
-        newSpaceButton.setVisibility(target == SPACE ? View.VISIBLE : View.GONE);
         for (int i = 0; i < navigation.length; i++) navigation[i].showSelected(i == target);
         render();
         if (target == SPACE) {
@@ -272,57 +248,60 @@ public final class MainActivity extends Activity {
     }
 
     private void render() {
-        boolean paired = app.settings.paired();
-        pairingStatus.setText(paired ? "已配对" : "未配对");
-        pairingStatus.setTextColor(ui.color(paired ? tray_text : tray_muted));
-        pairingStatus.setBackground(ui.fill(paired ? tray_selected : tray_tonal, 16));
+        toolbar.removeAllViews();
         page.removeAllViews();
+        if (selection != SPACE) toolbarTitle(PAGE_TITLES[selection]);
         if (selection == SPACE) renderWorkspace();
         else if (selection == FILES) renderFiles();
         else if (selection == CLIPBOARD) renderClipboard();
         else renderSettings();
     }
+
+    private void toolbarTitle(String title) {
+        TextView heading = ui.heading(title, 18, tray_text);
+        heading.setSingleLine(true);
+        heading.setEllipsize(TextUtils.TruncateAt.END);
+        ui.stretch(toolbar, heading);
+    }
     private void renderSettings() {
-        page.addView(ui.heading("中转服务器", 18, tray_text));
-        ui.gap(page, 9);
-        LinearLayout relay = ui.surface(tray_surface, 16, 16);
-        page.addView(relay);
-        if (!app.settings.paired() || editingConnection) {
-            renderConnectionFields(relay);
-        } else {
+        boolean paired = app.settings.paired();
+        LinearLayout connection = ui.row();
+        ui.stretch(connection, ui.heading("中转服务器", 16, tray_text));
+        connection.addView(ui.text(paired ? "已配对" : "未配对", 13, paired ? tray_primary : tray_muted, true));
+        connection.setPadding(0, dp(6), 0, dp(6));
+        page.addView(connection);
+        if (paired && !editingConnection) {
             LinearLayout deviceRow = ui.row();
-            deviceRow.addView(ui.iconView(SERVER, tray_primary, 22));
-            ui.gap(deviceRow, 12);
+            deviceRow.setPadding(0, dp(4), 0, dp(6));
             LinearLayout device = ui.column();
-            device.addView(ui.heading(app.settings.deviceName(), 17, tray_text));
+            device.addView(ui.text(app.settings.deviceName(), 16, tray_text, true));
             ui.gap(device, 4);
-            TextView address = ui.text(app.settings.server(), 13, tray_muted, false);
-            address.setTypeface(Typeface.MONOSPACE);
-            address.setTextIsSelectable(true);
-            device.addView(address);
+            device.addView(endpointLabel(app.settings.server()));
             ui.stretch(deviceRow, device);
-            relay.addView(deviceRow);
-            ui.gap(relay, 14);
-            relay.addView(actions(
-                ui.button("已配对设备", null, TONAL, () -> run(app.relay::devices, this::showDevices)),
-                ui.button("编辑连接", null, TEXT, () -> {
-                    editingConnection = true;
-                    render();
-                })
-            ));
-            Button unpair = ui.button("解除本机配对", null, TEXT, () -> confirm("解除本机配对？", () -> run(() -> {
-                app.settings.unpair();
-                return null;
-            }, ignored -> resetConnectionView())));
-            unpair.setTextColor(ui.color(tray_error));
-            relay.addView(unpair, new LinearLayout.LayoutParams(-2, -2));
+            deviceRow.addView(ui.iconButton("编辑连接", EDIT, tray_primary, () -> {
+                editingConnection = true;
+                render();
+            }));
+            deviceRow.addView(ui.iconButton("连接操作", MORE, tray_muted, anchor -> {
+                PopupMenu menu = new PopupMenu(this, anchor);
+                menuAction(menu, "已配对设备", () -> run(app.relay::devices, this::showDevices));
+                menuAction(menu, "解除本机配对", () -> confirm("解除本机配对？", () -> run(() -> {
+                    app.settings.unpair();
+                    return null;
+                }, ignored -> resetConnectionView())));
+                menu.show();
+            }));
+            page.addView(deviceRow);
+        } else {
+            ui.gap(page, 6);
+            renderConnectionFields(page);
         }
 
-        pageHeading("本地 MCP");
-        LinearLayout mcp = ui.surface(tray_surface, 16, 16);
+        ui.gap(page, 8);
+        ui.rule(page);
         Switch enable = new Switch(this);
-        enable.setText("启用本地 MCP");
-        enable.setTextSize(15);
+        enable.setText("本地 MCP");
+        enable.setTextSize(16);
         enable.setTextColor(ui.color(tray_text));
         enable.setMinHeight(dp(48));
         enable.setShowText(false);
@@ -338,27 +317,30 @@ public final class MainActivity extends Activity {
                 reportError(error);
             });
         });
-        mcp.addView(enable, new LinearLayout.LayoutParams(-1, -2));
-        if (!app.mcpError().isEmpty()) mcp.addView(ui.text(app.mcpError(), 14, tray_error, false));
+        page.addView(enable, new LinearLayout.LayoutParams(-1, -2));
+        if (!app.mcpError().isEmpty()) page.addView(ui.text(app.mcpError(), 14, tray_error, false));
         if (app.mcpRunning()) {
-            ui.rule(mcp);
-            ui.gap(mcp, 12);
-            TextView endpoint = ui.text("http://127.0.0.1:" + AppSettings.MCP_PORT + "/mcp", 13, tray_text, false);
-            endpoint.setTypeface(Typeface.MONOSPACE);
-            endpoint.setTextIsSelectable(true);
-            mcp.addView(endpoint);
-            ui.gap(mcp, 8);
-            mcp.addView(ui.button("复制连接配置", COPY, TONAL, () -> run(() ->
-                new JSONObject().put("url", "http://127.0.0.1:" + AppSettings.MCP_PORT + "/mcp")
+            String address = "http://127.0.0.1:" + AppSettings.MCP_PORT + "/mcp";
+            LinearLayout endpoint = ui.row();
+            ui.stretch(endpoint, endpointLabel(address));
+            endpoint.addView(ui.iconButton("复制连接配置", COPY, tray_primary, () -> run(() ->
+                new JSONObject().put("url", address)
                     .put("headers", new JSONObject().put("Authorization", "Bearer " + app.settings.mcpToken())).toString(2),
                 config -> {
                     try {
                         app.writeClipboard(config, true);
                         notice("连接配置已复制");
                     } catch (Exception exception) { reportError(exception); }
-                })), new LinearLayout.LayoutParams(-2, -2));
+                })));
+            page.addView(endpoint);
         }
-        page.addView(mcp);
+    }
+
+    private TextView endpointLabel(String address) {
+        TextView label = ui.text(address, 13, tray_muted, false);
+        label.setTypeface(Typeface.MONOSPACE);
+        label.setTextIsSelectable(true);
+        return label;
     }
 
     private void renderConnectionFields(LinearLayout panel) {
@@ -423,61 +405,50 @@ public final class MainActivity extends Activity {
 
     private void renderClipboard() {
         if (!app.settings.paired()) {
-            pairNotice(TrayUi.Icon.CLIPBOARD);
+            pairNotice();
+            return;
+        }
+        toolbar.addView(ui.iconButton("刷新", SYNC, tray_muted, () -> run(app.relay::clipboard, this::showClipboard)));
+        toolbar.addView(ui.iconButton("发送本机剪贴板", SEND, tray_primary, () -> run(() -> {
+            String clip = app.readClipboard();
+            if (clip.isEmpty()) throw new IllegalArgumentException("剪贴板里没有文本");
+            return app.relay.sendClipboard(clip);
+        }, updated -> {
+            showClipboard(updated);
+            notice("已发送");
+        })));
+        toolbar.addView(ui.iconButton("接收并复制", COPY, tray_primary, () -> run(() -> {
+            JSONObject clip = app.relay.clipboard();
+            if (clip.optString("text").isEmpty()) throw new IllegalArgumentException("暂无同步文本");
+            app.writeClipboard(clip.optString("text"));
+            return clip;
+        }, updated -> {
+            showClipboard(updated);
+            notice("已复制");
+        })));
+
+        String incoming = sharedClipboard == null ? "" : sharedClipboard.optString("text");
+        if (incoming.isEmpty()) {
+            empty(sharedClipboard == null && pendingRequests > 0 ? "正在获取" : "暂无同步文本");
             return;
         }
 
-        LinearLayout panel = ui.surface(tray_panel, 16, 18);
-        LinearLayout label = ui.row();
-        label.addView(ui.iconView(TrayUi.Icon.CLIPBOARD, tray_signal, 22));
-        ui.gap(label, 8);
-        ui.stretch(label, ui.heading("同步文本", 15, tray_panel_text));
-        label.addView(ui.iconButton("刷新", SYNC, tray_panel_muted, () -> run(app.relay::clipboard, this::showClipboard)));
-        panel.addView(label);
-        String incoming = sharedClipboard == null ? "" : sharedClipboard.optString("text");
-        String caption = sharedClipboard == null && pendingRequests > 0 ? "正在获取" : "暂无同步文本";
-        TextView content = ui.text(incoming.isEmpty() ? caption : incoming, 19,
-            incoming.isEmpty() ? tray_panel_muted : tray_panel_text, false);
-        content.setLineSpacing(dp(3), 1);
-        content.setMaxLines(9);
-        content.setEllipsize(TextUtils.TruncateAt.END);
-        panel.setMinimumHeight(dp(158));
-        panel.addView(content);
-        if (!incoming.isEmpty()) {
-            content.setTextIsSelectable(true);
-            String updated = localTime(sharedClipboard.optString("updatedAt"));
-            if (!updated.isEmpty()) {
-                ui.gap(panel, 12);
-                panel.addView(ui.text(updated, 13, tray_panel_muted, false));
-            }
-            if (incoming.length() > 240 || incoming.split("\\n", 8).length > 6) {
-                ui.gap(panel, 8);
-                panel.addView(ui.button("查看全文", null, PANEL, () -> showDialog(dialog()
-                    .setTitle("同步文本").setMessage(incoming).setPositiveButton("关闭", null))),
-                    new LinearLayout.LayoutParams(-2, -2));
-            }
+        ui.gap(page, 6);
+        int previewLimit = incoming.offsetByCodePoints(0, Math.min(incoming.codePointCount(0, incoming.length()), 4000));
+        TextView content = ui.text(incoming.substring(0, previewLimit), 17, tray_text, false);
+        content.setLineSpacing(dp(4), 1);
+        content.setTextIsSelectable(true);
+        page.addView(content);
+        String updated = localTime(sharedClipboard.optString("updatedAt"));
+        if (!updated.isEmpty()) {
+            ui.gap(page, 8);
+            page.addView(ui.text(updated, 12, tray_muted, false));
         }
-        page.addView(panel);
-        ui.gap(page, 14);
-        page.addView(actions(
-            ui.button("发送本机", SEND, TONAL, () -> run(() -> {
-                String clip = app.readClipboard();
-                if (clip.isEmpty()) throw new IllegalArgumentException("剪贴板里没有文本");
-                return app.relay.sendClipboard(clip);
-            }, updated -> {
-                showClipboard(updated);
-                notice("已发送");
-            })),
-            ui.button("接收并复制", COPY, PRIMARY, () -> run(() -> {
-                JSONObject clip = app.relay.clipboard();
-                if (clip.optString("text").isEmpty()) throw new IllegalArgumentException("暂无同步文本");
-                app.writeClipboard(clip.optString("text"));
-                return clip;
-            }, updated -> {
-                showClipboard(updated);
-                notice("已复制");
-            }))
-        ));
+        if (previewLimit < incoming.length()) {
+            page.addView(ui.button("查看全文", null, TEXT, () -> showDialog(dialog()
+                .setTitle("剪贴板").setMessage(incoming).setPositiveButton("关闭", null))),
+                new LinearLayout.LayoutParams(-2, -2));
+        }
     }
 
     private void showClipboard(JSONObject value) {
@@ -487,18 +458,13 @@ public final class MainActivity extends Activity {
 
     private void renderFiles() {
         if (!app.settings.paired()) {
-            pairNotice(FOLDER);
+            pairNotice();
             return;
         }
-        LinearLayout toolbar = ui.row();
-        ui.stretch(toolbar, ui.text(files.length() + " 个文件", 14, tray_muted, false));
-        toolbar.addView(ui.iconButton("刷新", SYNC, tray_primary, () -> run(app.relay::files, this::showFiles)));
-        ui.gap(toolbar, 6);
-        toolbar.addView(ui.button("添加文件", PLUS, PRIMARY, this::selectUpload));
-        page.addView(toolbar);
-        ui.gap(page, 8);
+        toolbar.addView(ui.iconButton("刷新", SYNC, tray_muted, () -> run(app.relay::files, this::showFiles)));
+        toolbar.addView(ui.iconButton("添加文件", PLUS, tray_primary, this::selectUpload));
         if (files.length() == 0) {
-            page.addView(empty(FOLDER, "暂无共享文件"));
+            empty("暂无共享文件");
             return;
         }
 
@@ -512,21 +478,19 @@ public final class MainActivity extends Activity {
             String path = group.getKey();
             if (!path.isEmpty()) {
                 LinearLayout folder = ui.row();
-                folder.addView(ui.iconView(FOLDER, tray_muted, 17));
+                folder.setPadding(0, dp(5), 0, dp(3));
+                folder.addView(ui.iconView(FOLDER, tray_primary, 15));
                 ui.gap(folder, 8);
                 folder.addView(ui.heading(path, 14, tray_muted));
                 page.addView(folder);
-                ui.gap(page, 8);
             }
-            LinearLayout list = ui.surface(tray_surface, 16, 4);
             boolean first = true;
             for (JSONObject item : group.getValue()) {
-                if (!first) ui.rule(list);
-                list.addView(fileRow(item));
+                if (!first) ui.rule(page);
+                page.addView(fileRow(item));
                 first = false;
             }
-            page.addView(list);
-            ui.gap(page, 14);
+            ui.gap(page, 10);
         }
     }
 
@@ -534,12 +498,9 @@ public final class MainActivity extends Activity {
         String name = item.optString("name", "文件");
         String id = item.optString("id");
         LinearLayout row = ui.row();
-        row.setMinimumHeight(dp(66));
-        row.setPadding(dp(8), dp(4), 0, dp(4));
-        FrameLayout art = new FrameLayout(this);
-        art.setBackground(ui.fill(tray_tonal, 10));
-        art.addView(ui.iconView(FILE, tray_primary, 20), new FrameLayout.LayoutParams(dp(20), dp(20), Gravity.CENTER));
-        row.addView(art, new LinearLayout.LayoutParams(dp(38), dp(40)));
+        row.setMinimumHeight(dp(52));
+        row.setPadding(0, dp(3), 0, dp(3));
+        row.addView(ui.iconView(FILE, tray_primary, 19));
         ui.gap(row, 10);
         LinearLayout label = ui.column();
         TextView file = ui.text(name, 15, tray_text, true);
@@ -555,13 +516,14 @@ public final class MainActivity extends Activity {
                 .addCategory(Intent.CATEGORY_OPENABLE).putExtra(Intent.EXTRA_TITLE, name);
             startActivityForResult(save, PICK_DOWNLOAD);
         }));
-        var more = ui.iconButton("文件操作", MORE, tray_muted, () -> {});
-        more.setOnClickListener(view -> showMenu(view, "删除", () ->
-            confirm("删除共享文件？", () -> run(() -> {
+        row.addView(ui.iconButton("文件操作", MORE, tray_muted, anchor -> {
+            PopupMenu menu = new PopupMenu(this, anchor);
+            menuAction(menu, "删除", () -> confirm("删除共享文件？", () -> run(() -> {
                 app.relay.deleteFile(id);
                 return app.relay.files();
-            }, this::showFiles))));
-        row.addView(more);
+            }, this::showFiles)));
+            menu.show();
+        }));
         return row;
     }
 
@@ -645,13 +607,17 @@ public final class MainActivity extends Activity {
     }
 
     private void renderWorkspace() {
-        if (workspace == null) return;
+        if (workspace == null) {
+            workspaceToolbar(new JSONArray(), null);
+            return;
+        }
         try {
             JSONArray spaces = WorkspaceStore.spaces(workspace);
             JSONObject selected = chooseSpace(spaces);
-            page.addView(spacePanel(spaces, selected));
+            workspaceToolbar(spaces, selected);
             if (workspace.has("remote")) renderConflict();
             if (selected != null) renderComponents(selected);
+            else empty("暂无空间");
             renderSsh(workspace.getJSONObject("document").optJSONArray("sshHosts"));
         } catch (Exception error) { reportError(error); }
     }
@@ -684,48 +650,54 @@ public final class MainActivity extends Activity {
         return first;
     }
 
-    private LinearLayout spacePanel(JSONArray spaces, JSONObject selected) {
-        LinearLayout panel = ui.surface(tray_panel, 16, 16);
-        LinearLayout caption = ui.row();
-        caption.addView(ui.iconView(TrayUi.Icon.SPACE, tray_signal, 19));
-        ui.gap(caption, 8);
-        ui.stretch(caption, ui.text("当前空间", 13, tray_panel_muted, true));
-        String state = "";
-        if (workspace.optBoolean("dirty")) state = "待同步";
-        else if (workspace.optLong("revision") > 0) state = "已同步";
-        if (!state.isEmpty()) caption.addView(ui.text(state, 13, tray_panel_muted, false));
-        panel.addView(caption);
+    private void workspaceToolbar(JSONArray spaces, JSONObject selected) {
         if (selected == null) {
-            ui.gap(panel, 14);
-            panel.addView(ui.heading("暂无空间", 25, tray_panel_text));
+            toolbarTitle(PAGE_TITLES[SPACE]);
+            toolbar.addView(ui.iconButton("新建空间", PLUS, tray_primary, this::createSpace));
         } else {
             String name = selected.optString("name", "空间");
-            String id = selected.optString("id");
-            LinearLayout space = ui.row();
-            Button picker = ui.button(name, null, TEXT, () -> showSpaces(spaces));
-            picker.setTextColor(ui.color(tray_panel_text));
-            picker.setBackground(ui.ripple(0, 12, tray_panel_text));
-            picker.setTextSize(25);
+            Button picker = ui.button(name, CHEVRON, TEXT, () -> showSpaces(spaces));
+            picker.setTextSize(18);
             picker.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
-            picker.setPadding(0, dp(6), dp(8), dp(6));
-            picker.setMaxLines(2);
-            ui.stretch(space, picker);
-            space.addView(ui.iconButton("切换空间", CHEVRON, tray_panel_text, () -> showSpaces(spaces)));
-            space.addView(ui.iconButton("重命名空间", EDIT, tray_panel_muted, () ->
-                edit("空间名称", name, false, label -> run(() -> app.workspace.renameSpace(id, label), this::showWorkspace))));
-            panel.addView(space);
+            picker.setPadding(0, 0, dp(4), 0);
+            picker.setSingleLine(true);
+            picker.setEllipsize(TextUtils.TruncateAt.END);
+            picker.setContentDescription("切换空间，" + name);
+            ui.stretch(toolbar, picker);
+            toolbar.addView(ui.iconButton("添加", PLUS, tray_primary, anchor -> {
+                PopupMenu menu = new PopupMenu(this, anchor);
+                String id = selected.optString("id");
+                menuAction(menu, "添加便签", () -> addComponent(id, "note", "便签"));
+                menuAction(menu, "添加待办", () -> addComponent(id, "todo", "待办"));
+                menuAction(menu, "新建空间", this::createSpace);
+                menu.show();
+            }));
         }
-        ui.gap(panel, 8);
         if (app.settings.paired()) {
-            panel.addView(actions(
-                ui.button("拉取", DOWNLOAD, PANEL, () -> run(app.workspace::pull, this::showWorkspace)),
-                ui.button("同步", SYNC, SIGNAL, () -> run(app.workspace::push, this::showWorkspace))
-            ));
-        } else {
-            panel.addView(ui.button("连接中转服务器", null, PANEL, () -> switchPage(SETTINGS)),
-                new LinearLayout.LayoutParams(-2, -2));
+            boolean dirty = workspace != null && workspace.optBoolean("dirty");
+            var sync = ui.iconButton(dirty ? "同步（有待同步修改）" : "同步", SYNC, tray_primary, () ->
+                run(app.workspace::push, updated -> {
+                    showWorkspace(updated);
+                    if (!updated.has("remote")) notice("已同步");
+                }));
+            if (dirty) sync.setBackground(ui.ripple(tray_selected, 16, tray_primary));
+            toolbar.addView(sync);
         }
-        return panel;
+        toolbar.addView(ui.iconButton("空间操作", MORE, tray_muted, anchor -> {
+            PopupMenu menu = new PopupMenu(this, anchor);
+            if (selected != null) {
+                String id = selected.optString("id");
+                String name = selected.optString("name", "空间");
+                menuAction(menu, "重命名空间", () -> edit("空间名称", name, false, label ->
+                    run(() -> app.workspace.renameSpace(id, label), this::showWorkspace)));
+            }
+            if (app.settings.paired()) {
+                menuAction(menu, "拉取", () -> run(app.workspace::pull, this::showWorkspace));
+            } else {
+                menuAction(menu, "连接中转服务器", () -> switchPage(SETTINGS));
+            }
+            menu.show();
+        }));
     }
 
     private void showSpaces(JSONArray spaces) {
@@ -766,16 +738,6 @@ public final class MainActivity extends Activity {
 
     private void renderComponents(JSONObject selected) {
         String spaceId = selected.optString("id");
-        ui.gap(page, 8);
-        LinearLayout controls = ui.row();
-        ui.stretch(controls, ui.heading("组件", 20, tray_text));
-        controls.addView(ui.button("添加组件", PLUS, TEXT, () -> showDialog(dialog()
-            .setTitle("添加组件")
-            .setItems(new String[]{"便签", "待办"}, (dialog, which) -> {
-                if (which == 0) addComponent(spaceId, "note", "便签");
-                else addComponent(spaceId, "todo", "待办");
-            }).setNegativeButton("取消", null))));
-        page.addView(controls);
         JSONArray items = selected.optJSONArray("items");
         int shown = 0;
         if (items != null) for (int index = 0; index < items.length(); index++) {
@@ -790,12 +752,15 @@ public final class MainActivity extends Activity {
                 default -> null;
             };
             if (component != null) {
-                if (shown > 0) ui.gap(page, 10);
+                if (shown > 0) {
+                    ui.rule(page);
+                    ui.gap(page, 4);
+                }
                 page.addView(component);
                 shown++;
             }
         }
-        if (shown == 0) page.addView(empty(TrayUi.Icon.SPACE, "暂无便签、待办或画板"));
+        if (shown == 0) empty("暂无便签、待办或画板");
     }
 
     private void addComponent(String spaceId, String kind, String title) {
@@ -814,24 +779,29 @@ public final class MainActivity extends Activity {
     }
 
     private LinearLayout renderNote(String space, JSONObject item, JSONObject data) {
-        LinearLayout card = ui.surface(tray_note, 16, 14);
-        card.setPadding(dp(14), dp(6), dp(14), dp(12));
-        LinearLayout title = componentTitle(itemTitle(item, data, "便签"), NOTE, tray_note_text);
+        LinearLayout row = ui.row();
+        row.setGravity(Gravity.TOP);
+        row.setPadding(0, dp(4), 0, dp(12));
+        LinearLayout noteContent = ui.column();
+        noteContent.setPadding(0, dp(4), 0, 0);
+        noteContent.addView(componentTitle(itemTitle(item, data, "便签"), NOTE, tray_note_text));
+        ui.gap(noteContent, 6);
         String note = data.optString("text");
-        title.addView(ui.iconButton("编辑便签", EDIT, tray_note_text, () ->
+        TextView preview = ui.text(note.isEmpty() ? "空便签" : note, 16, note.isEmpty() ? tray_muted : tray_text, false);
+        preview.setLineSpacing(dp(3), 1);
+        preview.setTextIsSelectable(!note.isEmpty());
+        preview.setMaxLines(14);
+        preview.setEllipsize(TextUtils.TruncateAt.END);
+        noteContent.addView(preview);
+        ui.stretch(row, noteContent);
+        row.addView(ui.iconButton("编辑便签", EDIT, tray_muted, () ->
             edit("编辑便签", note, true, content ->
                 run(() -> app.workspace.writeNote(space, item.optString("id"), content), this::showWorkspace))));
-        card.addView(title);
-        TextView preview = ui.text(note.isEmpty() ? "空便签" : note, 15, tray_note_text, false);
-        preview.setMaxLines(6);
-        preview.setEllipsize(TextUtils.TruncateAt.END);
-        preview.setLineSpacing(dp(3), 1);
-        card.addView(preview);
-        return card;
+        return row;
     }
 
     private LinearLayout renderTodo(String space, JSONObject item, JSONObject data) {
-        LinearLayout card = ui.surface(tray_surface, 16, 14);
+        LinearLayout card = ui.column();
         LinearLayout title = componentTitle(itemTitle(item, data, "待办"), TASKS, tray_primary);
         JSONArray tasks = data.optJSONArray("tasks");
         int done = 0;
@@ -842,16 +812,15 @@ public final class MainActivity extends Activity {
             total++;
             if (task.optBoolean("completed")) done++;
         }
-        if (total > 0) title.addView(ui.text(done + "/" + total, 13, tray_muted, true));
-        card.addView(title);
         String itemId = item.optString("id");
+        if (total > 0) title.addView(ui.text(done + "/" + total, 13, tray_muted, true));
+        title.addView(ui.iconButton("新增待办", PLUS, tray_primary, () ->
+            edit("待办内容", "", false, task -> saveTask(space, itemId, "", task, null))));
+        card.addView(title);
         if (tasks != null) for (int index = 0; index < tasks.length(); index++) {
             JSONObject task = tasks.optJSONObject(index);
             if (task != null) card.addView(taskRow(space, itemId, task));
         }
-        card.addView(ui.button("新增待办", PLUS, TEXT, () ->
-            edit("待办内容", "", false, task -> saveTask(space, itemId, "", task, null))),
-            new LinearLayout.LayoutParams(-2, -2));
         return card;
     }
 
@@ -862,37 +831,34 @@ public final class MainActivity extends Activity {
         CheckBox check = new CheckBox(this);
         check.setText(taskText);
         check.setTextColor(ui.color(tray_text));
+        check.setTextSize(15);
         check.setMinHeight(dp(48));
         check.setPadding(0, 0, dp(8), 0);
         check.setChecked(task.optBoolean("completed"));
         check.setOnCheckedChangeListener((view, checked) -> saveTask(space, itemId, taskId, null, checked));
         ui.stretch(line, check);
-        var more = ui.iconButton("待办操作", MORE, tray_muted, () -> {});
-        more.setOnClickListener(view -> {
+        line.addView(ui.iconButton("待办操作", MORE, tray_muted, view -> {
             PopupMenu menu = new PopupMenu(this, view);
-            menu.getMenu().add("编辑").setOnMenuItemClickListener(entry -> {
-                edit("待办内容", taskText, false, value -> saveTask(space, itemId, taskId, value, null));
-                return true;
-            });
-            menu.getMenu().add("删除").setOnMenuItemClickListener(entry -> {
-                confirm("删除这项待办？", () ->
-                    run(() -> app.workspace.removeTask(space, itemId, taskId), this::showWorkspace));
-                return true;
-            });
+            menuAction(menu, "编辑", () ->
+                edit("待办内容", taskText, false, value -> saveTask(space, itemId, taskId, value, null)));
+            menuAction(menu, "删除", () -> confirm("删除这项待办？", () ->
+                run(() -> app.workspace.removeTask(space, itemId, taskId), this::showWorkspace)));
             menu.show();
-        });
-        line.addView(more);
+        }));
         return line;
     }
 
     private LinearLayout renderBoard(JSONObject item, JSONObject data) {
-        LinearLayout card = ui.surface(tray_surface, 16, 14);
+        LinearLayout card = ui.column();
+        ui.gap(card, 8);
         card.addView(componentTitle(itemTitle(item, data, "画板"), BOARD, tray_primary));
-        ui.gap(card, 12);
+        ui.gap(card, 8);
         BoardView board = new BoardView(data.optJSONArray("strokes"));
-        board.setBackground(ui.fill(tray_board, 8));
+        var paper = ui.fill(tray_board, 8);
+        paper.setStroke(dp(1), ui.color(tray_outline));
+        board.setBackground(paper);
         board.setClipToOutline(true);
-        card.addView(board, new LinearLayout.LayoutParams(-1, dp(190)));
+        card.addView(board, new LinearLayout.LayoutParams(-1, dp(144)));
         return card;
     }
 
@@ -911,7 +877,7 @@ public final class MainActivity extends Activity {
     private void renderSsh(JSONArray hosts) {
         if (hosts == null || hosts.length() == 0) return;
         pageHeading("SSH 主机");
-        LinearLayout list = ui.surface(tray_surface, 16, 12);
+        LinearLayout list = ui.column();
         for (int index = 0; index < hosts.length(); index++) {
             JSONObject host = hosts.optJSONObject(index);
             if (host == null) continue;
@@ -1088,13 +1054,11 @@ public final class MainActivity extends Activity {
         }
     }
 
-    private void showMenu(View anchor, String title, Runnable action) {
-        PopupMenu menu = new PopupMenu(this, anchor);
+    private void menuAction(PopupMenu menu, String title, Runnable action) {
         menu.getMenu().add(title).setOnMenuItemClickListener(entry -> {
             action.run();
             return true;
         });
-        menu.show();
     }
 
     private void notice(String message) {
@@ -1110,23 +1074,16 @@ public final class MainActivity extends Activity {
         ui.gap(page, 9);
     }
 
-    private LinearLayout empty(TrayUi.Icon icon, String message) {
-        LinearLayout area = ui.surface(tray_tonal, 16, 20);
-        area.setGravity(Gravity.CENTER_HORIZONTAL);
-        area.addView(ui.iconView(icon, tray_primary, 27));
-        ui.gap(area, 12);
+    private void empty(String message) {
         TextView label = ui.text(message, 15, tray_muted, false);
-        label.setGravity(Gravity.CENTER);
-        area.addView(label);
-        return area;
+        label.setPadding(0, dp(12), 0, dp(12));
+        page.addView(label);
     }
 
-    private void pairNotice(TrayUi.Icon icon) {
-        LinearLayout state = empty(icon, "当前设备尚未配对");
-        ui.gap(state, 14);
-        state.addView(ui.button("前往设置", null, PRIMARY, () -> switchPage(SETTINGS)),
+    private void pairNotice() {
+        empty("当前设备尚未配对");
+        page.addView(ui.button("前往设置", null, TONAL, () -> switchPage(SETTINGS)),
             new LinearLayout.LayoutParams(-2, -2));
-        page.addView(state);
     }
 
     private LinearLayout actions(Button first, Button second) {

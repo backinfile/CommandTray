@@ -10,8 +10,6 @@
     <color name="tray_on_primary">#193322</color>
     <color name="tray_selected">#354A37</color>
     <color name="tray_panel">#253D34</color>
-    <color name="tray_panel_raised">#3B574A</color>
-    <color name="tray_note">#3D3027</color>
     <color name="tray_note_text">#F5DDC3</color>
     <color name="tray_error">#FFAFA7</color>
 </resources>

@@ -29,7 +29,7 @@ import static dev.commandtray.android.R.color.*;
 
 final class TrayUi {
     enum Icon { SPACE, FOLDER, CLIPBOARD, SETTINGS, PLUS, SYNC, DOWNLOAD, MORE, CHEVRON, NOTE, TASKS, BOARD, FILE, EDIT, COPY, SEND, SERVER, KEY }
-    enum Style { PRIMARY, TONAL, TEXT, PANEL, SIGNAL }
+    enum Style { PRIMARY, TONAL, TEXT }
 
     private final Context context;
 
@@ -108,27 +108,13 @@ final class TrayUi {
         parent.addView(line, new LinearLayout.LayoutParams(-1, dp(1)));
     }
 
-    TextView status(String content, boolean positive) {
-        TextView label = text(content, 12, positive ? tray_text : tray_muted, true);
-        label.setPadding(dp(10), dp(5), dp(10), dp(5));
-        label.setBackground(fill(positive ? tray_selected : tray_tonal, 16));
-        return label;
-    }
-
     Button button(String content, Icon symbol, Style style, Runnable action) {
         int background = switch (style) {
             case PRIMARY -> tray_primary;
             case TONAL -> tray_tonal;
             case TEXT -> 0;
-            case PANEL -> tray_panel_raised;
-            case SIGNAL -> tray_signal;
         };
-        int ink = switch (style) {
-            case PRIMARY -> tray_on_primary;
-            case PANEL -> tray_panel_text;
-            case SIGNAL -> tray_signal_text;
-            default -> tray_text;
-        };
+        int ink = style == Style.PRIMARY ? tray_on_primary : tray_primary;
         Button view = new Button(context, null, 0);
         view.setText(content);
         view.setAllCaps(false);
@@ -139,7 +125,7 @@ final class TrayUi {
         view.setMinimumWidth(0);
         view.setGravity(Gravity.CENTER);
         view.setPadding(dp(12), dp(6), dp(12), dp(6));
-        view.setBackground(ripple(background, 14, ink));
+        view.setBackground(ripple(background, 10, ink));
         view.setStateListAnimator(null);
         if (symbol != null) {
             Drawable art = icon(symbol, ink, 18);
@@ -154,6 +140,10 @@ final class TrayUi {
     }
 
     ImageButton iconButton(String description, Icon symbol, int ink, Runnable action) {
+        return iconButton(description, symbol, ink, button -> action.run());
+    }
+
+    ImageButton iconButton(String description, Icon symbol, int ink, View.OnClickListener action) {
         ImageButton button = new ImageButton(context, null, 0);
         button.setImageDrawable(icon(symbol, ink, 20));
         button.setScaleType(ImageView.ScaleType.CENTER);
@@ -161,7 +151,7 @@ final class TrayUi {
         button.setContentDescription(description);
         button.setTooltipText(description);
         button.setLayoutParams(new LinearLayout.LayoutParams(dp(48), dp(48)));
-        button.setOnClickListener(view -> action.run());
+        button.setOnClickListener(action);
         return button;
     }
 
@@ -208,37 +198,33 @@ final class TrayUi {
         private final Icon symbol;
         private final ImageView graphic;
         private final TextView label;
-        private final android.widget.FrameLayout pill;
 
-        Destination(String title, Icon symbol, Runnable action) {
+        Destination(String title, Icon symbol, boolean stacked, Runnable action) {
             super(context);
             this.symbol = symbol;
-            setOrientation(VERTICAL);
+            setOrientation(stacked ? VERTICAL : HORIZONTAL);
             setGravity(Gravity.CENTER);
-            setMinimumHeight(dp(62));
-            setPadding(0, dp(6), 0, dp(5));
+            setMinimumHeight(dp(stacked ? 52 : 48));
+            setPadding(dp(2), dp(3), dp(2), dp(3));
             setContentDescription(title);
-            setBackground(ripple(0, 16, tray_primary));
             setFocusable(true);
             setOnClickListener(view -> action.run());
-            pill = new android.widget.FrameLayout(context);
-            graphic = iconView(symbol, tray_muted, 22);
-            pill.addView(graphic, new android.widget.FrameLayout.LayoutParams(dp(22), dp(22), Gravity.CENTER));
-            addView(pill, new LayoutParams(dp(56), dp(32)));
+            graphic = iconView(symbol, tray_muted, 18);
+            addView(graphic);
+            gap(this, stacked ? 3 : 5);
             label = text(title, 12, tray_muted, true);
             label.setMaxLines(1);
             label.setEllipsize(TextUtils.TruncateAt.END);
             label.setGravity(Gravity.CENTER);
             label.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-            gap(this, 4);
-            addView(label);
+            addView(label, new LayoutParams(-2, -2));
         }
 
         void showSelected(boolean active) {
             setSelected(active);
-            pill.setBackground(active ? fill(tray_selected, 16) : null);
-            int ink = active ? tray_text : tray_muted;
-            graphic.setImageDrawable(icon(symbol, ink, 22));
+            setBackground(ripple(active ? tray_selected : 0, 12, tray_primary));
+            int ink = active ? tray_primary : tray_muted;
+            graphic.setImageDrawable(icon(symbol, ink, 18));
             label.setTextColor(color(ink));
         }
     }
