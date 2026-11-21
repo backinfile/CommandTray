@@ -66,13 +66,16 @@ public final class MainActivity extends Activity {
     private static final int FILES = 1;
     private static final int CLIPBOARD = 2;
     private static final int SETTINGS = 3;
+    private static final String[] PAGE_TITLES = {"工作空间", "共享文件", "剪贴板", "设置"};
     private final ExecutorService work = Executors.newSingleThreadExecutor();
     private final TrayUi.Destination[] navigation = new TrayUi.Destination[4];
     private CommandTrayApp app;
     private TrayUi ui;
     private LinearLayout page;
     private ScrollView scroll;
+    private TextView appBarTitle;
     private TextView pairingStatus;
+    private View newSpaceButton;
     private TextView feedback;
     private ProgressBar progress;
     private int selection;
@@ -150,18 +153,25 @@ public final class MainActivity extends Activity {
 
     private LinearLayout createAppBar() {
         LinearLayout bar = ui.row();
-        bar.setPadding(dp(20), dp(8), dp(20), dp(8));
+        bar.setMinimumHeight(dp(56));
+        bar.setPadding(dp(20), dp(4), dp(20), dp(4));
         ImageView mark = new ImageView(this);
         mark.setImageResource(R.drawable.tray_mark);
         mark.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-        bar.addView(mark, new LinearLayout.LayoutParams(dp(30), dp(30)));
-        ui.gap(bar, 9);
-        TextView name = ui.text("CommandTray", 17, tray_text, true);
-        name.setSingleLine(true);
-        name.setEllipsize(TextUtils.TruncateAt.END);
-        ui.stretch(bar, name);
+        bar.addView(mark, new LinearLayout.LayoutParams(dp(24), dp(24)));
+        ui.gap(bar, 8);
+        appBarTitle = ui.heading("", 20, tray_text);
+        appBarTitle.setSingleLine(true);
+        appBarTitle.setEllipsize(TextUtils.TruncateAt.END);
+        ui.stretch(bar, appBarTitle);
+        ui.gap(bar, 8);
         pairingStatus = ui.status("", false);
         bar.addView(pairingStatus);
+        newSpaceButton = ui.iconButton("新建空间", PLUS, tray_primary, this::createSpace);
+        newSpaceButton.setBackground(ui.ripple(tray_tonal, 14, tray_primary));
+        LinearLayout.LayoutParams newSpaceLayout = (LinearLayout.LayoutParams) newSpaceButton.getLayoutParams();
+        newSpaceLayout.setMarginStart(dp(8));
+        bar.addView(newSpaceButton, newSpaceLayout);
         return bar;
     }
 
@@ -244,6 +254,8 @@ public final class MainActivity extends Activity {
     private void switchPage(int target) {
         if (selection != target) scroll.scrollTo(0, 0);
         selection = target;
+        appBarTitle.setText(PAGE_TITLES[target]);
+        newSpaceButton.setVisibility(target == SPACE ? View.VISIBLE : View.GONE);
         for (int i = 0; i < navigation.length; i++) navigation[i].showSelected(i == target);
         render();
         if (target == SPACE) {
@@ -271,8 +283,8 @@ public final class MainActivity extends Activity {
         else renderSettings();
     }
     private void renderSettings() {
-        page.addView(pageTitle("设置"));
-        pageHeading("中转服务器");
+        page.addView(ui.heading("中转服务器", 18, tray_text));
+        ui.gap(page, 9);
         LinearLayout relay = ui.surface(tray_surface, 16, 16);
         page.addView(relay);
         if (!app.settings.paired() || editingConnection) {
@@ -410,8 +422,6 @@ public final class MainActivity extends Activity {
     }
 
     private void renderClipboard() {
-        page.addView(pageTitle("剪贴板"));
-        ui.gap(page, 16);
         if (!app.settings.paired()) {
             pairNotice(TrayUi.Icon.CLIPBOARD);
             return;
@@ -476,8 +486,6 @@ public final class MainActivity extends Activity {
     }
 
     private void renderFiles() {
-        page.addView(pageTitle("共享文件"));
-        ui.gap(page, 16);
         if (!app.settings.paired()) {
             pairNotice(FOLDER);
             return;
@@ -637,11 +645,6 @@ public final class MainActivity extends Activity {
     }
 
     private void renderWorkspace() {
-        LinearLayout heading = ui.row();
-        ui.stretch(heading, pageTitle("工作空间"));
-        heading.addView(ui.button("新建", PLUS, TONAL, this::createSpace));
-        page.addView(heading);
-        ui.gap(page, 12);
         if (workspace == null) return;
         try {
             JSONArray spaces = WorkspaceStore.spaces(workspace);
@@ -1099,12 +1102,6 @@ public final class MainActivity extends Activity {
         feedback.setText(message);
         feedback.setVisibility(View.VISIBLE);
         feedback.postDelayed(dismissFeedback, 3800);
-    }
-
-    private TextView pageTitle(String title) {
-        TextView text = ui.heading(title, 30, tray_text);
-        text.setLetterSpacing(-0.02f);
-        return text;
     }
 
     private void pageHeading(String title) {
