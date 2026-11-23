@@ -24,6 +24,8 @@ internal static class DaemonTransport
         listener.Listen(16);
         var sessions = new List<Task>();
         await using var runtime = new ServiceRuntime();
+        using var background = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var synchronization = LinuxCommands.SyncPeriodicallyAsync(background.Token);
         try
         {
             await runtime.StartConfiguredAsync();
@@ -37,6 +39,8 @@ internal static class DaemonTransport
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
         finally
         {
+            await background.CancelAsync();
+            await synchronization;
             await Task.WhenAll(sessions);
             File.Delete(LocalState.Socket);
         }

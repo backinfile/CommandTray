@@ -13,5 +13,6 @@
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <PackageReference Include="ModelContextProtocol.AspNetCore" Version="2.1.0" />
     <ProjectReference Include="../CommandTray.Sync/CommandTray.Sync.csproj" />
+    <ProjectReference Include="../CommandTray.Core/CommandTray.Core.csproj" />
   </ItemGroup>
 </Project>

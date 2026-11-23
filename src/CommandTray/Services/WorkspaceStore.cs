@@ -40,6 +40,13 @@ internal sealed class WorkspaceStore
         lock (_gate) return ((JsonObject)_document.DeepClone(), _generation);
     }
 
+    public (JsonObject Document, long Generation) ReadForSync()
+    {
+        var (document, generation) = ReadDocument();
+        foreach (var (_, _, key, data) in LocalPathFields(document)) data.Remove(key);
+        return (document, generation);
+    }
+
     public WorkspaceSnapshot Snapshot()
     {
         lock (_gate)
@@ -103,6 +110,41 @@ internal sealed class WorkspaceStore
         return id;
     }
 
+    public string SaveItem(string spaceId, JsonObject update)
+    {
+        var id = Text(update["id"]) ?? Guid.NewGuid().ToString("N");
+        Edit(doc =>
+        {
+            var items = Items(Find(Spaces(doc), spaceId, "space"));
+            var item = items.OfType<JsonObject>().FirstOrDefault(x => Text(x["id"]) == id);
+            var n = items.Count;
+            if (item is null)
+            {
+                item = new JsonObject { ["id"] = id, ["data"] = new JsonObject() };
+                Position(item, new Rectangle(16 + (n % 2) * 408, 16 + (n / 2) * 294, 392, 278));
+                items.Add(item);
+            }
+
+            var kind = Text(update["kind"]) ?? Text(item["kind"]);
+            if (kind is null || (!Kinds.Contains(kind) && kind != Text(item["kind"])))
+                throw new ArgumentException("Unknown workspace item kind.");
+            item["kind"] = kind;
+            item["title"] = RequireText(Text(update["title"]) ?? Text(item["title"]) ?? kind, "Item title", 128);
+            Position(item, new Rectangle(
+                Number(update["x"], Number(item["x"], 16)),
+                Number(update["y"], Number(item["y"], 16)),
+                Number(update["width"], Number(item["width"], 392)),
+                Number(update["height"], Number(item["height"], 278))));
+            if (update["data"] is JsonObject changes)
+            {
+                var data = item["data"] as JsonObject ?? new JsonObject();
+                foreach (var entry in changes) data[entry.Key] = entry.Value?.DeepClone();
+                if (data.Parent is null) item["data"] = data;
+            }
+        });
+        return id;
+    }
+
     public void RenameItem(string spaceId, string itemId, string title) =>
         Edit(doc => Item(doc, spaceId, itemId)["title"] = RequireText(title, "Item title", 128));
 
@@ -136,7 +178,7 @@ internal sealed class WorkspaceStore
                 Position((JsonObject)items[n]!, new Rectangle(16 + (n % columns) * 408, 16 + (n / columns) * 294, 392, 278));
         });
 
-    public void RecoverFromRelay(JsonObject document, long expectedGeneration)
+    public void RecoverFromRelay(JsonObject document, long expectedGeneration, bool backup = true, bool restoreLocalPaths = false)
     {
         var copy = (JsonObject)document.DeepClone();
         Validate(copy);
@@ -144,10 +186,42 @@ internal sealed class WorkspaceStore
         {
             if (_generation != expectedGeneration)
                 throw new InvalidOperationException("The workspace changed during the download. Retry the pull.");
-            WriteAtomic(Path.Combine(Path.GetDirectoryName(_path)!, "workspace-before-pull.json"), _document);
+            if (restoreLocalPaths)
+            {
+                var originals = LocalPathFields(_document).Where(path => path.Data.ContainsKey(path.Key))
+                    .ToDictionary(path => (path.SpaceId, path.ItemId, path.Key), path => path.Data[path.Key]);
+                foreach (var (spaceId, itemId, key, data) in LocalPathFields(copy, createMissing: true))
+                {
+                    if (originals.TryGetValue((spaceId, itemId, key), out var original))
+                        data[key] = original?.DeepClone();
+                    else data.Remove(key);
+                }
+            }
+            if (JsonNode.DeepEquals(copy, _document)) return;
+            if (backup) WriteAtomic(Path.Combine(Path.GetDirectoryName(_path)!, "workspace-before-pull.json"), _document);
             Persist(copy);
         }
         Changed?.Invoke(this, EventArgs.Empty);
+    }
+
+    public void UpdateCommandTemplates(IReadOnlyDictionary<string, JsonObject> changed, IReadOnlySet<string> removed)
+    {
+        if (changed.Count == 0 && removed.Count == 0) return;
+        Edit(doc =>
+        {
+            var records = doc["commands"] as JsonArray;
+            if (records is null) doc["commands"] = records = new JsonArray();
+            for (var i = records.Count - 1; i >= 0; i--)
+                if (Text((records[i] as JsonObject)?["id"]) is { } id && removed.Contains(id)) records.RemoveAt(i);
+            foreach (var (id, patch) in changed)
+            {
+                var existing = records.OfType<JsonObject>().FirstOrDefault(record => Text(record["id"]) == id);
+                if (existing is null)
+                    records.Add(patch.DeepClone());
+                else
+                    foreach (var entry in patch) existing[entry.Key] = entry.Value?.DeepClone();
+            }
+        });
     }
 
     public JsonArray ReadHosts()
@@ -333,6 +407,30 @@ internal sealed class WorkspaceStore
         if (Text(doc["activeSpaceId"]) is not string active || !spaces.Any(space => Text(space?["id"]) == active))
             doc["activeSpaceId"] = Text(spaces[0]?["id"]);
         doc["schemaVersion"] = 1;
+    }
+
+    private static IEnumerable<(string SpaceId, string ItemId, string Key, JsonObject Data)> LocalPathFields(
+        JsonObject document, bool createMissing = false)
+    {
+        foreach (var space in Spaces(document).OfType<JsonObject>())
+        foreach (var item in Items(space).OfType<JsonObject>())
+        {
+            var kind = Text(item["kind"]);
+            if (kind is not ("files" or "preview" or "terminal")) continue;
+            if (item["data"] is not JsonObject data)
+            {
+                if (!createMissing) continue;
+                item["data"] = data = new JsonObject();
+            }
+            var spaceId = Text(space["id"])!;
+            var itemId = Text(item["id"])!;
+            if (kind == "terminal")
+            {
+                yield return (spaceId, itemId, "workingDirectory", data);
+                yield return (spaceId, itemId, "directory", data);
+            }
+            else yield return (spaceId, itemId, "path", data);
+        }
     }
 
     private static void CheckIds(JsonArray list)

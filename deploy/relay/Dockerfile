@@ -1,8 +1,10 @@
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /source
 COPY src/CommandTray.Relay/CommandTray.Relay.csproj src/CommandTray.Relay/
-RUN dotnet restore src/CommandTray.Relay/CommandTray.Relay.csproj
+COPY src/CommandTray.Sync/CommandTray.Sync.csproj src/CommandTray.Sync/
+RUN dotnet restore src/CommandTray.Relay/CommandTray.Relay.csproj -p:Configuration=Release
 COPY src/CommandTray.Relay/ src/CommandTray.Relay/
+COPY src/CommandTray.Sync/ src/CommandTray.Sync/
 RUN dotnet publish src/CommandTray.Relay/CommandTray.Relay.csproj -c Release --no-restore -o /app
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0

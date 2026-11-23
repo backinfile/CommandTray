@@ -59,6 +59,14 @@ public sealed class RelayClient
     public Task<JsonObject> PutWorkspaceAsync(long baseRevision, JsonNode document, CancellationToken cancellationToken = default) =>
         SendJsonAsync(HttpMethod.Put, "v1/workspace", new { baseRevision, document }, cancellationToken);
 
+    public Task<JsonObject> GetWorkspaceChangesAsync(long after, CancellationToken cancellationToken = default) =>
+        SendJsonAsync(HttpMethod.Get, "v1/workspace/changes?after=" + after.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            null, cancellationToken);
+
+    public Task<JsonObject> ApplyWorkspaceChangesAsync(long baseRevision, string operationId,
+        WorkspaceChange[] changes, CancellationToken cancellationToken = default) =>
+        SendJsonAsync(HttpMethod.Patch, "v1/workspace/changes", new { baseRevision, operationId, changes }, cancellationToken);
+
     public Task<JsonObject> GetClipboardAsync(CancellationToken cancellationToken = default) =>
         SendJsonAsync(HttpMethod.Get, "v1/clipboard", null, cancellationToken);
 
@@ -108,7 +116,7 @@ public sealed class RelayClient
         using var request = Create(method, path);
         if (body is not null) request.Content = JsonContent.Create(body);
         using var response = await _http.SendAsync(request, cancellationToken);
-        if (response.StatusCode == HttpStatusCode.Conflict && path == "v1/workspace")
+        if (response.StatusCode == HttpStatusCode.Conflict && path is "v1/workspace" or "v1/workspace/changes")
             throw new RelayConflictException(await ReadObjectAsync(response, cancellationToken));
         await CheckAsync(response, cancellationToken);
         return await ReadObjectAsync(response, cancellationToken);

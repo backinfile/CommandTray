@@ -4,12 +4,12 @@
 
 [![Release](https://github.com/backinfile/CommandTray/actions/workflows/release.yml/badge.svg)](https://github.com/backinfile/CommandTray/actions/workflows/release.yml)
 
-CommandTray 在 Windows 用本机窗口和系统托盘管理命令、多个空间、文件与终端。Linux CLI 可以在没有桌面的机器上管理命令和同步数据。Android 应用用于剪贴板、共享文件、待办、便签和设备配对。
+CommandTray 的 Windows、Linux 桌面与 Android 客户端共用一套 Avalonia 界面。桌面空间可以并排摆放目录和终端，Android 优先显示便签、待办、画板和共享内容。Linux 也可通过 CLI 在无桌面环境使用。
 
 | 入口 | 使用方式 |
 | --- | --- |
 | Windows | 从托盘打开命令管理、工作区、共享文件、捕获、剪贴板、SSH 和本地设置。空间中可新建目录栏、终端和组件，再拖动、调整大小。 |
-| Linux | 解压后运行 `commandtray --help`。后台进程、终端、同步和 MCP 说明见 [Linux CLI](packaging/linux/README.md)。 |
+| Linux | CLI 归档运行 `commandtray --help`，桌面归档运行 `./commandtray-desktop`。两个入口使用同一个用户级守护进程。[Linux 使用说明](packaging/linux/README.md) |
 | Android | 安装 APK 后在本地设置配对。构建与签名见 [Android](android/README.md)。 |
 | 自部署中转 | 使用镜像和 Compose 配置。配对后的设备可共享文件、文本剪贴板和工作区。见 [部署说明](deploy/relay/README.md)。 |
 
@@ -17,7 +17,7 @@ CommandTray 在 Windows 用本机窗口和系统托盘管理命令、多个空�
 
 - 在系统托盘中集中管理多个 CMD 命令或本地开发服务。
 - 一键启动、停止、重启、打开服务网页和查看日志。
-- 服务配置按“基本配置 / 启动与停止 / 环境变量”分组，支持搜索、字段校验和未保存提醒。
+- 在命令页搜索服务，编辑启动、停止、工作目录和环境变量。
 - 完整中文和英文界面，可在应用设置中即时切换，或跟随系统语言。
 - 日志支持搜索、复制、自动换行和暂停跟随输出。
 - 支持工作目录、环境变量、自定义停止命令与停止超时。
@@ -27,7 +27,7 @@ CommandTray 在 Windows 用本机窗口和系统托盘管理命令、多个空�
 - 使用当前 Windows 用户的 DPAPI 加密标记为敏感的环境变量。
 - 内置本地 MCP 服务，让受信任的 AI 客户端管理服务。
 
-Windows 截图和贴图可直接使用。录屏使用 PATH 上的 ffmpeg，OCR 使用 PATH 上的 tesseract 和相应语言数据。设备配对后，可在工作区推送和拉取空间；同步冲突时保留本地数据。
+Windows 截图和贴图可直接使用。录屏使用 PATH 上的 ffmpeg，OCR 使用 PATH 上的 tesseract 和相应语言数据。已配对客户端会提交本地空间变更并接收中转增量。断网时把待提交的修改保存在本机，重连后继续同步，冲突时可保留任一版本。
 
 ## 下载与安装
 
@@ -43,13 +43,13 @@ Windows 截图和贴图可直接使用。录屏使用 PATH 上的 ffmpeg，OCR �
 
 ## 快速开始
 
-1. 启动 CommandTray，双击托盘图标打开设置。
-2. 点击左侧 **“+ 添加服务”** 新建服务。
+1. 启动 CommandTray，双击托盘图标打开应用。
+2. 在 **命令** 页点击 **新建命令**。
 3. 填写名称和启动命令，按需设置其他字段。
-4. 点击 **“保存修改”**，或按 **Ctrl+S**。
-5. 点击顶部 **“启动”**，或从托盘菜单启动服务。
+4. 点击 **保存**。
+5. 点击对应行的启动按钮，或从托盘菜单启动。
 
-在 **“应用设置 → 显示语言”** 中选择 **跟随系统 / 简体中文 / English**，已打开的窗口和托盘菜单会立即更新。服务名称、命令和日志内容会保留原文。
+在 **设置 → 语言** 中选择 **简体中文 / English**。服务名称、命令和日志内容保留原文。
 
 常用快捷键：**Ctrl+N** 添加服务、**Ctrl+F** 搜索服务（日志窗口中搜索日志）、**Ctrl+L** 查看日志、**Ctrl+Tab / Ctrl+Shift+Tab** 前后切换配置页签。页签获得焦点时，也可以用左右方向键及 **Home / End** 切换。切换服务时会提示保存未完成的修改；关闭窗口只隐藏界面并保留编辑内容。
 

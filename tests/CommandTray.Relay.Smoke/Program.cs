@@ -95,6 +95,53 @@ try
             Assert(JsonNode.DeepEquals(conflict.Current["document"], document), "Conflict did not return the server version.");
         }
 
+        var firstPath = Path.Combine(runData, "windows-workspace-journal.json");
+        var secondPath = Path.Combine(runData, "linux-workspace-journal.json");
+        var firstJournal = new WorkspaceSyncJournal(firstPath);
+        var secondJournal = new WorkspaceSyncJournal(secondPath);
+        var left = (JsonObject)document.DeepClone();
+        var right = (JsonObject)document.DeepClone();
+        long leftRevision = 1, rightRevision = 1;
+        void ApplyLeft(JsonObject merged, long revision) { left = merged; leftRevision = revision; }
+        void ApplyRight(JsonObject merged, long revision) { right = merged; rightRevision = revision; }
+        await firstJournal.SynchronizeAsync(first, left, leftRevision, push: false, ApplyLeft);
+        await secondJournal.SynchronizeAsync(second, right, rightRevision, push: false, ApplyRight);
+
+        using var offlineHttp = new HttpClient(new DisconnectedHandler());
+        var disconnected = new RelayClient(uri, linux.Token, offlineHttp);
+        right["spaces"]![0]!["items"]![0]!["x"] = 180;
+        try
+        {
+            await secondJournal.SynchronizeAsync(disconnected, right, rightRevision, push: true, ApplyRight);
+            throw new InvalidOperationException("The disconnected request unexpectedly reached the relay.");
+        }
+        catch (HttpRequestException) { }
+        Assert(File.ReadAllText(secondPath).Contains("\"outbox\":{", StringComparison.Ordinal), "Offline changes were not queued on disk.");
+
+        left["spaces"]![0]!["items"]![0]!["data"]!["text"] = "first device edited the note";
+        await firstJournal.SynchronizeAsync(first, left, leftRevision, push: true, ApplyLeft);
+        secondJournal = new WorkspaceSyncJournal(secondPath);
+        await secondJournal.SynchronizeAsync(second, right, rightRevision, push: true, ApplyRight);
+        Assert(rightRevision == 3 && (int?)right["spaces"]![0]!["items"]![0]!["x"] == 180 &&
+               (string?)right["spaces"]![0]!["items"]![0]!["data"]!["text"] == "first device edited the note",
+            "Offline geometry did not merge with the independent text edit.");
+        var incremental = await first.GetWorkspaceChangesAsync(1);
+        Assert(incremental["document"] is null && incremental["changes"] is JsonArray { Count: 2 },
+            "The relay did not return the requested incremental history.");
+
+        await firstJournal.SynchronizeAsync(first, left, leftRevision, push: false, ApplyLeft);
+        left["spaces"]![0]!["items"]![0]!["data"]!["text"] = "remote revision";
+        await firstJournal.SynchronizeAsync(first, left, leftRevision, push: true, ApplyLeft);
+        right["spaces"]![0]!["items"]![0]!["data"]!["text"] = "local revision";
+        var conflictState = await secondJournal.SynchronizeAsync(second, right, rightRevision, push: true, ApplyRight);
+        Assert(conflictState.Conflict is { } saved &&
+               (string?)saved.Local["spaces"]![0]!["items"]![0]!["data"]!["text"] == "local revision" &&
+               (string?)saved.Remote["spaces"]![0]!["items"]![0]!["data"]!["text"] == "remote revision",
+            "The overlapping text edit did not preserve both versions.");
+        await secondJournal.ResolveAsync(second, right, "local", ApplyRight);
+        Assert(rightRevision == 5, "Resolving a conflict did not commit the chosen workspace.");
+        document = (JsonObject)right.DeepClone();
+
         await first.PutClipboardAsync("跨设备剪贴板");
         var clipboard = await second.GetClipboardAsync();
         Assert((string?)clipboard["text"] == "跨设备剪贴板", "Clipboard did not cross devices.");
@@ -141,7 +188,7 @@ try
     }
 
     await VerifyAdminMcpAsync();
-    Console.WriteLine("Relay smoke passed: pairing, conflict, clipboard, shared bytes, revocation, backup/restore, encrypted secret and MCP.");
+    Console.WriteLine("Relay smoke passed: pairing, offline replay, incremental merge, conflict resolution, clipboard, shared bytes, revocation, backup/restore, encrypted secret and MCP.");
 }
 finally
 {
@@ -249,4 +296,10 @@ static async Task StopAsync(Process process)
 static void Assert(bool condition, string message)
 {
     if (!condition) throw new InvalidOperationException(message);
+}
+
+sealed class DisconnectedHandler : HttpMessageHandler
+{
+    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+        Task.FromException<HttpResponseMessage>(new HttpRequestException("Fixture device is offline."));
 }

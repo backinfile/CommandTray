@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-android36.0</TargetFramework>
+    <SupportedOSPlatformVersion>29.0</SupportedOSPlatformVersion>
+    <RootNamespace>CommandTray.Android</RootNamespace>
+    <ApplicationId>dev.commandtray.android</ApplicationId>
+    <ApplicationTitle>CommandTray</ApplicationTitle>
+    <ApplicationVersion>3001</ApplicationVersion>
+    <ApplicationDisplayVersion>0.3.1</ApplicationDisplayVersion>
+    <AndroidPackageFormats>apk</AndroidPackageFormats>
+    <RuntimeIdentifiers>android-arm64;android-x64</RuntimeIdentifiers>
+    <EmbedAssembliesIntoApk>true</EmbedAssembliesIntoApk>
+    <AndroidUseApkSigner>true</AndroidUseApkSigner>
+    <AndroidSdkBuildToolsVersion>35.0.0</AndroidSdkBuildToolsVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)' == 'Debug'">
+    <CommandTrayDebugKeyStore Condition="'$(CommandTrayDebugKeyStore)' == '' and '$(USERPROFILE)' != ''">$(USERPROFILE)/.android/debug.keystore</CommandTrayDebugKeyStore>
+    <CommandTrayDebugKeyStore Condition="'$(CommandTrayDebugKeyStore)' == '' and '$(HOME)' != ''">$(HOME)/.android/debug.keystore</CommandTrayDebugKeyStore>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)' == 'Debug' and Exists('$(CommandTrayDebugKeyStore)')">
+    <AndroidKeyStore>true</AndroidKeyStore>
+    <AndroidSigningKeyStore>$(CommandTrayDebugKeyStore)</AndroidSigningKeyStore>
+    <AndroidSigningKeyAlias>androiddebugkey</AndroidSigningKeyAlias>
+    <AndroidSigningStorePass>android</AndroidSigningStorePass>
+    <AndroidSigningKeyPass>android</AndroidSigningKeyPass>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)' == 'Release' and '$(COMMANDTRAY_ANDROID_KEYSTORE)' != ''">
+    <AndroidKeyStore>true</AndroidKeyStore>
+    <AndroidSigningKeyStore>$(COMMANDTRAY_ANDROID_KEYSTORE)</AndroidSigningKeyStore>
+    <AndroidSigningKeyAlias>$(COMMANDTRAY_ANDROID_KEY_ALIAS)</AndroidSigningKeyAlias>
+    <AndroidSigningStorePass>env:COMMANDTRAY_ANDROID_STORE_PASSWORD</AndroidSigningStorePass>
+    <AndroidSigningKeyPass>env:COMMANDTRAY_ANDROID_KEY_PASSWORD</AndroidSigningKeyPass>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Avalonia.Android" Version="12.1.6" />
+    <ProjectReference Include="../CommandTray.Core/CommandTray.Core.csproj" />
+    <ProjectReference Include="../CommandTray.Sync/CommandTray.Sync.csproj" />
+    <ProjectReference Include="../CommandTray.Ui/CommandTray.Ui.csproj" />
+  </ItemGroup>
+</Project>

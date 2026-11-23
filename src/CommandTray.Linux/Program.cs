@@ -13,13 +13,13 @@ if (args.Length == 0 || args[0] is "--help" or "-h" or "help")
 
           daemon
           service list|get|start|stop|restart|logs|delete <name>
-          service create|update <name> [--cwd <path>] [--stop-timeout <seconds>]
+          service create|update <name> [--name <new-name>] [--cwd <path>] [--stop-timeout <seconds>]
                    [--auto-start|--no-auto-start] -- <executable> [args...]
-          terminal list|open|read|write|close
+          terminal list|open|read|write|resize|close
           shell [cwd] [executable]
           config get | config set server|mcp-port <value>
-          workspace list|get|create|show|use|rename|remove|load|replace|put-item|remove-item
-          sync pair <server> [device-name] | sync status|push|pull|devices|remove-device
+          workspace list|get|create|show|use|rename|remove|load|replace|put-item|move-item|remove-item
+          sync pair <server> [device-name] | sync status|push|pull|devices|remove-device | sync resolve local|remote
           clip put [text] | clip get|status
           share list | share put <file> [folder] | share get <id> <destination> | share remove <id>
           host list|get|put|remove|connect

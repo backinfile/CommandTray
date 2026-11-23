@@ -4,14 +4,14 @@
 
 [![Release](https://github.com/backinfile/CommandTray/actions/workflows/release.yml/badge.svg)](https://github.com/backinfile/CommandTray/actions/workflows/release.yml)
 
-CommandTray is a lightweight Windows 10/11 x64 system-tray utility for starting, stopping, and monitoring long-running command-line services.
+CommandTray uses one Avalonia UI across Windows, Linux desktop, and Android. Desktop workspaces show multiple folders and terminals together. Android puts notes, checklists, boards, and shared files first. Linux also has a headless CLI.
 
 ## Highlights
 
 - Manage multiple CMD commands or local development services from one tray menu.
 - Start, stop, restart, open service URLs, and inspect logs.
-- Search services and edit Configuration, Startup & shutdown, and Environment tabs with validation and unsaved-change prompts.
-- Complete Chinese and English interfaces with immediate language switching or system-language selection.
+- Search commands and edit their configuration, startup and shutdown behavior, and environment variables.
+- Choose Chinese or English under Settings.
 - Search and copy logs, wrap lines, or pause scrolling while output continues to arrive.
 - Configure working directories, environment variables, stop commands, and stop timeouts.
 - Start selected services with CommandTray and restart them after unexpected exits.
@@ -35,16 +35,14 @@ CommandTray stays in the notification area after launch. Closing the settings wi
 ## Quick start
 
 1. Start CommandTray and double-click its tray icon.
-2. Select **“+ Add service”**.
+2. Open **Commands** and select **Add command**.
 3. Enter a name and CMD command, then configure any optional fields.
-4. Select **“Save changes”**, or press **Ctrl+S**.
-5. Select **“Start”**, or start the service from the tray menu.
+4. Select **Save**.
+5. Start the command from its row or the tray menu.
 
-Choose **Follow system / English / 简体中文** under **Application settings → Display language**. Open windows and the tray menu update immediately; service names, commands, and log output remain as entered.
+Choose **English** or **简体中文** under **Settings → Language**. Service names, commands, and log output keep their original text.
 
-Shortcuts: **Ctrl+N** adds a service, **Ctrl+F** searches services (or logs in the log viewer), **Ctrl+L** opens logs, and **Ctrl+Tab / Ctrl+Shift+Tab** cycle configuration tabs. When a tab has focus, use the arrow keys or **Home / End** to select a tab. Switching services prompts you to save unfinished edits. Closing the manager hides it and preserves your draft.
-
-The primary service button shows **Start** or **Stop** according to service state, displays progress, and prevents duplicate operations while busy. **Logs** and **Website** remain visible. **Delete…** is separated on the right and requires confirmation.
+Each command row shows its state and a start or stop action. Its menu opens logs, configuration, or the configured service address.
 
 | Field | Description |
 | --- | --- |

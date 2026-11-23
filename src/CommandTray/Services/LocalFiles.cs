@@ -14,6 +14,16 @@ internal static class LocalFiles
             .OrderByDescending(item => item.Directory).ThenBy(item => item.Name, StringComparer.CurrentCultureIgnoreCase).ToArray();
     }
 
+    public static void Copy(string source, string destination, bool overwrite)
+    {
+        source = Path.GetFullPath(source);
+        destination = Path.GetFullPath(destination);
+        if (Directory.Exists(source))
+            Microsoft.VisualBasic.FileIO.FileSystem.CopyDirectory(source, destination, overwrite);
+        else
+            File.Copy(source, destination, overwrite);
+    }
+
     public static async Task<string> PreviewAsync(string path, CancellationToken cancellationToken = default)
     {
         var buffer = new byte[65536];

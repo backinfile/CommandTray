@@ -8,7 +8,7 @@ using static CommandTray.Linux.ServiceRuntime;
 
 namespace CommandTray.Linux;
 
-internal sealed class LinuxCommands
+internal sealed partial class LinuxCommands
 {
     public async Task<object?> ExecuteAsync(string[] args, CancellationToken cancellationToken = default)
     {
@@ -18,6 +18,13 @@ internal sealed class LinuxCommands
         switch (args[0])
         {
             case "service":
+            {
+                var result = await DaemonTransport.ExecuteAsync(args, cancellationToken);
+                if (action is "create" or "update" or "delete" && result is { } response &&
+                    JsonNode.Parse(response.GetRawText()) is JsonObject profile)
+                    StageService(profile, action == "delete");
+                return result;
+            }
             case "terminal":
                 return await DaemonTransport.ExecuteAsync(args, cancellationToken);
             case "config":
@@ -36,6 +43,34 @@ internal sealed class LinuxCommands
                 return Identity(action, tail);
             default: throw new ArgumentException("Unknown command. Use --help for usage.");
         }
+    }
+
+    public static void DeleteCommandTemplate(string id) => StageService(new JsonObject { ["deleted"] = id }, removed: true);
+
+    private static void StageService(JsonObject profile, bool removed)
+    {
+        using var mutex = WorkspaceLock();
+        var workspace = WorkspaceState.Load();
+        var collection = ArrayAt(workspace.Document, "commands");
+        if (removed)
+        {
+            if (Text(profile, "deleted") is { } deleted && ObjectBy(collection, "id", deleted) is { } old)
+            {
+                collection.Remove(old);
+                Save(workspace);
+            }
+            return;
+        }
+        var command = LinuxClientBackend.CommandView(profile);
+        command.Remove("state");
+        command["platform"] = "linux";
+        var id = Text(command, "id")!;
+        if (ObjectBy(collection, "id", id) is { } existing)
+        {
+            foreach (var (key, value) in command) existing[key] = value?.DeepClone();
+        }
+        else collection.Add(command);
+        Save(workspace);
     }
 
     private static object Config(string action, string[] args)
@@ -73,7 +108,8 @@ internal sealed class LinuxCommands
 
     private static object SettingsView(LocalSettings settings) => new
     {
-        settings.Server, settings.DeviceId, paired = !string.IsNullOrWhiteSpace(settings.Token),
+        settings.Server, settings.DeviceId, settings.DeviceName, settings.Language, settings.RunAtLogin, settings.McpEnabled,
+        paired = !string.IsNullOrWhiteSpace(settings.Token),
         mcpEndpoint = $"http://127.0.0.1:{settings.McpPort}/mcp",
         mcpTokenConfigured = !string.IsNullOrWhiteSpace(settings.McpToken),
         dataDirectory = LocalState.Root
@@ -104,28 +140,18 @@ internal sealed class LinuxCommands
         LocalState.Write(LocalState.Workspace, workspace with { BaseRevision = 0, Dirty = true });
     }
 
-    private static async Task<object?> SyncAsync(string action, string[] args, CancellationToken cancellationToken)
+    private async Task<object?> SyncAsync(string action, string[] args, CancellationToken cancellationToken)
     {
         switch (action)
         {
             case "pair":
             {
-                var server = ParseServer(Required(args, 0, "relay address"));
+                var server = Required(args, 0, "relay address");
                 var name = args.Length > 1 ? args[1] : Environment.MachineName;
                 var code = Environment.GetEnvironmentVariable("COMMANDTRAY_PAIRING_CODE");
                 if (string.IsNullOrWhiteSpace(code))
                     throw new InvalidOperationException("Set COMMANDTRAY_PAIRING_CODE locally before pairing.");
-                using var config = SettingsLock();
-                var current = LocalSettings.Load();
-                var pairing = await new RelayClient(server).PairAsync(name, code, cancellationToken);
-                if (current.Server != server.AbsoluteUri)
-                {
-                    using var workspace = WorkspaceLock();
-                    ResetWorkspaceSync();
-                }
-                current = current with { Server = server.AbsoluteUri, DeviceId = pairing.DeviceId, Token = pairing.Token };
-                LocalState.Write(LocalState.Settings, current);
-                return SettingsView(current);
+                return await PairAsync(server, name, code, cancellationToken);
             }
             case "status":
             {
@@ -149,48 +175,35 @@ internal sealed class LinuxCommands
                 return new { removed = id };
             }
             case "push":
-            {
-                using var workspace = WorkspaceLock();
-                var local = WorkspaceState.Load();
-                try
-                {
-                    var remote = await Relay().PutWorkspaceAsync(local.BaseRevision, local.Document, cancellationToken);
-                    var revision = Revision(remote);
-                    LocalState.Write(LocalState.Workspace, local with { BaseRevision = revision, Dirty = false });
-                    return new { revision, dirty = false };
-                }
-                catch (RelayConflictException ex)
-                {
-                    var conflict = Path.Combine(LocalState.Root, "workspace-remote-conflict.json");
-                    LocalState.Write(conflict, ex.Current);
-                    throw new InvalidOperationException($"The remote workspace changed. Local edits are preserved. Remote conflict saved to {conflict}.", ex);
-                }
-            }
             case "pull":
-            {
-                using var workspace = WorkspaceLock();
-                var local = WorkspaceState.Load();
-                var remote = await Relay().GetWorkspaceAsync(cancellationToken);
-                var revision = Revision(remote);
-                string? saved = null;
-                if (local.Dirty)
-                {
-                    if (!args.Contains("--replace", StringComparer.Ordinal))
-                    {
-                        if (local.BaseRevision == revision) return new { revision, dirty = true };
-                        var conflict = Path.Combine(LocalState.Root, "workspace-remote-conflict.json");
-                        LocalState.Write(conflict, remote);
-                        throw new InvalidOperationException($"The remote workspace changed. Local edits are preserved. Remote conflict saved to {conflict}.");
-                    }
-                    saved = Path.Combine(LocalState.Root, "workspace-local-" + Guid.NewGuid().ToString("N") + ".json");
-                    LocalState.Write(saved, local);
-                }
-                var document = remote["document"] as JsonObject ?? throw new InvalidDataException("The relay response omitted the workspace document.");
-                LocalState.Write(LocalState.Workspace, new WorkspaceState(revision, false, document));
-                return new { revision, dirty = false, saved };
-            }
+            case "resolve":
+                return await SynchronizeWorkspaceAsync(action, args, cancellationToken);
             default: throw new ArgumentException("Unknown sync action.");
         }
+    }
+
+    public async Task<object> PairAsync(string address, string name, string pairingCode, CancellationToken cancellationToken)
+    {
+        var server = ParseServer(address);
+        using var config = SettingsLock();
+        var current = LocalSettings.Load();
+        var pairing = await new RelayClient(server).PairAsync(name, pairingCode, cancellationToken);
+        if (current.Server != server.AbsoluteUri)
+        {
+            using var workspace = WorkspaceLock();
+            ResetWorkspaceSync();
+        }
+        current = current with { Server = server.AbsoluteUri, DeviceId = pairing.DeviceId, Token = pairing.Token, DeviceName = name };
+        LocalState.Write(LocalState.Settings, current);
+        return SettingsView(current);
+    }
+
+    public object Unpair()
+    {
+        using var config = SettingsLock();
+        var current = LocalSettings.Load() with { DeviceId = null, Token = null, DeviceName = null };
+        LocalState.Write(LocalState.Settings, current);
+        return SettingsView(current);
     }
 
     private static long Revision(JsonObject envelope) =>
@@ -207,7 +220,7 @@ internal sealed class LinuxCommands
         };
     }
 
-    private static async Task<object> ShareAsync(string action, string[] args, CancellationToken cancellationToken)
+    private async Task<object> ShareAsync(string action, string[] args, CancellationToken cancellationToken)
     {
         var relay = Relay();
         switch (action)
@@ -215,9 +228,7 @@ internal sealed class LinuxCommands
             case "list": return await relay.ListFilesAsync(cancellationToken);
             case "put":
             {
-                var path = Path.GetFullPath(Required(args, 0, "local file"));
-                await using var stream = File.OpenRead(path);
-                return await relay.UploadAsync(Path.GetFileName(path), stream, args.ElementAtOrDefault(1), cancellationToken);
+                return await UploadSharedFileAsync(Required(args, 0, "local file"), null, args.ElementAtOrDefault(1), cancellationToken);
             }
             case "get":
             {
@@ -247,6 +258,13 @@ internal sealed class LinuxCommands
             }
             default: throw new ArgumentException("Use share list, share put, share get or share remove.");
         }
+    }
+
+    public async Task<JsonObject> UploadSharedFileAsync(string source, string? name, string? folder, CancellationToken cancellationToken)
+    {
+        var path = Path.GetFullPath(source);
+        await using var stream = File.OpenRead(path);
+        return await Relay().UploadAsync(string.IsNullOrWhiteSpace(name) ? Path.GetFileName(path) : name, stream, folder, cancellationToken);
     }
 
     private static object Workspace(string action, string[] args)
@@ -306,6 +324,21 @@ internal sealed class LinuxCommands
                 else items.Add(item);
                 break;
             }
+            case "move-item":
+            {
+                var items = ArrayAt(match, "items");
+                var id = Required(args, 1, "component ID");
+                var item = ObjectBy(items, "id", id) ?? throw new InvalidOperationException("Unknown component.");
+                var layout = ParseObject(Required(args, 2, "component layout"));
+                foreach (var key in new[] { "x", "y", "width", "height" })
+                {
+                    if (layout[key] is not JsonValue coordinate || !coordinate.TryGetValue<double>(out var number) ||
+                        !double.IsFinite(number) || (key is "width" or "height") && number <= 0)
+                        throw new ArgumentException($"Invalid component {key}.");
+                    item[key] = number;
+                }
+                break;
+            }
             case "remove-item":
             {
                 var items = ArrayAt(match, "items");
@@ -354,7 +387,7 @@ internal sealed class LinuxCommands
         return host;
     }
 
-    public static CommandProfile SshProfile(string id, string workingDirectory)
+    public static CommandProfile SshProfile(string id, string workingDirectory, string? passphrase = null)
     {
         var host = ObjectBy(ArrayAt(WorkspaceState.Load().Document, "sshHosts"), "id", id)
             ?? throw new InvalidOperationException("Unknown SSH host.");
@@ -367,7 +400,12 @@ internal sealed class LinuxCommands
         if (Text(host, "keyId") is { Length: > 0 } keyId)
         {
             var key = IdentityPath(keyId);
-            if (!File.Exists(key)) throw new InvalidOperationException("Install the SSH identity on this device before connecting.");
+            if (!File.Exists(key))
+            {
+                if (string.IsNullOrWhiteSpace(passphrase))
+                    throw new InvalidOperationException("Enter the synchronized SSH identity passphrase or install the identity with commandtray identity install.");
+                Identity("install", [keyId], passphrase);
+            }
             arguments.AddRange(["-i", key, "-o", "IdentitiesOnly=yes"]);
         }
         arguments.Add(address);
@@ -383,7 +421,15 @@ internal sealed class LinuxCommands
             throw new ArgumentException("Enter a hostname or IP address and a valid SSH username.");
     }
 
-    private static object Identity(string action, string[] args)
+    public object ImportAndInstallIdentity(string path, string name, string passphrase)
+    {
+        var id = Guid.NewGuid().ToString("N");
+        Identity("import", [id, path, name], passphrase);
+        Identity("install", [id], passphrase);
+        return new { id, name, installed = true };
+    }
+
+    private static object Identity(string action, string[] args, string? suppliedPassphrase = null)
     {
         using var mutex = WorkspaceLock();
         var workspace = WorkspaceState.Load();
@@ -401,7 +447,7 @@ internal sealed class LinuxCommands
             return new { removed };
         }
         if (action is not ("import" or "install")) throw new ArgumentException("Unknown identity action.");
-        var passphrase = Environment.GetEnvironmentVariable("COMMANDTRAY_VAULT_PASSPHRASE");
+        var passphrase = suppliedPassphrase ?? Environment.GetEnvironmentVariable("COMMANDTRAY_VAULT_PASSPHRASE");
         if (string.IsNullOrWhiteSpace(passphrase))
             throw new InvalidOperationException("Set COMMANDTRAY_VAULT_PASSPHRASE locally before using the SSH vault.");
         if (action == "import")

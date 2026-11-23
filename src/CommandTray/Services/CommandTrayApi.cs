@@ -63,7 +63,11 @@ public sealed class CommandTrayApi
         finally { _operations.Release(); }
     }
 
-    public async Task<ServiceView> UpdateServiceAsync(string serviceId, ServiceInput input, CancellationToken cancellationToken = default)
+    public Task<ServiceView> UpdateServiceAsync(string serviceId, ServiceInput input, CancellationToken cancellationToken = default) =>
+        UpdateServiceAsync(serviceId, _ => input, cancellationToken);
+
+    internal async Task<ServiceView> UpdateServiceAsync(
+        string serviceId, Func<ServiceView, ServiceInput> update, CancellationToken cancellationToken = default)
     {
         await _operations.WaitAsync(cancellationToken);
         try
@@ -72,7 +76,7 @@ public sealed class CommandTrayApi
             lock (_configuration)
             {
                 existing = FindService(serviceId);
-                var updated = BuildService(existing.Id, input, existing);
+                var updated = BuildService(existing.Id, update(ToView(existing)), existing);
                 ValidateReplacement(existing, updated);
                 var previous = CloneService(existing);
                 CopyService(updated, existing);

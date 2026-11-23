@@ -86,7 +86,8 @@ internal static class LocalState
     }
 }
 
-internal sealed record LocalSettings(string? Server = null, string? DeviceId = null, string? Token = null, int McpPort = 58629, string? McpToken = null)
+internal sealed record LocalSettings(string? Server = null, string? DeviceId = null, string? Token = null, int McpPort = 58629,
+    string? McpToken = null, string? DeviceName = null, string Language = "en", bool RunAtLogin = false, bool McpEnabled = false)
 {
     public static LocalSettings Load() => LocalState.Read(LocalState.Settings, new LocalSettings());
 }
@@ -106,4 +107,4 @@ internal sealed record WorkspaceState(long BaseRevision, bool Dirty, JsonObject 
 
 internal sealed record CommandProfile(string Id, string Name, string Executable, string[] Arguments, string WorkingDirectory,
     int StopTimeoutSeconds = 3, bool AutoStart = false);
-internal sealed record RunStatus(bool Started, int? ExitCode = null, string? Error = null);
+internal sealed record RunStatus(bool Started, int? ExitCode = null, string? Error = null, int? ProcessId = null);

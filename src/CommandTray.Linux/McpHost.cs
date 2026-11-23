@@ -31,11 +31,33 @@ internal static class McpHost
         {
             var stdio = Host.CreateEmptyApplicationBuilder(new HostApplicationBuilderSettings { Args = [] });
             stdio.Logging.ClearProviders();
-            stdio.Services.AddMcpServer().WithStdioServerTransport().WithTools(tools);
+            await using var backend = new LinuxClientBackend();
+            stdio.Services.AddMcpServer().WithStdioServerTransport().WithTools(tools)
+                .WithTools(new LinuxFilesMcpTools(backend)).WithTools(LinuxSharedMcpTool.CreateAliases(backend));
             await stdio.Build().RunAsync(cancellationToken);
             return;
         }
 
+        await ((IHost)BuildHttp(null)).RunAsync(cancellationToken);
+    }
+
+    public static async Task<WebApplication> StartHttpAsync(LinuxClientBackend backend, CancellationToken cancellationToken)
+    {
+        var app = BuildHttp(backend);
+        try
+        {
+            await app.StartAsync(cancellationToken);
+            return app;
+        }
+        catch
+        {
+            await app.DisposeAsync();
+            throw;
+        }
+    }
+
+    private static WebApplication BuildHttp(LinuxClientBackend? desktop)
+    {
         GetToken(rotate: false);
         var settings = LocalSettings.Load();
         var address = $"http://127.0.0.1:{settings.McpPort}";
@@ -43,7 +65,11 @@ internal static class McpHost
         builder.Logging.ClearProviders();
         builder.Services.AddRouting();
         builder.WebHost.UseKestrelCore().ConfigureKestrel(options => options.Listen(System.Net.IPAddress.Loopback, settings.McpPort));
-        builder.Services.AddMcpServer().WithHttpTransport(transport => transport.Stateless = true).WithTools(tools);
+        var backend = desktop ?? new LinuxClientBackend();
+        var mcp = builder.Services.AddMcpServer().WithHttpTransport(transport => transport.Stateless = true)
+            .WithTools(new LinuxMcpTools(new LinuxCommands())).WithTools(new LinuxFilesMcpTools(backend))
+            .WithTools(LinuxSharedMcpTool.CreateAliases(backend));
+        if (desktop is not null) mcp.WithTools(new LinuxClipboardMcpTools(desktop));
         var app = builder.Build();
         app.Use(async (context, next) =>
         {
@@ -63,10 +89,11 @@ internal static class McpHost
                 context.Response.StatusCode = StatusCodes.Status401Unauthorized;
                 return;
             }
-            await next(context);
+            if (desktop is not null) await desktop.HandleMcpRequestAsync(context, next);
+            else await next(context);
         });
         app.MapMcp("/mcp");
-        await ((IHost)app).RunAsync(cancellationToken);
+        return app;
     }
 }
 
@@ -141,6 +168,11 @@ internal sealed class LinuxMcpTools(LinuxCommands commands)
     public Task<LinuxToolResult> ReadTerminal(string terminalId, CancellationToken cancellationToken, int lines = 200)
         => RunAsync(cancellationToken, "terminal", "read", terminalId, lines.ToString());
 
+    [McpServerTool(Name = "resize_terminal", UseStructuredContent = true)]
+    [Description("Set the character dimensions of an existing Linux PTY.")]
+    public Task<LinuxToolResult> ResizeTerminal(string terminalId, int columns, int rows, CancellationToken cancellationToken)
+        => RunAsync(cancellationToken, "terminal", "resize", terminalId, columns.ToString(), rows.ToString());
+
     [McpServerTool(Name = "close_terminal", Destructive = true, UseStructuredContent = true)]
     [Description("Close a terminal session owned by the daemon.")]
     public Task<LinuxToolResult> CloseTerminal(string terminalId, CancellationToken cancellationToken)
@@ -201,6 +233,13 @@ internal sealed class LinuxMcpTools(LinuxCommands commands)
     public Task<LinuxToolResult> PutComponent(string space, JsonObject component, CancellationToken cancellationToken)
         => RunAsync(cancellationToken, "workspace", "put-item", space, component.ToJsonString());
 
+    [McpServerTool(Name = "move_component", UseStructuredContent = true)]
+    [Description("Set the position and dimensions of a workspace component.")]
+    public Task<LinuxToolResult> MoveComponent(string space, string componentId, double x, double y, double width, double height,
+        CancellationToken cancellationToken)
+        => RunAsync(cancellationToken, "workspace", "move-item", space, componentId,
+            new JsonObject { ["x"] = x, ["y"] = y, ["width"] = width, ["height"] = height }.ToJsonString());
+
     [McpServerTool(Name = "delete_component", Destructive = true, UseStructuredContent = true)]
     [Description("Remove one component from a local space.")]
     public Task<LinuxToolResult> DeleteComponent(string space, string componentId, CancellationToken cancellationToken)
@@ -230,6 +269,11 @@ internal sealed class LinuxMcpTools(LinuxCommands commands)
     [Description("Fetch a relay workspace. Set replaceLocal to archive and replace unsynchronized edits.")]
     public Task<LinuxToolResult> Pull(CancellationToken cancellationToken, bool replaceLocal = false)
         => RunAsync(cancellationToken, replaceLocal ? ["sync", "pull", "--replace"] : ["sync", "pull"]);
+
+    [McpServerTool(Name = "sync_resolve", OpenWorld = true, UseStructuredContent = true)]
+    [Description("Resolve a retained workspace conflict in favor of local or remote.")]
+    public Task<LinuxToolResult> Resolve(string choice, CancellationToken cancellationToken)
+        => RunAsync(cancellationToken, "sync", "resolve", choice);
 
     [McpServerTool(Name = "list_devices", ReadOnly = true, UseStructuredContent = true)]
     [Description("List paired devices on the configured relay.")]

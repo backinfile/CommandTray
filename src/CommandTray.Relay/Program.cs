@@ -112,6 +112,21 @@ endpoints.MapDelete("/devices/{id}", async (string id, HttpContext context, Rela
 });
 
 endpoints.MapGet("/workspace", (RelayStore store) => Results.Ok(store.State.Workspace));
+endpoints.MapGet("/workspace/changes", (long after, RelayStore store) => after < 0
+    ? Results.BadRequest(new { error = "Expected a nonnegative workspace revision." })
+    : Results.Ok(store.WorkspaceChanges(after)));
+endpoints.MapPatch("/workspace/changes", async (WorkspaceDeltaInput input, RelayStore store,
+    HttpContext context, CancellationToken cancellation) =>
+{
+    if (input.BaseRevision < 0 || !RelayData.IsId(input.OperationId) || input.Changes is not { Length: > 0 and <= 4096 })
+        return Results.BadRequest(new { error = "Expected a base revision, operation ID and workspace changes." });
+    try
+    {
+        var write = await store.ApplyWorkspaceAsync(input, CurrentDevice(context).Id, cancellation);
+        return write.Accepted ? Results.Ok(write.Value) : Results.Conflict(write.Value);
+    }
+    catch (InvalidDataException error) { return Results.BadRequest(new { error = error.Message }); }
+});
 endpoints.MapPut("/workspace", async (WorkspaceInput input, RelayStore store, CancellationToken cancellation) =>
 {
     if (input.BaseRevision < 0 || !RelayData.IsWorkspace(input.Document))

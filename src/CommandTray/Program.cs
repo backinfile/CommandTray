@@ -1,3 +1,4 @@
+using Avalonia;
 using CommandTray.Services;
 
 namespace CommandTray;
@@ -32,14 +33,18 @@ internal static class Program
         }
 
         ApplicationConfiguration.Initialize();
+        // Native auxiliaries use Avalonia's Win32 dispatcher on the same STA.
+        WindowsFormsSynchronizationContext.AutoInstall = false;
         // Keep native inputs consistent with the light workspace; automatic
         // dark controls otherwise mix dark text surfaces with custom white UI.
-        Application.SetColorMode(SystemColorMode.Classic);
+        System.Windows.Forms.Application.SetColorMode(SystemColorMode.Classic);
         var store = new ConfigurationStore();
         AppConfigurationSafeLoad(store, out var configuration);
         Localizer.Configure(configuration.Language);
-        using var context = new TrayApplicationContext(store, configuration, showEvent, shutdownEvent);
-        Application.Run(context);
+        using var context = new WindowsAppStartup(store, configuration, showEvent, shutdownEvent);
+        AppBuilder.Configure(() => new WindowsClientApplication(context))
+            .UsePlatformDetect()
+            .StartWithClassicDesktopLifetime(args, Avalonia.Controls.ShutdownMode.OnExplicitShutdown);
     }
 
     private static void AppConfigurationSafeLoad(ConfigurationStore store, out Models.AppConfiguration configuration)

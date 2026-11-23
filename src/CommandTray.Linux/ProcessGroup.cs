@@ -53,6 +53,11 @@ internal static partial class ProcessGroup
         start.Environment.Remove("COMMANDTRAY_VAULT_PASSPHRASE");
     }
 
+    public static bool Owns(Process leader, int childPid)
+    {
+        return !leader.HasExited && GetSession(childPid) == leader.Id;
+    }
+
     public static void Signal(Process leader, bool force)
     {
         // The child holds its session until cleanup, so its PID identifies the owned group.
@@ -89,9 +94,9 @@ internal static partial class ProcessGroup
                 throw new InvalidOperationException("Missing process launch profile.");
             using var command = Process.Start(Command(profile)) ??
                 throw new InvalidOperationException("The profile could not be started.");
-            LocalState.Write(statusFile, new RunStatus(true));
+            LocalState.Write(statusFile, new RunStatus(true, ProcessId: command.Id));
             await command.WaitForExitAsync().ConfigureAwait(false);
-            LocalState.Write(statusFile, new RunStatus(true, command.ExitCode));
+            LocalState.Write(statusFile, new RunStatus(true, command.ExitCode, ProcessId: command.Id));
             await Task.Delay(Timeout.InfiniteTimeSpan).ConfigureAwait(false);
             return 0;
         }

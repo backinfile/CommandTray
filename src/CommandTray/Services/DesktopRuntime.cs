@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using CommandTray.Sync;
+using Avalonia.Threading;
 
 namespace CommandTray.Services;
 
@@ -13,6 +14,8 @@ internal sealed class DesktopRuntime : IDisposable
     private readonly string _directory;
     private readonly string _clipboardPath;
     private Control? _ui;
+    private WindowsDesktopShell? _shell;
+    private string? _sensitiveClipboardText;
 
     public DesktopRuntime(string directory)
     {
@@ -30,10 +33,59 @@ internal sealed class DesktopRuntime : IDisposable
     public string McpCredential { get; }
     public event EventHandler<DesktopNotice>? Notification;
     public void AttachWindow(Control window) => _ui = window;
+    public WindowsClientBackend? Backend { get; private set; }
+
+    public void AttachShell(WindowsDesktopShell shell, WindowsClientBackend backend)
+    {
+        _shell = shell;
+        Backend = backend;
+    }
+
     public Task<T> OnUiAsync<T>(Func<T> action, CancellationToken cancellationToken = default)
     {
+        if (_shell is not null)
+            return Dispatcher.UIThread.InvokeAsync(action, DispatcherPriority.Normal, cancellationToken).GetTask();
         var window = _ui ?? throw new InvalidOperationException("The Windows application is unavailable.");
         return window.InvokeAsync(action, cancellationToken);
+    }
+
+    public void Navigate(DesktopPage page, string? spaceId = null, string? itemId = null) =>
+        (_shell ?? throw new InvalidOperationException("The Windows application is unavailable.")).Navigate(page, spaceId, itemId);
+
+    public string? PromptSecret(string title) =>
+        (_shell ?? throw new InvalidOperationException("The Windows application is unavailable.")).PromptSecret(title);
+
+    public Rectangle? SelectScreenshotRegion() =>
+        DesktopCapturesPanel.SelectRegion(_shell?.Owner);
+
+    public string? AnnotateScreenshot(string path) =>
+        DesktopCapturesPanel.Annotate(Media.ResolveCapture(path), _shell?.Owner);
+
+    public bool OpenSsh(string itemId, string hostId, string? suppliedPassphrase = null)
+    {
+        var host = Workspace.ReadHosts().OfType<JsonObject>().FirstOrDefault(item => WorkspaceStore.Text(item["id"]) == hostId)
+            ?? throw new KeyNotFoundException("Unknown SSH host.");
+        string? identityFile = null;
+        if (WorkspaceStore.Text(host["keyId"]) is { Length: > 0 } keyId)
+        {
+            var passphrase = string.IsNullOrEmpty(suppliedPassphrase)
+                ? PromptSecret(Localizer.T("SSH vault passphrase", "SSH 密钥库口令"))
+                : suppliedPassphrase;
+            if (passphrase is null) return false;
+            identityFile = CreateIdentityFile(keyId, passphrase);
+        }
+        try
+        {
+            var session = OpenTerminal(itemId, "ssh", null, SshArguments.ForHost(host, identityFile).ToArray());
+            if (identityFile is not null)
+            {
+                var path = identityFile;
+                session.SetCleanup(() => File.Delete(path));
+                identityFile = null;
+            }
+            return true;
+        }
+        finally { if (identityFile is not null) File.Delete(identityFile); }
     }
     public void Notify(string message, string? spaceId = null, string? itemId = null) =>
         Notification?.Invoke(this, new DesktopNotice(message, spaceId, itemId));
@@ -77,15 +129,20 @@ internal sealed class DesktopRuntime : IDisposable
     public string ReadClipboard()
     {
         var text = Clipboard.ContainsText() ? Clipboard.GetText() : "";
-        RememberClipboard(text);
+        if (text != _sensitiveClipboardText)
+        {
+            _sensitiveClipboardText = null;
+            RememberClipboard(text);
+        }
         return text;
     }
 
-    public void WriteClipboard(string text)
+    public void WriteClipboard(string text, bool sensitive = false)
     {
         if (text.Length == 0) Clipboard.Clear();
         else Clipboard.SetText(text);
-        RememberClipboard(text);
+        _sensitiveClipboardText = sensitive ? text : null;
+        if (!sensitive) RememberClipboard(text);
     }
 
     public string[] ClipboardHistory() =>

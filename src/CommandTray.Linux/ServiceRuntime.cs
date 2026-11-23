@@ -59,10 +59,21 @@ internal sealed class ServiceRuntime : IAsyncDisposable
             var cwd = existing?.WorkingDirectory ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
             var timeout = existing?.StopTimeoutSeconds ?? 3;
             var auto = existing?.AutoStart ?? false;
+            var targetName = existing?.Name ?? name;
+            var identifier = existing?.Id ?? Guid.NewGuid().ToString("N");
             for (var i = 1; i < separator; i++)
             {
                 switch (args[i])
                 {
+                    case "--id" when existing is null:
+                        var requested = Required(args[..separator], ++i, "profile ID");
+                        if (!Guid.TryParseExact(requested, "N", out _) && !Guid.TryParseExact(requested, "D", out _))
+                            throw new ArgumentException("Use a UUID for a profile ID.");
+                        if (_profiles.Any(profile => profile.Id == requested))
+                            throw new InvalidOperationException("That service ID already exists.");
+                        identifier = requested;
+                        break;
+                    case "--name": targetName = Required(args[..separator], ++i, "new service name").Trim(); break;
                     case "--cwd": cwd = Required(args[..separator], ++i, "working directory"); break;
                     case "--stop-timeout": timeout = Positive(Required(args[..separator], ++i, "stop timeout"), 120); break;
                     case "--auto-start": auto = true; break;
@@ -70,7 +81,10 @@ internal sealed class ServiceRuntime : IAsyncDisposable
                     default: throw new ArgumentException($"Unknown profile setting: {args[i]}");
                 }
             }
-            var profile = new CommandProfile(existing?.Id ?? Guid.NewGuid().ToString("N"), existing?.Name ?? name,
+            if (targetName.Length == 0 || _profiles.Any(profile => profile != existing &&
+                string.Equals(profile.Name, targetName, StringComparison.OrdinalIgnoreCase)))
+                throw new ArgumentException("Use a nonempty and unique service name.");
+            var profile = new CommandProfile(identifier, targetName,
                 args[separator + 1], args[(separator + 2)..], ValidateDirectory(cwd), timeout, auto);
             MutateProfiles(profile, existing);
             return View(profile);
@@ -109,10 +123,19 @@ internal sealed class ServiceRuntime : IAsyncDisposable
         if (action == "list") return _terminals.Values.Select(job => job.View()).ToArray();
         if (action == "open")
         {
+            var id = Guid.NewGuid().ToString("N");
+            if (args is ["--id", var requested, ..])
+            {
+                if (requested.Length != 64 || requested.Any(character => !char.IsAsciiHexDigit(character)))
+                    throw new ArgumentException("Invalid terminal ID.");
+                id = requested;
+                args = args[2..];
+                if (_terminals.TryGetValue(id, out var existing) && existing.Running) return existing.View();
+                _terminals.Remove(id);
+            }
             var cwd = ValidateDirectory(Required(args, 0, "working directory"));
             var executable = args.Length > 1 ? args[1] : DefaultShell();
             var arguments = args.Length > 2 ? args[2..] : [];
-            var id = Guid.NewGuid().ToString("N");
             // util-linux script provides a real PTY to shells and SSH, and forwards termination to its child.
             var profile = new CommandProfile(id, Path.GetFileName(executable), "script",
                 ["--quiet", "--flush", "--return", "--command", string.Join(" ", new[] { executable }.Concat(arguments).Select(ShellQuote)), "/dev/null"],
@@ -131,6 +154,10 @@ internal sealed class ServiceRuntime : IAsyncDisposable
                 return selected.View();
             case "read":
                 return new { id = idToFind, content = ReadTail(LogPath(idToFind), args.Length >= 2 ? Positive(args[1], 1000) : 200) };
+            case "resize":
+                await selected.ResizeAsync(Positive(Required(args, 1, "columns"), 1000),
+                    Positive(Required(args, 2, "rows"), 1000));
+                return selected.View();
             case "close":
                 await selected.StopAsync();
                 _terminals.Remove(idToFind);
@@ -349,6 +376,14 @@ internal sealed class ServiceRuntime : IAsyncDisposable
             await Task.WhenAny(_complete.Task, Task.Delay(TimeSpan.FromSeconds(_profile.StopTimeoutSeconds)));
             if (!_complete.Task.IsCompleted) ProcessGroup.Signal(_host, force: true);
             await _complete.Task;
+        }
+
+        public Task ResizeAsync(int columns, int rows)
+        {
+            var status = LocalState.Read<RunStatus?>(_statusFile, null);
+            if (!_interactive || !Running || status?.ProcessId is not { } script || !ProcessGroup.Owns(_host, script))
+                throw new InvalidOperationException("The terminal session is not running.");
+            return PtySize.ApplyAsync(script, columns, rows);
         }
 
         public async Task WriteAsync(string input)

@@ -1,12 +1,13 @@
 using System.Diagnostics;
+using Avalonia.Controls.ApplicationLifetimes;
+using Avalonia.Threading;
 using CommandTray.Models;
 using CommandTray.Services;
 
 namespace CommandTray;
 
-public sealed class TrayApplicationContext : ApplicationContext
+internal sealed class TrayApplicationContext : IDisposable
 {
-    private readonly ConfigurationStore _store;
     private readonly AppConfiguration _configuration;
     private readonly ProcessSupervisor _supervisor = new();
     private readonly CommandTrayApi _api;
@@ -15,34 +16,44 @@ public sealed class TrayApplicationContext : ApplicationContext
     private readonly McpServerHost _mcpHost = new();
     private readonly Icon _appIcon;
     private readonly NotifyIcon _tray;
-    private readonly SettingsForm _settings;
+    private readonly IClassicDesktopStyleApplicationLifetime _lifetime;
+    private readonly WindowsDesktopShell _shell;
+    private readonly WindowsClientBackend _backend;
+    private readonly CancellationTokenSource _syncLifetime = new();
+    private readonly Task _backgroundSync;
     private readonly RegisteredWaitHandle _showRegistration;
     private readonly RegisteredWaitHandle _shutdownRegistration;
     private readonly ShutdownWindow _shutdownWindow;
     private bool _exiting;
+    private Action? _trayNoticeAction;
 
     public TrayApplicationContext(
         ConfigurationStore store,
         AppConfiguration configuration,
         EventWaitHandle showEvent,
-        EventWaitHandle shutdownEvent)
+        EventWaitHandle shutdownEvent,
+        IClassicDesktopStyleApplicationLifetime lifetime)
     {
-        _store = store;
         _configuration = configuration;
         _appIcon = Icon.ExtractAssociatedIcon(Application.ExecutablePath) ?? (Icon)SystemIcons.Application.Clone();
         _api = new CommandTrayApi(configuration, store, _supervisor);
+        _lifetime = lifetime;
         _desktop = new DesktopRuntime(Path.GetDirectoryName(store.PathName)!);
-        _settings = new SettingsForm(configuration, store, _supervisor, _desktop, _api);
-        _desktop.AttachWindow(_settings);
+        _backend = new WindowsClientBackend(_desktop, _api, store, configuration);
+        _shell = new WindowsDesktopShell(_backend, _appIcon);
+        _desktop.AttachShell(_shell, _backend);
         _desktop.SetPetVisible = SetPetVisible;
         _desktop.Notification += (_, message) => ShowNotice(message);
-        // Create the UI handle before registering cross-thread callbacks. Without
-        // it, a second instance can signal successfully while BeginInvoke fails,
-        // leaving a background process with no reachable UI.
-        _ = _settings.Handle;
-        _settings.ConfigurationChanged += (_, _) => { SaveConfiguration(); RebuildMenu(); };
-        _settings.McpEnabledChanged += async (_, _) => await ApplyMcpStateAsync();
-        _api.ConfigurationChanged += (_, _) => RefreshAfterApiChange();
+        _backend.SettingsChanged += (_, _) =>
+        {
+            RebuildMenu();
+            Dispatcher.UIThread.Post(async () => await ApplyMcpStateAsync());
+        };
+        _api.ConfigurationChanged += (_, _) =>
+        {
+            PublishCommandTemplates();
+            RebuildMenuOnUiThread();
+        };
         _supervisor.StateChanged += (_, _) => RebuildMenuOnUiThread();
         _supervisor.Failure += (_, failure) => ShowFailure(failure.Service.Name, failure.Message);
 
@@ -53,39 +64,41 @@ public sealed class TrayApplicationContext : ApplicationContext
             Visible = true
         };
         _tray.DoubleClick += (_, _) => ShowSettings();
+        _tray.BalloonTipClicked += (_, _) => _trayNoticeAction?.Invoke();
         RebuildMenu();
         Localizer.LanguageChanged += OnLanguageChanged;
 
         _shutdownWindow = new ShutdownWindow(BeginExit);
-
-        // Re-register once the WinForms message loop is actually pumping. This
-        // keeps the running state aligned with a live notification-area icon.
-        Application.Idle += EnsureTrayVisibleOnFirstIdle;
+        lifetime.ShutdownRequested += (_, args) =>
+        {
+            args.Cancel = true;
+            BeginExit();
+        };
+        // Re-register after the Avalonia Win32 message loop starts pumping.
+        Dispatcher.UIThread.Post(EnsureTrayVisible, DispatcherPriority.ApplicationIdle);
 
         _showRegistration = ThreadPool.RegisterWaitForSingleObject(showEvent, (_, _) =>
         {
-            if (!_exiting && !_settings.IsDisposed)
-                _settings.BeginInvoke(ShowSettings);
+            Dispatcher.UIThread.Post(ShowSettings);
         }, null, Timeout.Infinite, false);
         _shutdownRegistration = ThreadPool.RegisterWaitForSingleObject(shutdownEvent, (_, _) =>
             _shutdownWindow.RequestShutdown(), null, Timeout.Infinite, false);
 
+        PublishCommandTemplates();
         _ = _supervisor.StartConfiguredServicesAsync(_configuration.Services);
         _ = ApplyMcpStateAsync();
+        _backgroundSync = _desktop.Relay.RunBackgroundSyncAsync(
+            _desktop.ReapRemovedTerminals, _syncLifetime.Token);
     }
 
     public void ShowSettings()
     {
-        if (!_settings.Visible) _settings.Show();
-        if (_settings.WindowState == FormWindowState.Minimized) _settings.WindowState = FormWindowState.Normal;
-        _settings.Activate();
-        _settings.BringToFront();
+        if (!_exiting) _shell.Show();
     }
 
     private void ShowPage(DesktopPage page)
     {
-        _settings.ShowDesktopPage(page);
-        ShowSettings();
+        if (!_exiting) _shell.Navigate(page);
     }
 
     private bool SetPetVisible(bool visible)
@@ -107,43 +120,47 @@ public sealed class TrayApplicationContext : ApplicationContext
 
     private void ShowNotice(DesktopNotice notice)
     {
-        if (_exiting || _settings.IsDisposed) return;
-        if (_settings.InvokeRequired)
+        if (!Dispatcher.UIThread.CheckAccess())
         {
-            _settings.BeginInvoke(() => ShowNotice(notice));
+            Dispatcher.UIThread.Post(() => ShowNotice(notice));
             return;
         }
+        if (_exiting) return;
+        Action? openSource = notice.SpaceId is { } spaceId && notice.ItemId is { } itemId
+            ? () => _shell.Navigate(DesktopPage.Workspace, spaceId, itemId)
+            : null;
         if (_pet is { Visible: true } pet)
-        {
-            Action? openSource = notice.SpaceId is { } spaceId && notice.ItemId is { } itemId
-                ? () =>
-                {
-                    ShowPage(DesktopPage.Workspace);
-                    _settings.RevealWorkspaceComponent(spaceId, itemId);
-                }
-                : null;
             pet.Notice(notice.Message, openSource);
+        else
+        {
+            _trayNoticeAction = openSource;
+            _tray.ShowBalloonTip(4500, "CommandTray", notice.Message, ToolTipIcon.Info);
         }
-        else _tray.ShowBalloonTip(4500, "CommandTray", notice.Message, ToolTipIcon.Info);
     }
 
-    private void EnsureTrayVisibleOnFirstIdle(object? sender, EventArgs e)
+    private void EnsureTrayVisible()
     {
-        Application.Idle -= EnsureTrayVisibleOnFirstIdle;
         if (_exiting) return;
         _tray.Visible = false;
         _tray.Visible = true;
     }
 
-    private void RebuildMenuOnUiThread()
+    private void PublishCommandTemplates()
     {
-        if (_settings.IsHandleCreated) _settings.BeginInvoke(RebuildMenu);
+        try { _backend.PublishCommandTemplates(); }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        {
+            ShowFailure("Workspace", error.Message);
+        }
     }
+
+    private void RebuildMenuOnUiThread() => Dispatcher.UIThread.Post(RebuildMenu);
 
     private void OnLanguageChanged(object? sender, EventArgs e) => RebuildMenuOnUiThread();
 
     private void RebuildMenu()
     {
+        if (_exiting) return;
         var menu = new ContextMenuStrip();
         var header = new ToolStripMenuItem("CommandTray") { Enabled = false };
         menu.Items.Add(header);
@@ -165,7 +182,7 @@ public sealed class TrayApplicationContext : ApplicationContext
                 item.DropDownItems.Add(Localizer.T("Restart", "重启"), null, async (_, _) => await RunSafe(() => _supervisor.RestartAsync(service)));
             }
             item.DropDownItems.Add(Localizer.T("View log", "查看日志"), null, (_, _) =>
-                new LogViewerForm(service.Name, _supervisor.GetLogPath(service)).Show());
+                _shell.Navigate(DesktopPage.Commands, itemId: service.Id.ToString()));
             menu.Items.Add(item);
         }
 
@@ -194,9 +211,8 @@ public sealed class TrayApplicationContext : ApplicationContext
         };
         autoStart.CheckedChanged += (_, _) =>
         {
-            AutoStartService.SetEnabled(autoStart.Checked);
-            lock (_configuration) _configuration.RunAtLogin = autoStart.Checked;
-            SaveConfiguration();
+            try { _backend.SaveSettings(null, autoStart.Checked, null); }
+            catch (Exception error) { ShowFailure("Configuration", error.Message); }
         };
         menu.Items.Add(autoStart);
         menu.Items.Add(new ToolStripMenuItem(Localizer.T("Exit", "退出"), null, (_, _) =>
@@ -222,11 +238,14 @@ public sealed class TrayApplicationContext : ApplicationContext
 
     private async Task ExitAsync()
     {
-        Application.Idle -= EnsureTrayVisibleOnFirstIdle;
         _tray.Visible = false;
+        _syncLifetime.Cancel();
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         try
         {
+            try { await _backgroundSync.WaitAsync(timeout.Token); }
+            catch (OperationCanceledException) { }
+
             try { await _mcpHost.StopAsync(timeout.Token); }
             catch { /* shutdown must continue even if one component fails */ }
 
@@ -244,22 +263,15 @@ public sealed class TrayApplicationContext : ApplicationContext
                 _showRegistration.Unregister(null);
                 _shutdownRegistration.Unregister(null);
                 _pet?.Close();
-                _settings.AllowExit();
-                _settings.Close();
+                _shell.Close();
             }
             finally
             {
                 // A cleanup or window-disposal failure must never leave the
                 // tray process alive after the user requested Exit.
-                ExitThread();
+                _lifetime.Shutdown();
             }
         }
-    }
-
-    private void SaveConfiguration()
-    {
-        try { lock (_configuration) _store.Save(_configuration); }
-        catch (Exception ex) { ShowFailure("Configuration", ex.Message); }
     }
 
     private async Task ApplyMcpStateAsync()
@@ -274,23 +286,15 @@ public sealed class TrayApplicationContext : ApplicationContext
         catch (Exception ex) { ShowFailure("MCP server", ex.Message); }
     }
 
-    private void RefreshAfterApiChange()
-    {
-        if (_settings.IsDisposed || !_settings.IsHandleCreated) return;
-        _settings.BeginInvoke(() =>
-        {
-            _settings.RefreshFromExternalChange();
-            RebuildMenu();
-        });
-    }
-
     private void ShowFailure(string service, string message)
     {
-        if (_settings.IsHandleCreated && _settings.InvokeRequired)
+        if (!Dispatcher.UIThread.CheckAccess())
         {
-            _settings.BeginInvoke(() => ShowFailure(service, message));
+            Dispatcher.UIThread.Post(() => ShowFailure(service, message));
             return;
         }
+        if (_exiting) return;
+        _trayNoticeAction = null;
         _tray.ShowBalloonTip(5000, $"{service} - {Localizer.T("failed", "发生故障")}",
             Localizer.T(message, Localizer.ChineseError(message)), ToolTipIcon.Error);
     }
@@ -301,17 +305,19 @@ public sealed class TrayApplicationContext : ApplicationContext
             Process.Start(new ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true });
     }
 
-    protected override void Dispose(bool disposing)
+    public void Dispose()
     {
-        if (disposing)
-        {
-            Localizer.LanguageChanged -= OnLanguageChanged;
-            _mcpHost.DisposeAsync().AsTask().GetAwaiter().GetResult();
-            _desktop.Dispose();
-            _shutdownWindow.Dispose();
-            _tray.Dispose();
-            _appIcon.Dispose();
-        }
-        base.Dispose(disposing);
+        _exiting = true;
+        Localizer.LanguageChanged -= OnLanguageChanged;
+        _showRegistration.Unregister(null);
+        _shutdownRegistration.Unregister(null);
+        _syncLifetime.Cancel();
+        _syncLifetime.Dispose();
+        _mcpHost.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        _desktop.Dispose();
+        _shutdownWindow.Dispose();
+        _tray.ContextMenuStrip?.Dispose();
+        _tray.Dispose();
+        _appIcon.Dispose();
     }
 }

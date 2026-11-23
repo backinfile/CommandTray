@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Text.Json.Nodes;
 using ModelContextProtocol.Server;
 
@@ -11,12 +12,12 @@ internal sealed class DesktopMcpTools(DesktopRuntime desktop)
     [McpServerTool(Name = "get_desktop_settings", ReadOnly = true, UseStructuredContent = true)]
     [Description("Read local desktop settings without returning credentials.")]
     public Task<object> GetSettings(CancellationToken cancellationToken) =>
-        desktop.OnUiAsync(desktop.Window.GetDesktopSettings, cancellationToken);
+        Task.FromResult<object>(RequireBackend().ReadSettings());
 
     [McpServerTool(Name = "set_desktop_settings", UseStructuredContent = true)]
     [Description("Set the language (auto, en or zh), sign-in launch, or local MCP preference.")]
     public Task<object> SetSettings(CancellationToken cancellationToken, string? language = null, bool? runAtLogin = null, bool? mcpEnabled = null) =>
-        desktop.OnUiAsync(() => desktop.Window.SetDesktopSettings(language, runAtLogin, mcpEnabled), cancellationToken);
+        desktop.OnUiAsync<object>(() => RequireBackend().SaveSettings(language, runAtLogin, mcpEnabled), cancellationToken);
 
     [McpServerTool(Name = "open_desktop_page", UseStructuredContent = true)]
     [Description("Open the native commands, workspace, sharedFiles, clipboard, captures or settings page.")]
@@ -26,10 +27,7 @@ internal sealed class DesktopMcpTools(DesktopRuntime desktop)
             throw new ArgumentException("Unknown desktop page.");
         return desktop.OnUiAsync<object>(() =>
         {
-            desktop.Window.ShowDesktopPage(destination);
-            if (!desktop.Window.Visible) desktop.Window.Show();
-            if (desktop.Window.WindowState == FormWindowState.Minimized) desktop.Window.WindowState = FormWindowState.Normal;
-            desktop.Window.Activate();
+            desktop.Navigate(destination);
             return new { page };
         }, cancellationToken);
     }
@@ -128,14 +126,19 @@ internal sealed class DesktopMcpTools(DesktopRuntime desktop)
     public OperationResult StartTerminal(string spaceId, string itemId, string shell = "cmd", string? directory = null)
     {
         var item = FindTerminal(spaceId, itemId);
-        directory ??= WorkspaceStore.Text(item.Data["directory"]);
+        directory ??= WorkspaceStore.Text(item.Data["workingDirectory"]) ?? WorkspaceStore.Text(item.Data["directory"]);
         desktop.OpenTerminal(itemId, shell is "cmd" or "powershell" ? shell : throw new ArgumentException("Use cmd or powershell."), directory);
         try
         {
             desktop.Workspace.EditData(spaceId, itemId, data =>
             {
                 data["shell"] = shell;
-                if (directory is not null) data["directory"] = directory;
+                data.Remove("hostId");
+                if (directory is not null)
+                {
+                    data["directory"] = directory;
+                    data["workingDirectory"] = directory;
+                }
             });
         }
         catch { desktop.CloseTerminal(itemId); throw; }
@@ -156,6 +159,15 @@ internal sealed class DesktopMcpTools(DesktopRuntime desktop)
     {
         var terminal = desktop.Terminal(itemId);
         return new { active = terminal?.Active ?? false, output = terminal?.Output ?? "" };
+    }
+
+    [McpServerTool(Name = "resize_terminal_session", UseStructuredContent = true)]
+    [Description("Resize a native terminal in columns and rows.")]
+    public OperationResult ResizeTerminal(string itemId, int columns, int rows)
+    {
+        var terminal = desktop.Terminal(itemId) ?? throw new InvalidOperationException("Start a terminal first.");
+        terminal.Resize(columns, rows);
+        return Ok();
     }
 
     [McpServerTool(Name = "close_terminal_session", UseStructuredContent = true)]
@@ -197,10 +209,19 @@ internal sealed class DesktopMcpTools(DesktopRuntime desktop)
     public async Task<object> Push(CancellationToken cancellationToken) => new { revision = await desktop.Relay.PushWorkspaceAsync(cancellationToken) };
 
     [McpServerTool(Name = "pull_workspace", Destructive = true, UseStructuredContent = true)]
-    [Description("Replace the current workspace with the relay version and retain a local recovery copy.")]
+    [Description("Merge the latest relay changes into the local workspace.")]
     public async Task<object> Pull(CancellationToken cancellationToken)
     {
         var revision = await desktop.Relay.PullWorkspaceAsync(cancellationToken);
+        desktop.ReapRemovedTerminals();
+        return new { revision };
+    }
+
+    [McpServerTool(Name = "resolve_workspace_sync_conflict", UseStructuredContent = true)]
+    [Description("Resolve a workspace sync conflict by choosing local or remote.")]
+    public async Task<object> Resolve(string choice, CancellationToken cancellationToken)
+    {
+        var revision = await desktop.Relay.ResolveWorkspaceAsync(choice, cancellationToken);
         desktop.ReapRemovedTerminals();
         return new { revision };
     }
@@ -250,6 +271,15 @@ internal sealed class DesktopMcpTools(DesktopRuntime desktop)
     [Description("Fetch the latest text clipboard value from the relay.")]
     public Task<JsonObject> ReceiveClipboard(CancellationToken cancellationToken) => desktop.Relay.GetClipboardAsync(cancellationToken);
 
+    [McpServerTool(Name = "receive_relay_clipboard_to_local", OpenWorld = true, UseStructuredContent = true)]
+    [Description("Fetch the latest relay text and apply it to the local Windows clipboard.")]
+    public async Task<JsonObject> ReceiveToLocalClipboard(CancellationToken cancellationToken)
+    {
+        var clipboard = await desktop.Relay.GetClipboardAsync(cancellationToken);
+        await WriteClipboard(WorkspaceStore.Text(clipboard["text"]) ?? "", cancellationToken);
+        return clipboard;
+    }
+
     [McpServerTool(Name = "list_capture_history", ReadOnly = true, UseStructuredContent = true)]
     [Description("List screenshots and recordings made by CommandTray.")]
     public string[] Captures() => desktop.Media.Captures();
@@ -265,10 +295,40 @@ internal sealed class DesktopMcpTools(DesktopRuntime desktop)
         return desktop.OnUiAsync<object>(() => new { path = desktop.Media.Screenshot(region) }, cancellationToken);
     }
 
+    [McpServerTool(Name = "select_screenshot_region", UseStructuredContent = true)]
+    [Description("Open the local desktop area selector and save the selected region.")]
+    public Task<object> SelectScreenshot(CancellationToken cancellationToken) =>
+        desktop.OnUiAsync<object>(() =>
+        {
+            var rectangle = desktop.SelectScreenshotRegion();
+            if (rectangle is null) return new { status = "cancelled", path = (string?)null };
+            var path = desktop.Media.Screenshot(rectangle);
+            using var image = Image.FromFile(path);
+            Clipboard.SetImage(image);
+            return new { status = "saved", path = (string?)path };
+        }, cancellationToken);
+
     [McpServerTool(Name = "pin_screenshot", UseStructuredContent = true)]
     [Description("Show a saved screenshot in a local topmost window.")]
     public Task<OperationResult> Pin(string capture, CancellationToken cancellationToken) =>
         desktop.OnUiAsync(() => { DesktopCapturesPanel.ShowPinned(desktop.Media.ResolveCapture(capture)); return Ok(); }, cancellationToken);
+
+    [McpServerTool(Name = "annotate_screenshot", UseStructuredContent = true)]
+    [Description("Open the saved screenshot in the local annotation editor.")]
+    public Task<object> AnnotateScreenshot(string capture, CancellationToken cancellationToken) =>
+        desktop.OnUiAsync<object>(() =>
+        {
+            var path = desktop.AnnotateScreenshot(capture);
+            return new { status = path is null ? "cancelled" : "saved", path };
+        }, cancellationToken);
+
+    [McpServerTool(Name = "open_capture", UseStructuredContent = true)]
+    [Description("Open a saved screenshot or recording in its Windows viewer.")]
+    public OperationResult OpenCapture(string capture)
+    {
+        using var process = Process.Start(new ProcessStartInfo(desktop.Media.ResolveCapture(capture)) { UseShellExecute = true });
+        return Ok();
+    }
 
     [McpServerTool(Name = "start_screen_recording", UseStructuredContent = true)]
     [Description("Begin recording the main Windows screen with FFmpeg.")]
@@ -311,7 +371,7 @@ internal sealed class DesktopMcpTools(DesktopRuntime desktop)
     public Task<object> ImportKey(string path, string name, CancellationToken cancellationToken) =>
         desktop.OnUiAsync<object>(() =>
         {
-            var passphrase = DesktopWorkspacePanel.Prompt(desktop.Window, "Encrypt SSH key", "", secret: true);
+            var passphrase = desktop.PromptSecret("Encrypt SSH key");
             return passphrase is null ? new { status = "cancelled", id = (string?)null } :
                 new { status = "imported", id = (string?)desktop.ImportSshKey(path, name, passphrase) };
         }, cancellationToken);
@@ -327,9 +387,24 @@ internal sealed class DesktopMcpTools(DesktopRuntime desktop)
         {
             var host = desktop.Workspace.ReadHosts().OfType<JsonObject>().FirstOrDefault(item => WorkspaceStore.Text(item["id"]) == hostId)
                 ?? throw new KeyNotFoundException("Unknown SSH host.");
-            if (!desktop.Window.Visible) desktop.Window.Show();
-            var itemId = desktop.Window.ConnectDesktopSsh(host, spaceId);
-            return new { itemId, status = itemId is null ? "cancelled" : "started" };
+            var created = desktop.Workspace.AddItem(spaceId, "terminal", WorkspaceStore.Text(host["name"]) ?? "SSH",
+                new JsonObject { ["hostId"] = hostId });
+            try
+            {
+                if (desktop.OpenSsh(created, hostId))
+                {
+                    desktop.Navigate(DesktopPage.Workspace, spaceId, created);
+                    return new { itemId = (string?)created, status = "started" };
+                }
+            }
+            catch
+            {
+                desktop.CloseTerminal(created);
+                desktop.Workspace.RemoveItem(spaceId, created);
+                throw;
+            }
+            desktop.Workspace.RemoveItem(spaceId, created);
+            return new { itemId = (string?)null, status = "cancelled" };
         }, cancellationToken);
 
     [McpServerTool(Name = "set_desktop_pet_visible", UseStructuredContent = true)]
@@ -348,6 +423,9 @@ internal sealed class DesktopMcpTools(DesktopRuntime desktop)
     private WorkspaceItem FindTerminal(string spaceId, string itemId) => desktop.Workspace.Snapshot().Spaces
         .FirstOrDefault(space => space.Id == spaceId)?.Items.SingleOrDefault(item => item.Id == itemId && item.Kind == "terminal")
         ?? throw new KeyNotFoundException("Unknown terminal component.");
+
+    private WindowsClientBackend RequireBackend() => desktop.Backend
+        ?? throw new InvalidOperationException("The Windows application is unavailable.");
 
     private static OperationResult Ok() => new(true, "ok");
 }

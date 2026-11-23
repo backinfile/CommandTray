@@ -6,6 +6,7 @@ param(
     [string[]]$Target = @('windows','linux','relay','android'),
     [ValidateSet('Debug','Release')]
     [string]$AndroidVariant = 'Release',
+    [string]$AndroidDotnet = 'dotnet',
     [string]$InnoSetup,
     [switch]$RelayImage
 )
@@ -66,6 +67,13 @@ try {
             $output = Join-Path $dest "CommandTray-$Version-$rid.tar.gz"
             Write-TarGzip $build $output 'commandtray'
             $assets.Add($output)
+
+            $desktop = Join-Path $stage "desktop-$rid"
+            dotnet publish src/CommandTray.Linux.Desktop/CommandTray.Linux.Desktop.csproj -c Release -r $rid --self-contained true -p:PublishSingleFile=true -p:DebugType=None "-p:Version=$Version" -o $desktop
+            if (!(Test-Path -LiteralPath (Join-Path $desktop 'commandtray-desktop') -PathType Leaf)) { throw 'Missing Linux desktop executable.' }
+            $output = Join-Path $dest "CommandTray-$Version-$rid-desktop.tar.gz"
+            Write-TarGzip $desktop $output 'commandtray-desktop'
+            $assets.Add($output)
         }
         if ('relay' -in $Target) {
             $build = Join-Path $stage "relay-$rid"
@@ -103,13 +111,14 @@ try {
         $major,$minor,$patch = $Version.Split('.') | ForEach-Object { [int]$_ }
         $versionCode = [Math]::Max(1, $major * 1000000L + $minor * 1000L + $patch)
         if ($minor -gt 999 -or $patch -gt 999 -or $versionCode -gt 2100000000) { throw 'Android version exceeds the version-code range.' }
-        $gradle = if ($IsWindows) { Join-Path $root 'android/gradlew.bat' } else { Join-Path $root 'android/gradlew' }
-        & $gradle -p (Join-Path $root 'android') ":app:assemble$AndroidVariant" "-PcommandTrayVersionName=$Version" "-PcommandTrayVersionCode=$versionCode"
+        $androidBuild = Join-Path $stage 'android'
+        & $AndroidDotnet publish src/CommandTray.Android/CommandTray.Android.csproj -c $AndroidVariant `
+            "-p:ApplicationDisplayVersion=$Version" "-p:ApplicationVersion=$versionCode" -o $androidBuild
         $variant = $AndroidVariant.ToLowerInvariant()
-        $source = Join-Path $root "android/app/build/outputs/apk/$variant/app-$variant.apk"
-        if (!(Test-Path -LiteralPath $source -PathType Leaf)) { throw "Missing installable APK $source." }
+        $source = Get-ChildItem -LiteralPath $androidBuild -File -Filter '*-Signed.apk' | Select-Object -First 1
+        if (!$source) { throw "Missing signed APK in $androidBuild." }
         $output = Join-Path $dest "CommandTray-$Version-android-$variant.apk"
-        Copy-Item -LiteralPath $source -Destination $output -Force
+        Copy-Item -LiteralPath $source.FullName -Destination $output -Force
         $assets.Add($output)
     }
     Get-ChildItem -LiteralPath $dest -File | Where-Object Name -ne 'SHA256SUMS.txt' | Sort-Object Name | ForEach-Object {

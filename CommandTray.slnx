@@ -1,7 +1,10 @@
 <Solution>
   <Project Path="src/CommandTray/CommandTray.csproj" />
+  <Project Path="src/CommandTray.Core/CommandTray.Core.csproj" />
+  <Project Path="src/CommandTray.Ui/CommandTray.Ui.csproj" />
   <Project Path="tests/CommandTray.Tests/CommandTray.Tests.csproj" />
   <Project Path="src/CommandTray.Sync/CommandTray.Sync.csproj" />
   <Project Path="src/CommandTray.Linux/CommandTray.Linux.csproj" />
+  <Project Path="src/CommandTray.Linux.Desktop/CommandTray.Linux.Desktop.csproj" />
   <Project Path="src/CommandTray.Relay/CommandTray.Relay.csproj" />
 </Solution>

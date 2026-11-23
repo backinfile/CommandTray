@@ -1,3 +1,5 @@
+using CommandTray.Core;
+using ModelContextProtocol.Server;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -48,6 +50,11 @@ public sealed class McpServerHost : IAsyncDisposable
                 .WithTools(new CommandTrayMcpTools(api));
 
             if (desktop is not null) mcp.WithTools(new DesktopMcpTools(desktop));
+            if (desktop?.Backend is { } backend)
+            {
+                var shared = new SharedMcpDispatcher(backend);
+                mcp.WithTools(shared.Tools.Select(tool => (McpServerTool)new SharedDesktopMcpTool(shared, tool)));
+            }
             var application = builder.Build();
             application.Use(async (context, next) =>
             {

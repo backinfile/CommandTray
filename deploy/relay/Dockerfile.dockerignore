@@ -2,5 +2,7 @@
 !src/
 !src/CommandTray.Relay/
 !src/CommandTray.Relay/**
-src/CommandTray.Relay/bin/
-src/CommandTray.Relay/obj/
+!src/CommandTray.Sync/
+!src/CommandTray.Sync/**
+**/bin/
+**/obj/

@@ -1,0 +1,207 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="CommandTray.Ui.ClientApplication">
+  <Application.Resources>
+    <ResourceDictionary>
+      <ResourceDictionary.ThemeDictionaries>
+        <ResourceDictionary x:Key="Light">
+          <SolidColorBrush x:Key="TrayCanvas">#EDF1EF</SolidColorBrush>
+          <SolidColorBrush x:Key="TrayPaper">#FDFEFC</SolidColorBrush>
+          <SolidColorBrush x:Key="TrayChrome">#F6F8F5</SolidColorBrush>
+          <SolidColorBrush x:Key="TrayInk">#172823</SolidColorBrush>
+          <SolidColorBrush x:Key="TraySecondary">#4E625B</SolidColorBrush>
+          <SolidColorBrush x:Key="TrayLine">#D8E1DB</SolidColorBrush>
+          <SolidColorBrush x:Key="TrayAccent">#28624F</SolidColorBrush>
+          <SolidColorBrush x:Key="TrayAccentOn">#FFFFFF</SolidColorBrush>
+          <SolidColorBrush x:Key="TraySelection">#DCECE2</SolidColorBrush>
+          <SolidColorBrush x:Key="TrayHover">#E6EEE8</SolidColorBrush>
+          <SolidColorBrush x:Key="TrayMutedFill">#E9EFEB</SolidColorBrush>
+        </ResourceDictionary>
+        <ResourceDictionary x:Key="Dark">
+          <SolidColorBrush x:Key="TrayCanvas">#131F1B</SolidColorBrush>
+          <SolidColorBrush x:Key="TrayPaper">#1A2924</SolidColorBrush>
+          <SolidColorBrush x:Key="TrayChrome">#17231E</SolidColorBrush>
+          <SolidColorBrush x:Key="TrayInk">#EEF6EE</SolidColorBrush>
+          <SolidColorBrush x:Key="TraySecondary">#B1C7BC</SolidColorBrush>
+          <SolidColorBrush x:Key="TrayLine">#364A40</SolidColorBrush>
+          <SolidColorBrush x:Key="TrayAccent">#A5DCBA</SolidColorBrush>
+          <SolidColorBrush x:Key="TrayAccentOn">#10261A</SolidColorBrush>
+          <SolidColorBrush x:Key="TraySelection">#2B4A3A</SolidColorBrush>
+          <SolidColorBrush x:Key="TrayHover">#243C30</SolidColorBrush>
+          <SolidColorBrush x:Key="TrayMutedFill">#26392E</SolidColorBrush>
+        </ResourceDictionary>
+      </ResourceDictionary.ThemeDictionaries>
+      <SolidColorBrush x:Key="TerminalInk">#DCEBE0</SolidColorBrush>
+      <SolidColorBrush x:Key="TerminalPaper">#15231E</SolidColorBrush>
+      <SolidColorBrush x:Key="TerminalLine">#31473B</SolidColorBrush>
+    </ResourceDictionary>
+  </Application.Resources>
+  <Application.Styles>
+    <FluentTheme />
+    <Style Selector="UserControl.tray-root">
+      <Setter Property="Background" Value="{DynamicResource TrayPaper}" />
+      <Setter Property="Foreground" Value="{DynamicResource TrayInk}" />
+      <Setter Property="FontSize" Value="14" />
+    </Style>
+    <Style Selector="UserControl.tray-root.wide">
+      <Setter Property="Background" Value="{DynamicResource TrayCanvas}" />
+    </Style>
+    <Style Selector="Border.chrome">
+      <Setter Property="Background" Value="{DynamicResource TrayChrome}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource TrayLine}" />
+    </Style>
+    <Style Selector="Border.mark">
+      <Setter Property="Background" Value="{DynamicResource TrayAccent}" />
+      <Setter Property="CornerRadius" Value="7" />
+    </Style>
+    <Style Selector="Path.glyph">
+      <Setter Property="Stroke" Value="{DynamicResource TraySecondary}" />
+      <Setter Property="StrokeThickness" Value="1.65" />
+      <Setter Property="StrokeLineCap" Value="Round" />
+      <Setter Property="StrokeJoin" Value="Round" />
+    </Style>
+    <Style Selector="Path.glyph.mark">
+      <Setter Property="Stroke" Value="{DynamicResource TrayAccentOn}" />
+    </Style>
+    <Style Selector="Button.primary Path.glyph">
+      <Setter Property="Stroke" Value="{DynamicResource TrayAccentOn}" />
+    </Style>
+    <Style Selector="Button.selected Path.glyph">
+      <Setter Property="Stroke" Value="{DynamicResource TrayAccent}" />
+    </Style>
+    <Style Selector="TextBlock.brand">
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="FontSize" Value="14" />
+    </Style>
+    <Style Selector="Button.action">
+      <Setter Property="MinHeight" Value="34" />
+      <Setter Property="Padding" Value="9,3" />
+      <Setter Property="CornerRadius" Value="7" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="Foreground" Value="{DynamicResource TraySecondary}" />
+    </Style>
+    <Style Selector="Button.action:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource TrayHover}" />
+      <Setter Property="Foreground" Value="{DynamicResource TrayInk}" />
+    </Style>
+    <Style Selector="Button.action.icon-only">
+      <Setter Property="Width" Value="34" />
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="HorizontalContentAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Button.action.primary">
+      <Setter Property="Background" Value="{DynamicResource TrayAccent}" />
+      <Setter Property="Foreground" Value="{DynamicResource TrayAccentOn}" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+    <Style Selector="Button.action.primary:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource TrayAccent}" />
+      <Setter Property="Foreground" Value="{DynamicResource TrayAccentOn}" />
+      <Setter Property="Opacity" Value="0.88" />
+    </Style>
+    <Style Selector="Button.action.navigation">
+      <Setter Property="HorizontalAlignment" Value="Stretch" />
+      <Setter Property="HorizontalContentAlignment" Value="Left" />
+      <Setter Property="Padding" Value="10,4" />
+      <Setter Property="MinHeight" Value="38" />
+    </Style>
+    <Style Selector="Button.action.navigation.selected">
+      <Setter Property="Background" Value="{DynamicResource TraySelection}" />
+      <Setter Property="Foreground" Value="{DynamicResource TrayInk}" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+    <Style Selector="Button.action.space-tab">
+      <Setter Property="Foreground" Value="{DynamicResource TraySecondary}" />
+      <Setter Property="Margin" Value="0,0,3,0" />
+    </Style>
+    <Style Selector="Button.action.space-tab.selected">
+      <Setter Property="Background" Value="{DynamicResource TraySelection}" />
+      <Setter Property="Foreground" Value="{DynamicResource TrayInk}" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+    <Style Selector="UserControl.tray-root.compact Button.action">
+      <Setter Property="MinHeight" Value="44" />
+      <Setter Property="Padding" Value="7,3" />
+    </Style>
+    <Style Selector="UserControl.tray-root.compact Button.action.icon-only">
+      <Setter Property="Width" Value="44" />
+      <Setter Property="Padding" Value="0" />
+    </Style>
+    <Style Selector="UserControl.tray-root.compact Button.action.navigation">
+      <Setter Property="HorizontalContentAlignment" Value="Center" />
+      <Setter Property="Padding" Value="3,3" />
+      <Setter Property="FontSize" Value="12" />
+      <Setter Property="MinHeight" Value="46" />
+    </Style>
+    <Style Selector="TextBlock.muted">
+      <Setter Property="Foreground" Value="{DynamicResource TraySecondary}" />
+      <Setter Property="FontSize" Value="12" />
+    </Style>
+    <Style Selector="TextBlock.section">
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="FontSize" Value="15" />
+    </Style>
+    <Style Selector="TextBlock.toolbar-title">
+      <Setter Property="FontSize" Value="17" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+    <Style Selector="TextBlock.column-label">
+      <Setter Property="Foreground" Value="{DynamicResource TraySecondary}" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="FontSize" Value="11" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <Style Selector="SelectableTextBlock.reading">
+      <Setter Property="FontSize" Value="15" />
+      <Setter Property="LineHeight" Value="22" />
+    </Style>
+    <Style Selector="Border.divider">
+      <Setter Property="BorderBrush" Value="{DynamicResource TrayLine}" />
+      <Setter Property="BorderThickness" Value="0,0,0,1" />
+    </Style>
+    <Style Selector="Border.tile">
+      <Setter Property="Background" Value="{DynamicResource TrayPaper}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource TrayLine}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="9" />
+    </Style>
+    <Style Selector="Border.tile-heading">
+      <Setter Property="Background" Value="{DynamicResource TrayChrome}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource TrayLine}" />
+      <Setter Property="BorderThickness" Value="0,0,0,1" />
+    </Style>
+    <Style Selector="Border.table">
+      <Setter Property="Background" Value="{DynamicResource TrayPaper}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource TrayLine}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="9" />
+      <Setter Property="ClipToBounds" Value="True" />
+    </Style>
+    <Style Selector="Border.chip">
+      <Setter Property="Background" Value="{DynamicResource TrayMutedFill}" />
+      <Setter Property="CornerRadius" Value="5" />
+      <Setter Property="Padding" Value="7,3" />
+    </Style>
+    <Style Selector="Border.chip.live">
+      <Setter Property="Background" Value="{DynamicResource TraySelection}" />
+    </Style>
+    <Style Selector="TextBox.entry">
+      <Setter Property="Background" Value="{DynamicResource TrayPaper}" />
+      <Setter Property="Foreground" Value="{DynamicResource TrayInk}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource TrayLine}" />
+    </Style>
+    <Style Selector="TextBox.terminal">
+      <Setter Property="Background" Value="{DynamicResource TerminalPaper}" />
+      <Setter Property="Foreground" Value="{DynamicResource TerminalInk}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource TerminalLine}" />
+      <Setter Property="CornerRadius" Value="5" />
+      <Setter Property="FontSize" Value="13" />
+    </Style>
+    <Style Selector="Border.notice">
+      <Setter Property="Background" Value="{DynamicResource TraySelection}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource TrayLine}" />
+      <Setter Property="BorderThickness" Value="0,1,0,0" />
+    </Style>
+  </Application.Styles>
+</Application>

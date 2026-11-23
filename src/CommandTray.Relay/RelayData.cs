@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using CommandTray.Sync;
 
 namespace CommandTray.Relay;
 
@@ -29,7 +30,11 @@ internal static class RelayData
             state.Devices.Select(device => device.Id).Distinct(StringComparer.Ordinal).Count() != state.Devices.Length ||
             state.Files.Any(file => !IsId(file.Id) || !IsFileName(file.Name) || !IsFolder(file.Folder) ||
                                     file.Size is < 0 or > FileLimit || !IsHash(file.Sha256)) ||
-            state.Files.Select(file => file.Id).Distinct(StringComparer.Ordinal).Count() != state.Files.Length)
+            state.Files.Select(file => file.Id).Distinct(StringComparer.Ordinal).Count() != state.Files.Length ||
+            state.WorkspaceHistory is null || state.SyncReceipts is null ||
+            state.WorkspaceHistory.Any(entry => entry is null || entry.Revision < 1 ||
+                entry.Revision > state.Workspace.Revision || entry.Changes is null) ||
+            state.SyncReceipts.Any(entry => entry is null || !IsId(entry.DeviceId) || !IsId(entry.OperationId)))
             throw new InvalidDataException("The relay state does not conform to the version 1 format.");
     }
 
@@ -47,12 +52,18 @@ internal static class RelayData
     private static bool IsHash(string? hash) => hash is { Length: 64 } && hash.All(Uri.IsHexDigit);
 }
 
-internal sealed record RelayState(WorkspaceRecord Workspace, ClipboardRecord Clipboard, DeviceRecord[] Devices, StoredFile[] Files);
+internal sealed record RelayState(WorkspaceRecord Workspace, ClipboardRecord Clipboard, DeviceRecord[] Devices, StoredFile[] Files)
+{
+    public WorkspaceRevision[] WorkspaceHistory { get; init; } = [];
+    public SyncReceipt[] SyncReceipts { get; init; } = [];
+}
+internal sealed record SyncReceipt(string DeviceId, string OperationId);
 internal sealed record WorkspaceRecord(long Revision, JsonElement Document);
 internal sealed record ClipboardRecord(long Revision, string Text, string? DeviceId, DateTimeOffset UpdatedAt);
 internal sealed record DeviceRecord(string Id, string Name, string TokenHash, DateTimeOffset PairedAt);
 internal sealed record StoredFile(string Id, string Name, string Folder, long Size, string Sha256, DateTimeOffset ModifiedAt, string DeviceId);
 internal sealed record PairInput(string? DeviceName, string? PairingCode);
 internal sealed record WorkspaceInput(long BaseRevision, JsonElement Document);
+internal sealed record WorkspaceDeltaInput(long BaseRevision, string? OperationId, WorkspaceChange[]? Changes);
 internal sealed record ClipboardInput(string? Text);
 internal sealed record WorkspaceWrite(bool Accepted, WorkspaceRecord Value);

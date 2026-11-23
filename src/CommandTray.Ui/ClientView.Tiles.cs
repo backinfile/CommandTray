@@ -1,0 +1,459 @@
+using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
+using Avalonia;
+using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
+using Avalonia.Input;
+using Avalonia.Layout;
+using Avalonia.Media;
+using Avalonia.Platform.Storage;
+using CommandTray.Core;
+
+namespace CommandTray.Ui;
+
+public sealed partial class ClientView
+{
+    private Control LegacyPreview(string spaceId, JsonObject item)
+    {
+        string path = item.Object("data").Text("path", item.Object("data").Text("file"));
+        var body = new StackPanel { Spacing = 5 };
+        body.Children.Add(Action(L("选择预览文件", "Choose preview file"), async () =>
+        {
+            var files = await RequireTopLevel().StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions());
+            if (files.FirstOrDefault()?.TryGetLocalPath() is not string selected) return;
+            await SaveTilePath(spaceId, item, selected);
+        }));
+        if (path.Length > 0)
+        {
+            body.Children.Add(Muted(path));
+            body.AttachedToVisualTree += async (_, _) => await Act(async () =>
+                body.Children.Add(Body(TextOf(await Execute("local_preview", new() { ["path"] = path })))));
+        }
+        return new ScrollViewer { Content = body };
+    }
+
+    private Control LegacyService(string spaceId, JsonObject item, bool log)
+    {
+        var body = new StackPanel { Spacing = 4 };
+        body.AttachedToVisualTree += async (_, _) => await Act(async () =>
+        {
+            var commands = (await Execute("commands_list", []) as JsonArray ?? []).OfType<JsonObject>().ToArray();
+            var current = item.Object("data").Text("serviceId");
+            var list = new ComboBox
+            {
+                ItemsSource = commands.Select(command => command.Text("name")).ToArray(),
+                SelectedIndex = Array.FindIndex(commands, command => command.Text("id") == current),
+                HorizontalAlignment = HorizontalAlignment.Stretch
+            };
+            var detail = Muted("");
+            string Selected() => list.SelectedIndex >= 0 ? commands[list.SelectedIndex].Text("id") : "";
+            async Task Update(string operation)
+            {
+                string id = Selected();
+                if (id.Length == 0) return;
+                var reply = await Execute(operation, new() { ["id"] = id });
+                detail.Text = log ? TextOf(reply) : reply.Text("state", L("已提交", "Requested"));
+            }
+            body.Children.Add(list);
+            if (log) body.Children.Add(Action(L("刷新日志", "Refresh log"), () => Update("command_log")));
+            else body.Children.Add(Row(
+                Action(L("启动", "Start"), () => Update("command_start")),
+                Action(L("停止", "Stop"), () => Update("command_stop")),
+                Action(L("重启", "Restart"), () => Update("command_restart"))));
+            body.Children.Add(detail);
+            if (log) await Update("command_log");
+            list.SelectionChanged += async (_, _) => await Act(async () =>
+            {
+                string id = Selected();
+                if (id.Length == 0) return;
+                var copy = (JsonObject)item.DeepClone();
+                EnsureData(copy)["serviceId"] = id;
+                await Execute("item_save", new() { ["spaceId"] = spaceId, ["item"] = copy });
+                if (log) await Update("command_log");
+            });
+        });
+        return new ScrollViewer { Content = body };
+    }
+
+    private Control LegacyCommand(string spaceId, JsonObject item, Canvas? _)
+    {
+        var body = new StackPanel { Spacing = 4 };
+        var command = new TextBox { Text = item.Object("data").Text("command"), AcceptsReturn = true, MinHeight = 52 };
+        body.Children.Add(command);
+        body.Children.Add(Row(
+            Action(L("保存", "Save"), async () =>
+            {
+                var next = (JsonObject)item.DeepClone();
+                EnsureData(next)["command"] = command.Text ?? "";
+                await Execute("item_save", new() { ["spaceId"] = spaceId, ["item"] = next });
+                Report(L("已保存", "Saved"));
+            }),
+            Action(L("发送到终端", "Send to terminal"), async () =>
+            {
+                var available = _terminals.Where(terminal => terminal.Running).ToArray();
+                if (available.Length == 0) throw new InvalidOperationException(L("请先打开一个终端。", "Open a terminal first."));
+                var document = await Execute("workspace_read", []);
+                var active = document.Array("spaces").OfType<JsonObject>().FirstOrDefault(space => space.Text("id") == spaceId);
+                string Name(TerminalTile terminal) => active.Array("items").OfType<JsonObject>()
+                    .FirstOrDefault(candidate => candidate.Text("id") == terminal.Id).Text("title", terminal.Id);
+                var choose = Menu(L("选择终端", "Choose terminal"), available.Select(terminal =>
+                    (Name(terminal), (Func<Task>)(async () => await Execute("terminal_write", new()
+                    { ["itemId"] = terminal.Id, ["text"] = command.Text + "\r" })))).ToArray());
+                body.Children.Add(choose);
+                choose.Flyout?.ShowAt(choose);
+            })));
+        return body;
+    }
+
+    private Control PageTile(string page, string label)
+    {
+        var body = new StackPanel { Spacing = 4 };
+        var summary = Muted("");
+        body.Children.Add(summary);
+        body.Children.Add(Action(label, () => { Navigate(page); return Task.CompletedTask; }));
+        body.AttachedToVisualTree += async (_, _) => await Act(async () =>
+        {
+            if (page == "capture")
+            {
+                summary.Text = string.Join(Environment.NewLine, (await Execute("capture_list", []) as JsonArray ?? [])
+                    .Take(5).Select(entry => Path.GetFileName(TextOf(entry, "path"))));
+                return;
+            }
+            if (!(await Execute("relay_status", [])).Flag("paired")) return;
+            if (page == "clipboard") summary.Text = (await Execute("clipboard_read", [])).Text("text");
+            else summary.Text = string.Join(Environment.NewLine, (await Execute("files_list", []) as JsonArray ?? [])
+                .Take(5).Select(file => file.Text("name")));
+        });
+        return new ScrollViewer { Content = body };
+    }
+    private Control FilesComponent(string spaceId, JsonObject item)
+    {
+        var contents = new StackPanel { Spacing = 4 };
+        string path = item.Object("data").Text("path");
+
+        async Task Show(string folder)
+        {
+            var result = await Execute("local_list", new() { ["path"] = folder });
+            contents.Children.Clear();
+            path = result.Text("path", folder);
+            var quick = Menu("⋯",
+                (L("选择目录", "Choose folder"), async () =>
+                {
+                    var folders = await RequireTopLevel().StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions());
+                    if (folders.FirstOrDefault()?.TryGetLocalPath() is string selected)
+                        await SaveTilePath(spaceId, item, selected);
+                }),
+                (L("输入路径", "Enter path"), () => Form(L("目录", "Folder"), values =>
+                    SaveTilePath(spaceId, item, values.RequireText("path")), new Field("path", L("路径", "Path"), path))),
+                (L("新建目录", "New folder"), () => Form(L("新建目录", "New folder"), async values =>
+                {
+                    var name = values.RequireText("name");
+                    if (name != Path.GetFileName(name) || name is "." or "..") throw new ArgumentException(L("请输入目录名。", "Enter a folder name."));
+                    await Change("local_mkdir", new() { ["path"] = Path.Combine(path, name) });
+                }, new Field("name", L("名称", "Name")))));
+            var location = Muted(path);
+            location.TextWrapping = TextWrapping.NoWrap;
+            location.TextTrimming = TextTrimming.CharacterEllipsis;
+            var navigation = Row();
+            if (Directory.GetParent(path)?.FullName is string parent)
+                navigation.Children.Add(IconButton("up", L("上一级", "Parent folder"), () => SaveTilePath(spaceId, item, parent)));
+            navigation.Children.Add(quick);
+            contents.Children.Add(TitleRow(location, navigation));
+            foreach (var entry in result.Array("entries").OfType<JsonObject>())
+            {
+                var leaf = entry.Text("path");
+                var name = entry.Text("name");
+                var link = Action(name, entry.Flag("isDirectory")
+                    ? () => SaveTilePath(spaceId, item, leaf) : () => PreviewAsync(leaf), glyph: entry.Flag("isDirectory") ? "files" : "file");
+                link.HorizontalAlignment = HorizontalAlignment.Left;
+                var menu = Menu("⋯", (L("复制到…", "Copy to…"), () => Form(name, values => Change("local_copy",
+                    new() { ["source"] = leaf, ["destination"] = values.RequireText("path") }),
+                    new Field("path", L("目标路径", "Destination")))));
+                contents.Children.Add(TitleRow(link, menu));
+            }
+        }
+
+        contents.AttachedToVisualTree += async (_, _) =>
+        {
+            try { await Show(path); }
+            catch (Exception error)
+            {
+                contents.Children.Clear();
+                contents.Children.Add(Muted(error.Message));
+                contents.Children.Add(Action(L("选择目录", "Choose folder"), () => Form(L("目录", "Folder"),
+                    values => SaveTilePath(spaceId, item, values.RequireText("path")), new Field("path", L("路径", "Path"), path))));
+            }
+        };
+        return new ScrollViewer { Content = contents, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
+    }
+
+    private Task SaveTilePath(string spaceId, JsonObject item, string path)
+    {
+        var clone = (JsonObject)item.DeepClone();
+        EnsureData(clone)["path"] = path;
+        return SaveItem(spaceId, clone);
+    }
+
+    private async Task PreviewAsync(string path)
+    {
+        var preview = await Execute("local_preview", new() { ["path"] = path });
+        _contents.Children.Clear();
+        Header(Path.GetFileName(path), Action(L("返回", "Back"), LoadAsync));
+        _contents.Children.Add(Body(TextOf(preview)));
+    }
+
+    private Control TerminalComponent(JsonObject item)
+    {
+        string id = item.Text("id");
+        var data = item.Object("data");
+        var terminal = new TerminalTile(id, new TextBox
+        {
+            Text = data.Text("history"),
+            IsReadOnly = true,
+            AcceptsReturn = true,
+            TextWrapping = TextWrapping.NoWrap,
+            FontFamily = new FontFamily("monospace")
+        });
+        terminal.Output.Classes.Add("terminal");
+        ScrollViewer.SetHorizontalScrollBarVisibility(terminal.Output, ScrollBarVisibility.Auto);
+        ScrollViewer.SetVerticalScrollBarVisibility(terminal.Output, ScrollBarVisibility.Auto);
+        _terminals.Add(terminal);
+        var input = new TextBox { PlaceholderText = L("输入命令后按 Enter", "Type and press Enter") };
+        input.Classes.Add("entry");
+
+        async Task Start(string? passphrase = null)
+        {
+            var args = new JsonObject
+            {
+                ["itemId"] = id,
+                ["shell"] = data.Text("shell", OperatingSystem.IsWindows() ? "cmd" : "/bin/sh"),
+                ["workingDirectory"] = data.Text("workingDirectory", data.Text("directory")),
+                ["hostId"] = data.Text("hostId")
+            };
+            if (passphrase is not null) args["passphrase"] = passphrase;
+            var opened = await Execute("terminal_open", args);
+            if (opened.Text("status") == "cancelled") return;
+            terminal.Running = true;
+            await ResizeTerminalAsync(terminal);
+            input.Focus();
+        }
+
+        async Task Send()
+        {
+            if (!terminal.Running) await Start();
+            if (input.Text is not { Length: > 0 } text) return;
+            await Execute("terminal_write", new() { ["itemId"] = id, ["text"] = text + "\r" });
+            input.Clear();
+        }
+
+        var controls = Row(
+            Action(L("打开", "Open"), () => data.Text("hostId").Length == 0 ? Start()
+                : Form(L("SSH 连接", "SSH connection"), async values =>
+                {
+                    await Start(values.Text("passphrase"));
+                    await LoadAsync();
+                }, new Field("passphrase", L("私钥口令（可选）", "Key passphrase (optional)"), Secret: true))),
+            Action(L("关闭", "Close"), async () =>
+            {
+                await Execute("terminal_close", new() { ["itemId"] = id });
+                terminal.Running = false;
+            }));
+        if (data.Text("hostId").Length == 0) controls.Children.Add(Action(L("中断", "Interrupt"), async () =>
+            await Execute("terminal_write", new() { ["itemId"] = id, ["text"] = "\u0003" })));
+
+        input.KeyDown += async (_, e) =>
+        {
+            if (e.Key != Key.Enter) return;
+            e.Handled = true;
+            await Act(Send);
+        };
+        var layout = new Grid { RowDefinitions = new RowDefinitions("Auto,*,Auto") };
+        layout.Children.Add(controls);
+        Grid.SetRow(terminal.Output, 1);
+        layout.Children.Add(terminal.Output);
+        var command = TitleRow(input, Action(L("发送", "Send"), Send));
+        Grid.SetRow(command, 2);
+        layout.Children.Add(command);
+        terminal.Output.SizeChanged += async (_, _) =>
+        {
+            if (terminal.Running) await Act(() => ResizeTerminalAsync(terminal));
+        };
+        return layout;
+    }
+
+    private sealed class TerminalTile(string id, TextBox output)
+    {
+        public string Id { get; } = id;
+        public TextBox Output { get; } = output;
+        public bool Running { get; set; }
+        public bool Reading { get; set; }
+        public bool Checked { get; set; }
+        public (int Columns, int Rows) Size { get; set; }
+    }
+
+    private static readonly Regex AnsiSequence = new(
+        "\\x1B(?:\\[[0-?]*[ -/]*[@-~]|\\][^\\x07]*(?:\\x07|\\x1B\\\\))",
+        RegexOptions.Compiled, TimeSpan.FromMilliseconds(100));
+
+    private async Task RefreshTerminalsAsync()
+    {
+        foreach (var terminal in _terminals.ToArray())
+        {
+            if (terminal.Reading || terminal.Checked && !terminal.Running) continue;
+            terminal.Reading = true;
+            try
+            {
+                var value = await Execute("terminal_read", new() { ["itemId"] = terminal.Id });
+                var output = AnsiSequence.Replace(TextOf(value), "");
+                if (output.Length > 0 && _terminals.Contains(terminal) && terminal.Output.Text != output)
+                {
+                    terminal.Output.Text = output;
+                    terminal.Output.CaretIndex = output.Length;
+                    terminal.Running = value.Flag("active", true);
+                }
+                if (value is JsonObject state && state.ContainsKey("active")) terminal.Running = state.Flag("active");
+            }
+            catch { }
+            finally { terminal.Reading = false; terminal.Checked = true; }
+        }
+    }
+
+    private async Task ResizeTerminalAsync(TerminalTile terminal)
+    {
+        var bounds = terminal.Output.Bounds;
+        if (bounds.Width < 10 || bounds.Height < 10) return;
+        var size = (Columns: Math.Clamp((int)(bounds.Width / 8), 20, 360),
+            Rows: Math.Clamp((int)(bounds.Height / 17), 4, 180));
+        if (terminal.Size == size) return;
+        terminal.Size = size;
+        await Execute("terminal_resize", new()
+        {
+            ["itemId"] = terminal.Id, ["columns"] = size.Columns, ["rows"] = size.Rows
+        });
+    }
+
+    private Control BoardComponent(string spaceId, JsonObject item, bool editable)
+    {
+        var board = new DrawingBoard(item.Object("data").Array("strokes"), editable);
+        if (!editable) return board;
+        var panel = new Grid { RowDefinitions = new RowDefinitions("*,Auto") };
+        panel.Children.Add(board);
+        async Task Save()
+        {
+            var clone = (JsonObject)item.DeepClone();
+            EnsureData(clone)["strokes"] = board.Strokes.DeepClone();
+            await Execute("item_save", new() { ["spaceId"] = spaceId, ["item"] = clone });
+        }
+        board.Edited += async () => await Act(Save);
+        var undo = Action(L("撤销笔画", "Undo stroke"), async () =>
+        {
+            if (board.Strokes.Count == 0) return;
+            board.Strokes.RemoveAt(board.Strokes.Count - 1);
+            board.InvalidateVisual();
+            await Save();
+        });
+        Grid.SetRow(undo, 1);
+        panel.Children.Add(undo);
+        return panel;
+    }
+
+    private sealed class DrawingBoard : Control
+    {
+        private const double SheetWidth = 640;
+        private const double SheetHeight = 300;
+        private readonly bool _editable;
+        private JsonArray? _points;
+        private (double Scale, double Left, double Top) _sheet;
+
+        public DrawingBoard(JsonArray strokes, bool editable)
+        {
+            Strokes = (JsonArray)strokes.DeepClone();
+            _editable = editable;
+            MinHeight = 114;
+            ClipToBounds = true;
+            if (editable) Cursor = new Cursor(StandardCursorType.Cross);
+        }
+
+        public JsonArray Strokes { get; }
+        public event Func<Task>? Edited;
+
+        public override void Render(DrawingContext context)
+        {
+            base.Render(context);
+            context.FillRectangle(Brushes.White, new Rect(Bounds.Size));
+            double minX = _editable ? 0 : double.PositiveInfinity;
+            double minY = _editable ? 0 : double.PositiveInfinity;
+            double maxX = _editable ? SheetWidth : double.NegativeInfinity;
+            double maxY = _editable ? SheetHeight : double.NegativeInfinity;
+            foreach (var stroke in Strokes.OfType<JsonObject>())
+                foreach (var point in stroke.Array("points").OfType<JsonObject>())
+                {
+                    double x = Coordinate(point, "x"), y = Coordinate(point, "y");
+                    minX = Math.Min(minX, x);
+                    minY = Math.Min(minY, y);
+                    maxX = Math.Max(maxX, x);
+                    maxY = Math.Max(maxY, y);
+                }
+            if (!double.IsFinite(minX) || Bounds.Width <= 20 || Bounds.Height <= 20) return;
+            var width = Math.Max(1, maxX - minX);
+            var height = Math.Max(1, maxY - minY);
+            var scale = Math.Min(4, Math.Min((Bounds.Width - 20) / width, (Bounds.Height - 20) / height));
+            _sheet = (scale, (Bounds.Width - width * scale) / 2 - minX * scale, (Bounds.Height - height * scale) / 2 - minY * scale);
+            foreach (var stroke in Strokes.OfType<JsonObject>())
+            {
+                var color = stroke.Flag("erase") ? Colors.White
+                    : Color.TryParse(stroke.Text("color"), out var parsed) ? parsed : Color.Parse("#315545");
+                var pen = new Pen(new SolidColorBrush(color), Math.Max(stroke.Flag("erase") ? 4 : 1.5, scale * 2.5),
+                    lineCap: PenLineCap.Round);
+                Point? previous = null;
+                foreach (var point in stroke.Array("points").OfType<JsonObject>())
+                {
+                    var position = new Point(_sheet.Left + Coordinate(point, "x") * scale, _sheet.Top + Coordinate(point, "y") * scale);
+                    if (previous is Point start) context.DrawLine(pen, start, position);
+                    else context.DrawEllipse(pen.Brush, null, new Rect(position.X - .8, position.Y - .8, 1.6, 1.6));
+                    previous = position;
+                }
+            }
+        }
+
+        protected override void OnPointerPressed(PointerPressedEventArgs e)
+        {
+            base.OnPointerPressed(e);
+            if (!_editable || _sheet.Scale <= 0 || !e.GetCurrentPoint(this).Properties.IsLeftButtonPressed) return;
+            _points = new JsonArray();
+            Strokes.Add(new JsonObject { ["color"] = "#315545", ["points"] = _points });
+            AddPoint(e.GetPosition(this));
+            e.Pointer.Capture(this);
+            e.Handled = true;
+        }
+
+        protected override void OnPointerMoved(PointerEventArgs e)
+        {
+            base.OnPointerMoved(e);
+            if (_points is not null) AddPoint(e.GetPosition(this));
+        }
+
+        protected override async void OnPointerReleased(PointerReleasedEventArgs e)
+        {
+            base.OnPointerReleased(e);
+            if (_points is null) return;
+            AddPoint(e.GetPosition(this));
+            _points = null;
+            e.Pointer.Capture(null);
+            if (Edited is not null) await Edited.Invoke();
+        }
+
+        private void AddPoint(Point point)
+        {
+            _points!.Add(new JsonObject
+            {
+                ["x"] = Math.Clamp((point.X - _sheet.Left) / _sheet.Scale, 0, 100000),
+                ["y"] = Math.Clamp((point.Y - _sheet.Top) / _sheet.Scale, 0, 100000)
+            });
+            InvalidateVisual();
+        }
+
+        private static double Coordinate(JsonObject point, string axis) =>
+            point[axis] is JsonValue value && value.TryGetValue<double>(out var coordinate) && double.IsFinite(coordinate) ? coordinate : 0;
+    }
+}

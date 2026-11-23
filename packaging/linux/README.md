@@ -10,6 +10,8 @@ systemctl --user enable --now commandtray
 
 For a foreground daemon, run `commandtray daemon` in one shell and issue commands from another. Persistent configuration uses `$XDG_STATE_HOME/commandtray` or `~/.local/state/commandtray`. Set `COMMANDTRAY_HOME` to a private dedicated directory to isolate a client and daemon.
 
+For the optional desktop UI, extract the archive ending in `-desktop.tar.gz` and run `./commandtray-desktop` in a graphical session. On Debian or Ubuntu, the Avalonia desktop entry uses `libx11-6`, `libice6`, `libsm6`, and `libfontconfig1`. The CLI and desktop share the daemon and local state. [Avalonia Linux requirements](https://docs.avaloniaui.net/docs/deployment/linux)
+
 ```sh
 commandtray service create dev --cwd "$PWD" -- /usr/bin/python3 -m http.server 8080
 commandtray service start dev

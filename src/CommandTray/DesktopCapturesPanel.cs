@@ -18,7 +18,12 @@ internal sealed class DesktopCapturesPanel : UserControl
             Async("Record", "录屏", async () => { await desktop.Media.StartRecordingAsync(24); desktop.Notify(Localizer.T("Recording started", "开始录屏")); }),
             Async("Stop", "停止", async () => { await desktop.Media.StopRecordingAsync(); RefreshCaptures(); desktop.Notify(Localizer.T("Recording saved", "录屏已保存")); }),
             Button("Pin", "贴图", () => Safely(() => { if (Selected() is { } path) ShowPinned(path); })),
-            Button("Annotate", "标注", () => Safely(() => { if (Selected() is { } path) Annotate(path); })),
+            Button("Annotate", "标注", () => Safely(() =>
+            {
+                if (Selected() is not { } path) return;
+                Annotate(path, this);
+                RefreshCaptures();
+            })),
             Async("OCR", "文字识别", async () =>
             {
                 if (Selected() is not { } path) return;
@@ -48,15 +53,20 @@ internal sealed class DesktopCapturesPanel : UserControl
         Rectangle? rectangle = null;
         if (region)
         {
-            using var selector = new CaptureSelectionForm();
-            if (selector.ShowDialog(this) != DialogResult.OK) return;
-            rectangle = selector.Selection;
+            rectangle = SelectRegion(this);
+            if (rectangle is null) return;
         }
         var file = _desktop.Media.Screenshot(rectangle);
         using var image = Image.FromFile(file);
         Clipboard.SetImage(image);
         RefreshCaptures();
         _desktop.Notify(Localizer.T("Screenshot saved and copied", "截图已保存并复制"));
+    }
+
+    internal static Rectangle? SelectRegion(IWin32Window? owner)
+    {
+        using var selector = new CaptureSelectionForm();
+        return selector.ShowDialog(owner) == DialogResult.OK ? selector.Selection : null;
     }
 
     private string? Selected() => (_files.SelectedItem as FileInfo)?.FullName;
@@ -75,7 +85,7 @@ internal sealed class DesktopCapturesPanel : UserControl
         form.Show();
     }
 
-    private void Annotate(string path)
+    internal static string? Annotate(string path, IWin32Window? owner)
     {
         if (!path.EndsWith(".png", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("Select a screenshot.");
@@ -97,17 +107,23 @@ internal sealed class DesktopCapturesPanel : UserControl
             previous = current;
             picture.Invalidate();
         };
+        string? output = null;
         var save = Button("Save as…", "另存…", () =>
         {
             using var picker = new SaveFileDialog { Filter = "PNG (*.png)|*.png", FileName = Path.GetFileNameWithoutExtension(path) + "-annotated.png",
                 InitialDirectory = Path.GetDirectoryName(path) };
             if (picker.ShowDialog(form) != DialogResult.OK) return;
-            try { edited.Save(picker.FileName, System.Drawing.Imaging.ImageFormat.Png); form.Close(); }
+            try
+            {
+                edited.Save(picker.FileName, System.Drawing.Imaging.ImageFormat.Png);
+                output = picker.FileName;
+                form.Close();
+            }
             catch (Exception ex) { Error(form, ex); }
         });
         form.Controls.Add(picture); form.Controls.Add(Toolbar(save));
-        form.ShowDialog(this);
-        RefreshCaptures();
+        form.ShowDialog(owner);
+        return output;
     }
 
     private Button Async(string en, string zh, Func<Task> action)

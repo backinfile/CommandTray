@@ -1,7 +1,9 @@
 using System.Buffers;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Security.Cryptography;
+using CommandTray.Sync;
 
 namespace CommandTray.Relay;
 
@@ -79,11 +81,67 @@ internal sealed class RelayStore : IDisposable
                 return new(JsonElement.DeepEquals(state.Workspace.Document, input.Document), state.Workspace);
 
             var record = new WorkspaceRecord(state.Workspace.Revision + 1, input.Document.Clone());
-            await CommitAsync(state with { Workspace = record }, cancellation);
+            await CommitAsync(AdvanceWorkspace(state, record), cancellation);
             return new(true, record);
         }
         finally { _writes.Release(); }
     }
+
+    public object WorkspaceChanges(long after)
+    {
+        var state = State;
+        var history = state.WorkspaceHistory.Where(entry => entry.Revision > after).ToArray();
+        if (after == state.Workspace.Revision || after < state.Workspace.Revision &&
+            history.LongLength == state.Workspace.Revision - after &&
+            history.Select((entry, index) => entry.Revision == after + index + 1).All(value => value))
+            return new { revision = state.Workspace.Revision, changes = history };
+        return state.Workspace;
+    }
+
+    public async Task<WorkspaceWrite> ApplyWorkspaceAsync(WorkspaceDeltaInput input, string deviceId, CancellationToken cancellation)
+    {
+        await _writes.WaitAsync(cancellation);
+        try
+        {
+            var state = State;
+            var receipt = new SyncReceipt(deviceId, input.OperationId!);
+            if (state.SyncReceipts.Contains(receipt)) return new(true, state.Workspace);
+            var snapshot = ReadDocument(state.Workspace.Document);
+            if (input.BaseRevision > state.Workspace.Revision ||
+                !WorkspaceDelta.TryApply(snapshot, input.Changes!, out var merged)) return new(false, state.Workspace);
+            var document = JsonSerializer.SerializeToElement(merged, RelayData.Json);
+            if (!RelayData.IsWorkspace(document) || Encoding.UTF8.GetByteCount(document.GetRawText()) > RelayData.WorkspaceLimit)
+                throw new InvalidDataException("The workspace changes do not produce a valid workspace.");
+            var workspace = state.Workspace;
+            if (!JsonNode.DeepEquals(snapshot, merged))
+            {
+                workspace = new(workspace.Revision + 1, document);
+                state = AdvanceWorkspace(state, workspace);
+            }
+            state = state with { SyncReceipts = [.. state.SyncReceipts.TakeLast(511), receipt] };
+            await CommitAsync(state, cancellation);
+            return new(true, workspace);
+        }
+        finally { _writes.Release(); }
+    }
+
+    private static RelayState AdvanceWorkspace(RelayState state, WorkspaceRecord workspace)
+    {
+        var changes = WorkspaceDelta.Between(ReadDocument(state.Workspace.Document), ReadDocument(workspace.Document));
+        var history = new List<WorkspaceRevision>();
+        int bytes = 0;
+        foreach (var revision in state.WorkspaceHistory.Append(new(workspace.Revision, changes)).Reverse().Take(32))
+        {
+            int entryBytes = JsonSerializer.SerializeToUtf8Bytes(revision, RelayData.Json).Length;
+            if (entryBytes > 4 * 1024 * 1024 - bytes || revision.Changes.Any(change => change.Path.Length > 32)) break;
+            bytes += entryBytes;
+            history.Add(revision);
+        }
+        history.Reverse();
+        return state with { Workspace = workspace, WorkspaceHistory = [.. history] };
+    }
+
+    private static JsonObject ReadDocument(JsonElement element) => JsonNode.Parse(element.GetRawText())!.AsObject();
 
     public async Task<ClipboardRecord> PutClipboardAsync(string text, string deviceId, CancellationToken cancellation)
     {
