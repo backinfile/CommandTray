@@ -78,6 +78,7 @@ public sealed partial class ClientView
             Child = body
         };
         panel.Classes.Add("palette");
+        KeyboardNavigation.SetTabNavigation(panel, KeyboardNavigationMode.Cycle);
         _paletteOverlay.Child = panel;
         _paletteOverlay.IsVisible = true;
         query.Focus();

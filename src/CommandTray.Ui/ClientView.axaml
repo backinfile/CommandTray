@@ -5,7 +5,9 @@
   <Grid x:Name="Shell" ColumnDefinitions="Auto,*" RowDefinitions="Auto,*,Auto,Auto"
         Background="{DynamicResource TrayCanvas}">
     <Border Grid.Column="1" Classes="chrome topbar" BorderThickness="0,0,0,1">
-      <Grid x:Name="Toolbar" ColumnDefinitions="*,Auto" MinHeight="46" Margin="14,2" />
+      <ThemeVariantScope RequestedThemeVariant="Dark">
+        <Grid x:Name="Toolbar" ColumnDefinitions="*,Auto" MinHeight="46" Margin="14,2" />
+      </ThemeVariantScope>
     </Border>
     <Border x:Name="WorkspaceGrid" Grid.Column="1" Grid.Row="1" IsHitTestVisible="False" IsVisible="False"
             Background="{StaticResource TrayDotGrid}" />

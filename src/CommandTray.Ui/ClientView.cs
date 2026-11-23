@@ -128,6 +128,7 @@ public sealed partial class ClientView : UserControl
         _compact = compact;
         Classes.Set("compact", compact);
         Classes.Set("wide", !compact);
+        _shell.Classes.Set("compact", compact);
         Grid.SetColumn(_navBorder, _compact ? 1 : 0);
         Grid.SetRow(_navBorder, _compact ? 3 : 0);
         Grid.SetRowSpan(_navBorder, _compact ? 1 : 3);
