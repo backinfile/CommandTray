@@ -2,8 +2,11 @@ name: Release CommandTray Suite
 
 on:
   push:
-    tags:
-      - "suite-v*.*.*"
+    branches:
+      - codex/suite/release-recovery/1.0.0
+
+env:
+  RELEASE_TAG: suite-v1.0.0
 
 permissions:
   contents: read
@@ -30,13 +33,14 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          ref: ${{ env.RELEASE_TAG }}
 
       - name: Validate immutable release source
         id: version
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $tag = $env:GITHUB_REF_NAME
+          $tag = $env:RELEASE_TAG
           $prefix = 'suite-v'
           $pattern = '^suite-v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$'
           if ($tag -notmatch $pattern) {
@@ -100,6 +104,8 @@ jobs:
       VERSION: ${{ needs.windows.outputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.RELEASE_TAG }}
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           dotnet-version: "10.0.x"
@@ -124,6 +130,8 @@ jobs:
       VERSION: ${{ needs.windows.outputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.RELEASE_TAG }}
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           dotnet-version: "10.0.203"
@@ -171,6 +179,8 @@ jobs:
       VERSION: ${{ needs.windows.outputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.RELEASE_TAG }}
       - name: Download packages
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
@@ -214,7 +224,8 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
-          name: CommandTray Suite ${{ github.ref_name }}
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: CommandTray Suite ${{ env.RELEASE_TAG }}
           generate_release_notes: true
           previous_tag: ${{ needs.windows.outputs.previous_tag }}
           body_path: release-body.md
