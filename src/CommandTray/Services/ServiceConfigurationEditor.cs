@@ -37,6 +37,7 @@ internal static class ServiceConfigurationEditor
             {
                 Language = configuration.Language, RunAtLogin = configuration.RunAtLogin,
                 McpEnabled = configuration.McpEnabled, Services = services,
+                ClipboardAutoSync = configuration.ClipboardAutoSync,
                 SidebarWidth = configuration.SidebarWidth, SidebarCollapsed = configuration.SidebarCollapsed
             };
             // Previously live definitions changed before validation or disk

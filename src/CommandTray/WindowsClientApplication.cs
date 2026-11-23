@@ -1,4 +1,5 @@
 using Avalonia.Controls.ApplicationLifetimes;
+using Avalonia.Styling;
 using CommandTray.Models;
 using CommandTray.Services;
 using CommandTray.Ui;
@@ -22,6 +23,12 @@ internal sealed class WindowsAppStartup(
 
 internal sealed class WindowsClientApplication(WindowsAppStartup startup) : ClientApplication
 {
+    public override void Initialize()
+    {
+        base.Initialize();
+        RequestedThemeVariant = ThemeVariant.Dark;
+    }
+
     public override void OnFrameworkInitializationCompleted()
     {
         base.OnFrameworkInitializationCompleted();

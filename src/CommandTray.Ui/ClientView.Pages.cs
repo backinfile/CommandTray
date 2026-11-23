@@ -3,6 +3,7 @@ using System.Text.Json.Nodes;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Layout;
+using Avalonia.Media;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using CommandTray.Core;
@@ -13,10 +14,10 @@ public sealed partial class ClientView
 {
     private async Task RenderFilesAsync(CancellationToken token)
     {
-        var relay = await Execute("relay_status", [], token);
+        Header(L("共享文件", "Shared files"));
+        var relay = await ReadPageContent("relay_status", token);
         if (!relay.Flag("paired"))
         {
-            Header(L("共享文件", "Shared files"));
             PairPrompt(relay);
             return;
         }
@@ -65,6 +66,7 @@ public sealed partial class ClientView
         var storage = RequireTopLevel().StorageProvider;
         var inputs = await storage.OpenFilePickerAsync(new FilePickerOpenOptions { AllowMultiple = true });
         if (inputs.Count == 0) return;
+        Report(L("正在上传…", "Uploading…"));
         foreach (var input in inputs)
         {
             var path = TemporaryFile(input.Name);
@@ -89,6 +91,7 @@ public sealed partial class ClientView
         var destination = await RequireTopLevel().StorageProvider.SaveFilePickerAsync(
             new FilePickerSaveOptions { SuggestedFileName = name, ShowOverwritePrompt = true });
         if (destination is null) return;
+        Report(L("正在下载…", "Downloading…"));
         var path = TemporaryFile(name);
         try
         {
@@ -138,10 +141,10 @@ public sealed partial class ClientView
 
     private async Task RenderClipboardAsync(CancellationToken token)
     {
-        var relay = await Execute("relay_status", [], token);
+        Header(L("剪贴板", "Clipboard"));
+        var relay = await ReadPageContent("relay_status", token);
         if (!relay.Flag("paired"))
         {
-            Header(L("剪贴板", "Clipboard"));
             PairPrompt(relay);
         }
         else
@@ -152,22 +155,34 @@ public sealed partial class ClientView
                 {
                     var local = TextOf(await Execute("clipboard_local_read", []));
                     if (local.Length == 0) throw new InvalidOperationException(L("剪贴板没有文本。", "The clipboard has no text."));
+                    Report(L("正在发送…", "Sending…"));
                     await Change("clipboard_send", new() { ["text"] = local });
                 }));
-            var clip = await ReadPageContent("clipboard_read", token);
-            string text = clip.Text("text");
-            var preview = new StackPanel { Spacing = 6, Margin = new Thickness(_compact ? 0 : 12, 6) };
-            preview.Children.Add(text.Length > 0 ? Body(text) : Muted(L("暂无同步文本", "No synchronized text")));
-            if (DateTimeOffset.TryParse(clip.Text("updatedAt"), CultureInfo.InvariantCulture, out var updated) &&
-                updated > DateTimeOffset.UnixEpoch)
-                preview.Children.Add(Muted(updated.ToLocalTime().ToString("g")));
-            if (text.Length > 0)
-                preview.Children.Add(PrimaryAction(L("复制到本机", "Copy to this device"), async () =>
+            var entries = await ReadPageContent("clipboard_relay_history", token) as JsonArray ?? [];
+            _contents.Children.Add(Heading(L("同步历史", "Sync history")));
+            if (entries.Count == 0) _contents.Children.Add(Muted(L("暂无同步文本", "No synchronized text")));
+            foreach (var entry in entries.OfType<JsonObject>())
+            {
+                var text = entry.Text("text");
+                var source = entry.Text("deviceName", L("未知设备", "Unknown device"));
+                if (DateTimeOffset.TryParse(entry.Text("updatedAt"), CultureInfo.InvariantCulture, out var updated) &&
+                    updated > DateTimeOffset.UnixEpoch)
+                    source += " · " + updated.ToLocalTime().ToString("g");
+
+                var preview = text.Length > 240 ? text[..(char.IsHighSurrogate(text[239]) ? 239 : 240)] + "…" : text;
+                var open = Action(L("查看剪贴板内容", "View clipboard text"), () => OpenClipboardEntryAsync(text, source));
+                Avalonia.Automation.AutomationProperties.SetName(open, preview);
+                open.Content = new TextBlock
                 {
-                    await Execute("clipboard_local_write", new() { ["text"] = text });
-                    Report(L("已复制到本机剪贴板", "Copied to this device"));
-                }, "copy"));
-            _contents.Children.Add(_compact ? preview : Table(preview));
+                    Text = preview, TextWrapping = TextWrapping.Wrap, MaxLines = 2,
+                    TextTrimming = TextTrimming.CharacterEllipsis
+                };
+                open.HorizontalAlignment = HorizontalAlignment.Stretch;
+                open.HorizontalContentAlignment = HorizontalAlignment.Left;
+                open.Padding = new Thickness(0);
+                var summary = new StackPanel { Children = { open, Muted(source) } };
+                _contents.Children.Add(Section(TitleRow(summary, ClipboardCopyButton(text))));
+            }
         }
         if (Has(ClientFeatures.ClipboardHistory))
         {
@@ -184,6 +199,25 @@ public sealed partial class ClientView
         }
     }
 
+    private Button ClipboardCopyButton(string text) =>
+        IconButton("copy", L("复制到本机", "Copy to this device"), async () =>
+        {
+            await Execute("clipboard_local_write", new() { ["text"] = text });
+            Report(L("已复制到本机剪贴板", "Copied to this device"));
+        });
+
+    private Task OpenClipboardEntryAsync(string text, string source)
+    {
+        _editing = true;
+        _contents.Children.Clear();
+        _viewport.Offset = default;
+        Report("");
+        Header(L("剪贴板", "Clipboard"), ClipboardCopyButton(text), Action(L("返回", "Back"), LoadAsync));
+        _contents.Children.Add(Muted(source));
+        _contents.Children.Add(Body(text));
+        return Task.CompletedTask;
+    }
+
     private void PairPrompt(JsonNode? relay) => _contents.Children.Add(EmptyState("files", L("尚未配对", "Unpaired"),
         PrimaryAction(L("连接中转服务器", "Connect to a relay"), () => PairForm(relay))));
 
@@ -196,6 +230,11 @@ public sealed partial class ClientView
         var details = new StackPanel { Spacing = 4 };
         string relayName = relay.Text("deviceName");
         bool paired = relay.Flag("paired");
+        if (WindowsWorkbench && _sidebarPaired != paired)
+        {
+            _sidebarPaired = paired;
+            UpdateSidebarSpaces();
+        }
         details.Children.Add(Heading(paired ? L("已配对", "Paired") : L("未配对", "Unpaired")));
         if (paired && relayName.Length > 0) details.Children.Add(Muted(relayName));
         if (paired && relay.Text("server") is { Length: > 0 } server) details.Children.Add(Body(server));
@@ -213,6 +252,13 @@ public sealed partial class ClientView
             connectionRow.Padding = new Thickness(12, 7);
         }
         _contents.Children.Add(connectionRow);
+
+        var autoSync = new ToggleSwitch { IsChecked = settings.Flag("clipboardAutoSync"), OnContent = "", OffContent = "" };
+        var clipboardLabel = L("自动同步剪贴板", "Sync clipboard automatically");
+        Avalonia.Automation.AutomationProperties.SetName(autoSync, clipboardLabel);
+        autoSync.IsCheckedChanged += async (_, _) => await Act(() =>
+            Change("settings_save", new() { ["clipboardAutoSync"] = autoSync.IsChecked == true }));
+        _contents.Children.Add(Section(TitleRow(Heading(clipboardLabel), autoSync)));
 
         var mcp = new ToggleSwitch { IsChecked = settings.Flag("mcpEnabled"), OnContent = "", OffContent = "" };
         Avalonia.Automation.AutomationProperties.SetName(mcp, L("本地 MCP", "Local MCP"));
@@ -251,11 +297,12 @@ public sealed partial class ClientView
 
     private async Task ShowDevicesAsync()
     {
-        var devices = await Execute("relay_devices", []) as JsonArray ?? [];
+        var token = _loading?.Token ?? CancellationToken.None;
         _editing = true;
         _contents.Children.Clear();
         _viewport.Offset = default;
         Header(L("已配对设备", "Paired devices"), Action(L("返回", "Back"), LoadAsync));
+        var devices = await ReadPageContent("relay_devices", token) as JsonArray ?? [];
         foreach (var device in devices) _contents.Children.Add(Heading(device.Text("name", device.Text("id"))));
     }
 
@@ -267,7 +314,7 @@ public sealed partial class ClientView
     }
 
     private Task PairForm(JsonNode? relay) => Form(L("连接中转服务器", "Connect to a relay"), L("配对", "Pair"),
-        PairAsync,
+        L("正在配对…", "Pairing…"), PairAsync,
         new Field("server", L("服务器地址", "Server address"), relay.Text("server")),
         new Field("deviceName", L("设备名称", "Device name"), relay.Text("deviceName", Environment.MachineName)),
         new Field("pairingCode", L("配对码", "Pairing code"), Secret: true));

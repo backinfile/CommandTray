@@ -177,7 +177,7 @@ public sealed partial class ClientView : UserControl
         }
         ApplySidebarGeometry();
         _navBorder.BorderThickness = _compact ? new Thickness(0, 1, 0, 0) : new Thickness(0, 0, 1, 0);
-        _contents.Margin = _compact ? new Thickness(12, 10) : new Thickness(16);
+        _contents.Margin = _compact ? new Thickness(12, 10) : WindowsWorkbench ? new Thickness(24, 18) : new Thickness(16);
         return true;
     }
 
@@ -327,7 +327,14 @@ public sealed partial class ClientView : UserControl
         {
             ToolTip.SetTip(button, tooltip);
         }
-        button.Click += async (_, _) => await Act(action);
+        button.Click += async (_, _) =>
+        {
+            var pending = Act(action);
+            if (pending.IsCompleted) { await pending; return; }
+            button.IsEnabled = false;
+            try { await pending; }
+            finally { button.IsEnabled = true; }
+        };
         return button;
     }
 
@@ -481,6 +488,9 @@ public sealed partial class ClientView : UserControl
         Form(title, L("保存", "Save"), save, fields);
 
     private Task Form(string title, string submitLabel, Func<JsonObject, Task> save, params Field[] fields)
+        => Form(title, submitLabel, L("正在处理…", "Working…"), save, fields);
+
+    private Task Form(string title, string submitLabel, string pendingLabel, Func<JsonObject, Task> save, params Field[] fields)
     {
         _editing = true;
         _workspaceGrid.IsVisible = false;
@@ -513,14 +523,14 @@ public sealed partial class ClientView : UserControl
             _contents.Children.Add(input);
             inputs.Add((field.Key, () => JsonValue.Create(input.Text ?? "")));
         }
-        bool submitting = false;
+        var progress = Muted(pendingLabel);
+        progress.IsVisible = false;
         var button = PrimaryAction(submitLabel, async () =>
         {
-            if (submitting) return;
             var values = new JsonObject();
             foreach (var input in inputs) values[input.Key] = input.Value();
             error.IsVisible = false;
-            submitting = true;
+            progress.IsVisible = true;
             try { await save(values); }
             catch (Exception failure) when (failure is not OperationCanceledException)
             {
@@ -528,9 +538,10 @@ public sealed partial class ClientView : UserControl
                 error.IsVisible = true;
                 error.BringIntoView();
             }
-            finally { submitting = false; }
+            finally { progress.IsVisible = false; }
         });
-        _contents.Children.Add(button);
+        _contents.Children.Add(new WrapPanel { ItemSpacing = 8, Children = { button, progress } });
+        progress.VerticalAlignment = VerticalAlignment.Center;
         _contents.Children.Add(error);
         return Task.CompletedTask;
     }

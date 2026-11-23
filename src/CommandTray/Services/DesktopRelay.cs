@@ -166,6 +166,15 @@ internal sealed class DesktopRelay
     public Task<JsonObject> GetClipboardAsync(CancellationToken cancellationToken = default) =>
         Client(GetConnection()).GetClipboardAsync(cancellationToken);
 
+    public Task<JsonArray> GetClipboardHistoryAsync(CancellationToken cancellationToken = default) =>
+        Client(GetConnection()).GetClipboardHistoryAsync(cancellationToken);
+
+    public ClipboardSyncConnection? ClipboardConnection()
+    {
+        lock (_settingsGate)
+            return _connection is { } connection ? new(connection.DeviceId, Client(connection)) : null;
+    }
+
     public Task<JsonObject> PutClipboardAsync(string text, CancellationToken cancellationToken = default) =>
         Client(GetConnection()).PutClipboardAsync(text, cancellationToken);
 

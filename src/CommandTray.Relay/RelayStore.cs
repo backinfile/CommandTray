@@ -143,15 +143,42 @@ internal sealed class RelayStore : IDisposable
 
     private static JsonObject ReadDocument(JsonElement element) => JsonNode.Parse(element.GetRawText())!.AsObject();
 
-    public async Task<ClipboardRecord> PutClipboardAsync(string text, string deviceId, CancellationToken cancellation)
+    public ClipboardRecord[] ReadClipboardHistory() => ReadClipboardHistory(State);
+
+    private static ClipboardRecord[] ReadClipboardHistory(RelayState state)
+    {
+        if (state.ClipboardHistory.Length > 0) return state.ClipboardHistory;
+        if (state.Clipboard.Text.Length == 0) return [];
+        // Older relay stores have only the current clipboard entry.
+        var current = state.Clipboard;
+        return [current with { DeviceName = current.DeviceName ??
+            state.Devices.FirstOrDefault(device => device.Id == current.DeviceId)?.Name }];
+    }
+
+    public async Task<ClipboardRecord> PutClipboardAsync(string text, DeviceRecord source, CancellationToken cancellation)
     {
         await _writes.WaitAsync(cancellation);
         try
         {
             var state = State;
-            if (state.Clipboard.Text == text) return state.Clipboard;
-            var record = new ClipboardRecord(state.Clipboard.Revision + 1, text, deviceId, DateTimeOffset.UtcNow);
-            await CommitAsync(state with { Clipboard = record }, cancellation);
+            if (state.Clipboard.Text == text && (text.Length == 0 || state.Clipboard.DeviceId == source.Id))
+                return state.Clipboard;
+            var record = new ClipboardRecord(state.Clipboard.Revision + 1, text, source.Id, DateTimeOffset.UtcNow)
+                { DeviceName = source.Name };
+            var history = ReadClipboardHistory(state);
+            if (text.Length > 0)
+            {
+                var retained = new List<ClipboardRecord> { record };
+                int length = text.Length;
+                foreach (var previous in history.Take(RelayData.ClipboardHistoryLimit - 1))
+                {
+                    if (length + previous.Text.Length > RelayData.ClipboardHistoryTextLimit) break;
+                    retained.Add(previous);
+                    length += previous.Text.Length;
+                }
+                history = [.. retained];
+            }
+            await CommitAsync(state with { Clipboard = record, ClipboardHistory = history }, cancellation);
             return record;
         }
         finally { _writes.Release(); }

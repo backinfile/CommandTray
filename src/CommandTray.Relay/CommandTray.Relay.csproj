@@ -8,5 +8,6 @@
   <ItemGroup>
     <PackageReference Include="ModelContextProtocol" Version="2.1.0" />
     <ProjectReference Include="../CommandTray.Sync/CommandTray.Sync.csproj" />
+    <EmbeddedResource Include="Web/*" LogicalName="CommandTray.Web.%(Filename)%(Extension)" />
   </ItemGroup>
 </Project>

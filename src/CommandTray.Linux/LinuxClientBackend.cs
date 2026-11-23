@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using CommandTray.Core;
+using CommandTray.Sync;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 
@@ -21,11 +22,40 @@ public sealed class LinuxClientBackend(
     private readonly AsyncLocal<HttpResponse?> _mcpResponse = new();
     private WebApplication? _mcp;
     private string? _sensitiveClipboardText;
+    private CancellationTokenSource? _clipboardLifetime;
+    private Task? _clipboardTask;
 
     public ClientFeatures Features => ClientFeatures.LocalFiles | ClientFeatures.Terminals | ClientFeatures.Commands |
         ClientFeatures.Layout | ClientFeatures.Ssh | ClientFeatures.ClipboardHistory;
 
     internal bool HasDesktopClipboard => clipboardRead is not null && clipboardWrite is not null;
+
+    public void StartClipboardSync()
+    {
+        if (clipboardRead is null || clipboardWrite is null || _clipboardLifetime is not null) return;
+        _clipboardLifetime = new CancellationTokenSource();
+        var sync = new ClipboardAutoSync(() =>
+        {
+            var settings = LocalSettings.Load();
+            return settings is { ClipboardAutoSync: true, DeviceId: { Length: > 0 } id, Server: not null, Token: not null }
+                ? new(id, LinuxCommands.Relay(settings)) : null;
+        }, Read, async (expected, text, cancellation) =>
+        {
+            if (await Read(cancellation) != expected || !LocalSettings.Load().ClipboardAutoSync) return false;
+            await clipboardWrite(text, cancellation).AsTask().WaitAsync(cancellation);
+            RememberClipboard(text);
+            return true;
+        });
+        _clipboardTask = sync.RunAsync(_clipboardLifetime.Token);
+
+        async Task<string?> Read(CancellationToken cancellation)
+        {
+            var text = await clipboardRead(cancellation).AsTask().WaitAsync(cancellation) ?? "";
+            if (text == _sensitiveClipboardText) return null;
+            _sensitiveClipboardText = null;
+            return text;
+        }
+    }
 
     public async ValueTask<JsonNode?> ExecuteAsync(string operation, JsonObject args, CancellationToken cancellationToken = default)
     {
@@ -52,6 +82,7 @@ public sealed class LinuxClientBackend(
             "file_download" => ["share", "get", Required("id"), Required("path")],
             "file_delete" => ["share", "remove", Required("id")],
             "clipboard_read" or "clipboard_receive" => ["clip", "status"],
+            "clipboard_relay_history" => ["clip", "history"],
             "clipboard_send" => ["clip", "put", Text(args, "text") ?? ""],
             "terminal_write" => ["terminal", "write", Item(), Text(args, "text") ?? ""],
             "terminal_read" => ["terminal", "read", Item(), "300"],
@@ -197,6 +228,7 @@ public sealed class LinuxClientBackend(
         {
             ["language"] = settings.Language, ["runAtLogin"] = settings.RunAtLogin,
             ["mcpEnabled"] = settings.McpEnabled, ["mcpEndpoint"] = $"http://127.0.0.1:{settings.McpPort}/mcp",
+            ["clipboardAutoSync"] = settings.ClipboardAutoSync,
             ["sidebarWidth"] = settings.SidebarWidth, ["sidebarCollapsed"] = settings.SidebarCollapsed
         };
     }
@@ -239,6 +271,7 @@ public sealed class LinuxClientBackend(
             LocalState.Write(LocalState.Settings, current with
             {
                 Language = language, RunAtLogin = login, McpEnabled = mcpEnabled,
+                ClipboardAutoSync = args["clipboardAutoSync"]?.GetValue<bool>() ?? current.ClipboardAutoSync,
                 SidebarWidth = args["sidebarWidth"]?.GetValue<int>() ?? current.SidebarWidth,
                 SidebarCollapsed = args["sidebarCollapsed"]?.GetValue<bool>() ?? current.SidebarCollapsed
             });
@@ -471,6 +504,12 @@ public sealed class LinuxClientBackend(
 
     public async ValueTask DisposeAsync()
     {
+        if (_clipboardLifetime is { } clipboardLifetime)
+        {
+            clipboardLifetime.Cancel();
+            if (_clipboardTask is not null) await _clipboardTask;
+            clipboardLifetime.Dispose();
+        }
         await _settingsGate.WaitAsync();
         try { await StopMcpAsync(); }
         finally { _settingsGate.Release(); }

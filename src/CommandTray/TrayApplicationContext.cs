@@ -3,6 +3,7 @@ using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Threading;
 using CommandTray.Models;
 using CommandTray.Services;
+using CommandTray.Sync;
 
 namespace CommandTray;
 
@@ -87,8 +88,24 @@ internal sealed class TrayApplicationContext : IDisposable
         PublishCommandTemplates();
         _ = _supervisor.StartConfiguredServicesAsync(_configuration.Services);
         _ = ApplyMcpStateAsync();
-        _backgroundSync = _desktop.Relay.RunBackgroundSyncAsync(
-            _desktop.ReapRemovedTerminals, _syncLifetime.Token);
+        var clipboard = new ClipboardAutoSync(
+            () =>
+            {
+                lock (_configuration)
+                    return _configuration.ClipboardAutoSync ? _desktop.Relay.ClipboardConnection() : null;
+            },
+            cancellation => _desktop.OnUiAsync(_desktop.ReadClipboardForSync, cancellation),
+            (expected, text, cancellation) => _desktop.OnUiAsync(() =>
+            {
+                lock (_configuration)
+                    if (!_configuration.ClipboardAutoSync) return false;
+                if (_desktop.ReadClipboardForSync() != expected) return false;
+                _desktop.WriteClipboard(text);
+                return true;
+            }, cancellation));
+        _backgroundSync = Task.WhenAll(
+            _desktop.Relay.RunBackgroundSyncAsync(_desktop.ReapRemovedTerminals, _syncLifetime.Token),
+            clipboard.RunAsync(_syncLifetime.Token));
     }
 
     public void ShowSettings()

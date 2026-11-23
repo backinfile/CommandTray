@@ -70,6 +70,23 @@ public sealed class RelayClient
     public Task<JsonObject> GetClipboardAsync(CancellationToken cancellationToken = default) =>
         SendJsonAsync(HttpMethod.Get, "v1/clipboard", null, cancellationToken);
 
+    public async Task<JsonArray> GetClipboardHistoryAsync(CancellationToken cancellationToken = default)
+    {
+        try { return await GetListAsync("v1/clipboard/history", "entries", cancellationToken); }
+        catch (RelayException error) when (error.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.MethodNotAllowed)
+        {
+            var latest = await GetClipboardAsync(cancellationToken);
+            if (latest["text"]?.GetValue<string>() is not { Length: > 0 }) return [];
+            if (latest["deviceId"]?.GetValue<string>() is { Length: > 0 } id)
+            {
+                var devices = await ListDevicesAsync(cancellationToken);
+                var source = devices.OfType<JsonObject>().FirstOrDefault(device => device["id"]?.GetValue<string>() == id);
+                latest["deviceName"] = source?["name"]?.DeepClone();
+            }
+            return [latest];
+        }
+    }
+
     public Task<JsonObject> PutClipboardAsync(string text, CancellationToken cancellationToken = default) =>
         SendJsonAsync(HttpMethod.Put, "v1/clipboard", new { text }, cancellationToken);
 

@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>CommandTray</title>
+  <link rel="stylesheet" href="/commandtray.css">
+  <script src="/commandtray.js" defer></script>
+</head>
+<body>
+  <div class="shell" id="shell">
+    <header class="brand"><span class="mark" aria-hidden="true">▦</span><strong>CommandTray</strong></header>
+    <header class="top" id="top"></header>
+    <nav class="sidebar" id="sidebar" aria-label="主导航"></nav>
+    <main id="content" aria-label="工作区内容"></main>
+  </div>
+  <div class="status" id="status" role="status" hidden></div>
+  <dialog id="dialog" aria-labelledby="dialog-title">
+    <header class="dialog-head"><h2 id="dialog-title"></h2><button id="dialog-close" aria-label="关闭">×</button></header>
+    <div class="dialog-content" id="dialog-content"></div>
+  </dialog>
+</body>
+</html>

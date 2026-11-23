@@ -20,7 +20,7 @@ if (args.Length == 0 || args[0] is "--help" or "-h" or "help")
           config get | config set server|mcp-port <value>
           workspace list|get|create|show|use|rename|remove|load|replace|put-item|move-item|remove-item
           sync pair <server> [device-name] | sync status|push|pull|devices|remove-device | sync resolve local|remote
-          clip put [text] | clip get|status
+          clip put [text] | clip get|status|history
           share list | share put <file> [folder] | share get <id> <destination> | share remove <id>
           host list|get|put|remove|connect
           identity list|import|install|remove

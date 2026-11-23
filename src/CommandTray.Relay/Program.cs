@@ -67,6 +67,8 @@ app.Use(async (context, next) =>
     await next(context);
 });
 app.UseRateLimiter();
+if (bool.TryParse(Environment.GetEnvironmentVariable("COMMANDTRAY_RELAY_WEB"), out var enableWeb) && enableWeb)
+    RelayWeb.Map(app);
 app.MapGet("/healthz", () => Results.Ok(new { ready = true, protocol = 1 }));
 app.MapPost("/v1/devices/pair", async (PairInput input, RelayStore store, CancellationToken cancellation) =>
 {
@@ -136,11 +138,12 @@ endpoints.MapPut("/workspace", async (WorkspaceInput input, RelayStore store, Ca
 });
 
 endpoints.MapGet("/clipboard", (RelayStore store) => Results.Ok(store.State.Clipboard));
+endpoints.MapGet("/clipboard/history", (RelayStore store) => Results.Ok(new { entries = store.ReadClipboardHistory() }));
 endpoints.MapPut("/clipboard", async (ClipboardInput input, HttpContext context, RelayStore store, CancellationToken cancellation) =>
 {
-    if (input.Text is not { Length: <= 1_000_000 })
-        return Results.BadRequest(new { error = "Clipboard text must be at most 1,000,000 characters." });
-    return Results.Ok(await store.PutClipboardAsync(input.Text, CurrentDevice(context).Id, cancellation));
+    if (input.Text is not { Length: <= RelayData.ClipboardTextLimit })
+        return Results.BadRequest(new { error = $"Clipboard text must be at most {RelayData.ClipboardTextLimit:N0} characters." });
+    return Results.Ok(await store.PutClipboardAsync(input.Text, CurrentDevice(context), cancellation));
 });
 
 endpoints.MapGet("/files", (RelayStore store) => Results.Ok(new { files = store.State.Files }));

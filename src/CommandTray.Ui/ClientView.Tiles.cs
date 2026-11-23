@@ -7,6 +7,7 @@ using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Platform.Storage;
+using Avalonia.Styling;
 using CommandTray.Core;
 
 namespace CommandTray.Ui;
@@ -366,31 +367,69 @@ public sealed partial class ClientView
         if (!editable) return board;
         var panel = new Grid { RowDefinitions = new RowDefinitions("*,Auto") };
         panel.Children.Add(board);
+        var saves = new SemaphoreSlim(1);
         async Task Save()
         {
-            var clone = (JsonObject)item.DeepClone();
-            EnsureData(clone)["strokes"] = board.Strokes.DeepClone();
-            await Execute("item_save", new() { ["spaceId"] = spaceId, ["item"] = clone });
+            await saves.WaitAsync();
+            try
+            {
+                var clone = (JsonObject)item.DeepClone();
+                var strokes = board.Strokes.DeepClone();
+                EnsureData(clone)["strokes"] = strokes;
+                await Execute("item_save", new() { ["spaceId"] = spaceId, ["item"] = clone });
+                EnsureData(item)["strokes"] = strokes.DeepClone();
+            }
+            finally { saves.Release(); }
         }
         board.Edited += async () => await Act(Save);
-        var undo = Action(L("撤销笔画", "Undo stroke"), async () =>
+        var tools = new WrapPanel { ItemSpacing = 3, LineSpacing = 2 };
+        Button? selected = null;
+        foreach (var (tool, label) in new[]
+        {
+            (BoardTool.Pen, L("画笔", "Pen")), (BoardTool.Line, L("直线", "Line")),
+            (BoardTool.Arrow, L("箭头", "Arrow")), (BoardTool.Rectangle, L("矩形", "Rectangle")),
+            (BoardTool.Ellipse, L("椭圆", "Ellipse")), (BoardTool.Eraser, L("橡皮", "Eraser"))
+        })
+        {
+            Button? option = null;
+            option = Action(label, () =>
+            {
+                selected?.Classes.Remove("primary");
+                selected = option;
+                selected!.Classes.Add("primary");
+                board.Tool = tool;
+                return Task.CompletedTask;
+            });
+            if (tool == BoardTool.Pen)
+            {
+                selected = option;
+                option.Classes.Add("primary");
+            }
+            tools.Children.Add(option);
+        }
+        tools.Children.Add(Action(L("撤销", "Undo"), async () =>
         {
             if (board.Strokes.Count == 0) return;
             board.Strokes.RemoveAt(board.Strokes.Count - 1);
             board.InvalidateVisual();
             await Save();
-        });
-        Grid.SetRow(undo, 1);
-        panel.Children.Add(undo);
+        }));
+        Grid.SetRow(tools, 1);
+        panel.Children.Add(tools);
         return panel;
     }
+
+    private enum BoardTool { Pen, Line, Arrow, Rectangle, Ellipse, Eraser }
 
     private sealed class DrawingBoard : Control
     {
         private const double SheetWidth = 640;
         private const double SheetHeight = 300;
         private readonly bool _editable;
-        private JsonArray? _points;
+        private JsonObject? _draft;
+        private IPointer? _pointer;
+        private Point _anchor;
+        private BoardTool _activeTool;
         private (double Scale, double Left, double Top) _sheet;
 
         public DrawingBoard(JsonArray strokes, bool editable)
@@ -403,12 +442,16 @@ public sealed partial class ClientView
         }
 
         public JsonArray Strokes { get; }
+        public BoardTool Tool { get; set; }
         public event Func<Task>? Edited;
 
         public override void Render(DrawingContext context)
         {
             base.Render(context);
-            context.FillRectangle(Brushes.White, new Rect(Bounds.Size));
+            bool dark = ActualThemeVariant == ThemeVariant.Dark;
+            var paper = dark ? Color.Parse("#101923") : Colors.White;
+            var defaultStroke = Color.Parse(dark ? "#C1ED8B" : "#315545");
+            context.FillRectangle(new SolidColorBrush(paper), new Rect(Bounds.Size));
             double minX = _editable ? 0 : double.PositiveInfinity;
             double minY = _editable ? 0 : double.PositiveInfinity;
             double maxX = _editable ? SheetWidth : double.NegativeInfinity;
@@ -427,10 +470,12 @@ public sealed partial class ClientView
             var height = Math.Max(1, maxY - minY);
             var scale = Math.Min(4, Math.Min((Bounds.Width - 20) / width, (Bounds.Height - 20) / height));
             _sheet = (scale, (Bounds.Width - width * scale) / 2 - minX * scale, (Bounds.Height - height * scale) / 2 - minY * scale);
-            foreach (var stroke in Strokes.OfType<JsonObject>())
+            foreach (var stroke in Strokes.OfType<JsonObject>().Append(_draft).OfType<JsonObject>())
             {
-                var color = stroke.Flag("erase") ? Colors.White
-                    : Color.TryParse(stroke.Text("color"), out var parsed) ? parsed : Color.Parse("#315545");
+                var storedColor = stroke.Text("color");
+                var color = stroke.Flag("erase") ? paper
+                    : !storedColor.Equals("#315545", StringComparison.OrdinalIgnoreCase) &&
+                        Color.TryParse(storedColor, out var parsed) ? parsed : defaultStroke;
                 var pen = new Pen(new SolidColorBrush(color), Math.Max(stroke.Flag("erase") ? 4 : 1.5, scale * 2.5),
                     lineCap: PenLineCap.Round);
                 Point? previous = null;
@@ -447,10 +492,14 @@ public sealed partial class ClientView
         protected override void OnPointerPressed(PointerPressedEventArgs e)
         {
             base.OnPointerPressed(e);
-            if (!_editable || _sheet.Scale <= 0 || !e.GetCurrentPoint(this).Properties.IsLeftButtonPressed) return;
-            _points = new JsonArray();
-            Strokes.Add(new JsonObject { ["color"] = "#315545", ["points"] = _points });
-            AddPoint(e.GetPosition(this));
+            if (!_editable || _pointer is not null || _sheet.Scale <= 0 ||
+                !e.GetCurrentPoint(this).Properties.IsLeftButtonPressed) return;
+            _pointer = e.Pointer;
+            _activeTool = Tool;
+            _anchor = SheetPoint(e.GetPosition(this));
+            _draft = new JsonObject { ["color"] = "#315545", ["points"] = new JsonArray() };
+            if (_activeTool == BoardTool.Eraser) _draft["erase"] = true;
+            UpdateDraft(e.GetPosition(this));
             e.Pointer.Capture(this);
             e.Handled = true;
         }
@@ -458,28 +507,74 @@ public sealed partial class ClientView
         protected override void OnPointerMoved(PointerEventArgs e)
         {
             base.OnPointerMoved(e);
-            if (_points is not null) AddPoint(e.GetPosition(this));
+            if (e.Pointer == _pointer) UpdateDraft(e.GetPosition(this));
         }
 
         protected override async void OnPointerReleased(PointerReleasedEventArgs e)
         {
             base.OnPointerReleased(e);
-            if (_points is null) return;
-            AddPoint(e.GetPosition(this));
-            _points = null;
+            if (e.Pointer != _pointer || _draft is null) return;
+            UpdateDraft(e.GetPosition(this));
+            Strokes.Add(_draft);
+            _draft = null;
+            _pointer = null;
             e.Pointer.Capture(null);
             if (Edited is not null) await Edited.Invoke();
         }
 
-        private void AddPoint(Point point)
+        protected override void OnPointerCaptureLost(PointerCaptureLostEventArgs e)
         {
-            _points!.Add(new JsonObject
-            {
-                ["x"] = Math.Clamp((point.X - _sheet.Left) / _sheet.Scale, 0, 100000),
-                ["y"] = Math.Clamp((point.Y - _sheet.Top) / _sheet.Scale, 0, 100000)
-            });
+            base.OnPointerCaptureLost(e);
+            if (e.Pointer != _pointer) return;
+            _pointer = null;
+            _draft = null;
             InvalidateVisual();
         }
+
+        private Point SheetPoint(Point point) => new(
+            Math.Clamp((point.X - _sheet.Left) / _sheet.Scale, 0, 100000),
+            Math.Clamp((point.Y - _sheet.Top) / _sheet.Scale, 0, 100000));
+
+        private void UpdateDraft(Point position)
+        {
+            var end = SheetPoint(position);
+            var points = (JsonArray)_draft!["points"]!;
+            if (_activeTool is BoardTool.Pen or BoardTool.Eraser) points.Add(PointNode(end));
+            else
+            {
+                points.Clear();
+                foreach (var point in Shape(_activeTool, _anchor, end)) points.Add(PointNode(point));
+            }
+            InvalidateVisual();
+        }
+
+        // Shapes use the existing stroke format so older and read-only clients can render them.
+        private static IEnumerable<Point> Shape(BoardTool tool, Point start, Point end)
+        {
+            switch (tool)
+            {
+                case BoardTool.Rectangle:
+                    return [start, new Point(end.X, start.Y), end, new Point(start.X, end.Y), start];
+                case BoardTool.Ellipse:
+                    return Enumerable.Range(0, 49).Select(index =>
+                    {
+                        double angle = index * Math.Tau / 48;
+                        return new Point((start.X + end.X + Math.Abs(end.X - start.X) * Math.Cos(angle)) / 2,
+                            (start.Y + end.Y + Math.Abs(end.Y - start.Y) * Math.Sin(angle)) / 2);
+                    });
+                case BoardTool.Arrow:
+                    var direction = end - start;
+                    double length = Math.Min(24, Math.Sqrt(direction.X * direction.X + direction.Y * direction.Y) / 3);
+                    double heading = Math.Atan2(direction.Y, direction.X);
+                    Point Wing(double angle) => new(Math.Max(0, end.X - length * Math.Cos(angle)),
+                        Math.Max(0, end.Y - length * Math.Sin(angle)));
+                    return [start, end, Wing(heading - 0.55), end, Wing(heading + 0.55)];
+                default:
+                    return [start, end];
+            }
+        }
+
+        private static JsonObject PointNode(Point point) => new() { ["x"] = point.X, ["y"] = point.Y };
 
         private static double Coordinate(JsonObject point, string axis) =>
             point[axis] is JsonValue value && value.TryGetValue<double>(out var coordinate) && double.IsFinite(coordinate) ? coordinate : 0;

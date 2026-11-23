@@ -8,6 +8,9 @@ internal static class RelayData
 {
     internal const int WorkspaceLimit = 16 * 1024 * 1024;
     internal const long FileLimit = 128L * 1024 * 1024;
+    internal const int ClipboardTextLimit = 1_000_000;
+    internal const int ClipboardHistoryLimit = 50;
+    internal const int ClipboardHistoryTextLimit = 2_000_000;
     internal static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
     internal static RelayState Empty()
@@ -25,7 +28,11 @@ internal static class RelayData
     internal static void ValidateState(RelayState state)
     {
         if (state.Workspace.Revision < 0 || !IsWorkspace(state.Workspace.Document) ||
-            state.Clipboard.Revision < 0 || state.Clipboard.Text.Length > 1_000_000 ||
+            state.Clipboard.Revision < 0 || state.Clipboard.Text.Length > ClipboardTextLimit ||
+            state.ClipboardHistory is null || state.ClipboardHistory.Length > ClipboardHistoryLimit ||
+            state.ClipboardHistory.Any(entry => entry is null || entry.Revision < 1 ||
+                entry.Revision > state.Clipboard.Revision || entry.Text is not { Length: > 0 and <= ClipboardTextLimit }) ||
+            state.ClipboardHistory.Sum(entry => entry.Text.Length) > ClipboardHistoryTextLimit ||
             state.Devices.Any(device => !IsId(device.Id) || !IsHash(device.TokenHash)) ||
             state.Devices.Select(device => device.Id).Distinct(StringComparer.Ordinal).Count() != state.Devices.Length ||
             state.Files.Any(file => !IsId(file.Id) || !IsFileName(file.Name) || !IsFolder(file.Folder) ||
@@ -54,12 +61,16 @@ internal static class RelayData
 
 internal sealed record RelayState(WorkspaceRecord Workspace, ClipboardRecord Clipboard, DeviceRecord[] Devices, StoredFile[] Files)
 {
+    public ClipboardRecord[] ClipboardHistory { get; init; } = [];
     public WorkspaceRevision[] WorkspaceHistory { get; init; } = [];
     public SyncReceipt[] SyncReceipts { get; init; } = [];
 }
 internal sealed record SyncReceipt(string DeviceId, string OperationId);
 internal sealed record WorkspaceRecord(long Revision, JsonElement Document);
-internal sealed record ClipboardRecord(long Revision, string Text, string? DeviceId, DateTimeOffset UpdatedAt);
+internal sealed record ClipboardRecord(long Revision, string Text, string? DeviceId, DateTimeOffset UpdatedAt)
+{
+    public string? DeviceName { get; init; }
+}
 internal sealed record DeviceRecord(string Id, string Name, string TokenHash, DateTimeOffset PairedAt);
 internal sealed record StoredFile(string Id, string Name, string Folder, long Size, string Sha256, DateTimeOffset ModifiedAt, string DeviceId);
 internal sealed record PairInput(string? DeviceName, string? PairingCode);

@@ -67,6 +67,7 @@ internal sealed class LinuxApplication : ClientApplication
             window.Content = new ClientView(Backend);
             window.Opened += async (_, _) =>
             {
+                Backend.StartClipboardSync();
                 try { await Backend.StartConfiguredMcpAsync(); }
                 catch (Exception ex) when (ex is IOException or InvalidOperationException)
                 {

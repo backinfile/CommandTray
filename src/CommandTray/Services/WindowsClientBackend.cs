@@ -59,6 +59,7 @@ internal sealed class WindowsClientBackend(
             case "file_download": return Json(await _actions.Download(Id(), PathArgument(), cancellationToken, Flag("overwrite") ?? false));
             case "file_delete": return Json(await _actions.DeleteShared(Id(), cancellationToken));
             case "clipboard_read": return await Relay.GetClipboardAsync(cancellationToken);
+            case "clipboard_relay_history": return await Relay.GetClipboardHistoryAsync(cancellationToken);
             case "clipboard_send": return await Relay.PutClipboardAsync(Required("text"), cancellationToken);
             case "clipboard_receive": return await _actions.ReceiveToLocalClipboard(cancellationToken);
             case "clipboard_history": return Json(desktop.ClipboardHistory());
@@ -72,7 +73,8 @@ internal sealed class WindowsClientBackend(
                 return Json(new { success = true });
             case "settings_read": return ReadSettings();
             case "settings_save": return await desktop.OnUiAsync(() => SaveSettings(Text("language"), Flag("runAtLogin"),
-                Flag("mcpEnabled"), arguments["sidebarWidth"]?.GetValue<int>(), Flag("sidebarCollapsed")), cancellationToken);
+                Flag("mcpEnabled"), arguments["sidebarWidth"]?.GetValue<int>(), Flag("sidebarCollapsed"),
+                Flag("clipboardAutoSync")), cancellationToken);
             case "mcp_config": return new JsonObject
             {
                 ["url"] = McpServerHost.Endpoint,
@@ -155,6 +157,7 @@ internal sealed class WindowsClientBackend(
                 language = configuration.Language,
                 runAtLogin = configuration.RunAtLogin,
                 mcpEnabled = configuration.McpEnabled,
+                clipboardAutoSync = configuration.ClipboardAutoSync,
                 sidebarWidth = configuration.SidebarWidth,
                 sidebarCollapsed = configuration.SidebarCollapsed,
                 mcpEndpoint = McpServerHost.Endpoint
@@ -162,7 +165,7 @@ internal sealed class WindowsClientBackend(
     }
 
     public JsonObject SaveSettings(string? language, bool? runAtLogin, bool? mcpEnabled,
-        int? sidebarWidth = null, bool? sidebarCollapsed = null)
+        int? sidebarWidth = null, bool? sidebarCollapsed = null, bool? clipboardAutoSync = null)
     {
         if (language is not null and not ("auto" or "en" or "zh"))
             throw new ArgumentException("Language must be auto, en or zh.");
@@ -171,6 +174,7 @@ internal sealed class WindowsClientBackend(
             var priorLanguage = configuration.Language;
             var priorLogin = configuration.RunAtLogin;
             var priorMcp = configuration.McpEnabled;
+            var priorClipboard = configuration.ClipboardAutoSync;
             var priorSidebar = (configuration.SidebarWidth, configuration.SidebarCollapsed);
             var priorRegistryValue = runAtLogin.HasValue && AutoStartService.IsEnabled();
             try
@@ -182,6 +186,7 @@ internal sealed class WindowsClientBackend(
                     configuration.RunAtLogin = login;
                 }
                 if (mcpEnabled is { } enabled) configuration.McpEnabled = enabled;
+                if (clipboardAutoSync is { } syncClipboard) configuration.ClipboardAutoSync = syncClipboard;
                 if (sidebarWidth.HasValue) configuration.SidebarWidth = sidebarWidth;
                 if (sidebarCollapsed.HasValue) configuration.SidebarCollapsed = sidebarCollapsed.Value;
                 configurationStore.Save(configuration);
@@ -191,6 +196,7 @@ internal sealed class WindowsClientBackend(
                 configuration.Language = priorLanguage;
                 configuration.RunAtLogin = priorLogin;
                 configuration.McpEnabled = priorMcp;
+                configuration.ClipboardAutoSync = priorClipboard;
                 (configuration.SidebarWidth, configuration.SidebarCollapsed) = priorSidebar;
                 if (runAtLogin.HasValue) AutoStartService.SetEnabled(priorRegistryValue);
                 throw;

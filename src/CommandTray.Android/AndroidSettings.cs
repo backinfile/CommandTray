@@ -24,6 +24,7 @@ internal sealed class AndroidSettings(Context context)
     public string Language => Get("language", "auto");
     public bool Paired => Server.Length != 0 && _preferences.Contains("relayToken");
     public bool McpEnabled => _preferences.GetBoolean("mcpEnabled", false);
+    public bool ClipboardAutoSync => _preferences.GetBoolean("clipboardAutoSync", false);
 
     public void SavePairing(string server, string name, string deviceId, string token, string? activeSpace)
     {
@@ -59,6 +60,13 @@ internal sealed class AndroidSettings(Context context)
     {
         using var edit = Edit();
         edit.PutString("language", language);
+        Commit(edit);
+    }
+
+    public void SetClipboardAutoSync(bool enabled)
+    {
+        using var edit = Edit();
+        edit.PutBoolean("clipboardAutoSync", enabled);
         Commit(edit);
     }
 

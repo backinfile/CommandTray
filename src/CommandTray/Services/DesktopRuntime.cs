@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Buffers.Binary;
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -143,6 +144,31 @@ internal sealed class DesktopRuntime : IDisposable
         else Clipboard.SetText(text);
         _sensitiveClipboardText = sensitive ? text : null;
         if (!sensitive) RememberClipboard(text);
+    }
+
+    internal string? ReadClipboardForSync()
+    {
+        var data = Clipboard.GetDataObject();
+        if (data is null || data.GetFormats(autoConvert: false).Length == 0) return "";
+        if (data.GetDataPresent("ExcludeClipboardContentFromMonitorProcessing", autoConvert: false) ||
+            ClipboardFlagDisabled(data, "CanUploadToCloudClipboard") ||
+            ClipboardFlagDisabled(data, "CanIncludeInClipboardHistory")) return null;
+        var text = data.GetData(DataFormats.UnicodeText) as string;
+        if (text == _sensitiveClipboardText) return null;
+        _sensitiveClipboardText = null;
+        return text;
+    }
+
+    private static bool ClipboardFlagDisabled(IDataObject data, string name)
+    {
+        if (!data.GetDataPresent(name, autoConvert: false)) return false;
+        return data.GetData(name, autoConvert: false) switch
+        {
+            MemoryStream { Length: >= 4 } stream => BinaryPrimitives.ReadInt32LittleEndian(stream.ToArray()) != 1,
+            byte[] { Length: >= 4 } bytes => BinaryPrimitives.ReadInt32LittleEndian(bytes) != 1,
+            int value => value != 1,
+            _ => true
+        };
     }
 
     public string[] ClipboardHistory() =>

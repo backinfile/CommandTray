@@ -3,18 +3,25 @@ using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Layout;
+using Avalonia.Media;
+using CommandTray.Core;
 
 namespace CommandTray.Ui;
 
 public sealed partial class ClientView
 {
     private const int RailWidth = 56;
-    private const int DefaultSidebarWidth = 176;
+    private static readonly int DefaultSidebarWidth = OperatingSystem.IsWindows() ? 232 : 176;
     private const int MinimumSidebarWidth = 132;
-    private const int MaximumSidebarWidth = 252;
+    private static readonly int MaximumSidebarWidth = OperatingSystem.IsWindows() ? 320 : 252;
     private bool _sidebarCollapsed;
     private int _sidebarWidth = DefaultSidebarWidth;
     private Button? _sidebarToggle;
+    private StackPanel? _sidebarSpaceList;
+    private TextBlock? _sidebarRelayStatus;
+    private (string Id, string Name)[] _sidebarSpaces = [];
+    private bool? _sidebarPaired;
+    private bool WindowsWorkbench => OperatingSystem.IsWindows() && Has(ClientFeatures.Layout);
 
     private void ApplySidebarGeometry()
     {
@@ -34,6 +41,8 @@ public sealed partial class ClientView
     {
         var pages = NavigationPages();
         _navigation.Children.Clear();
+        _sidebarSpaceList = null;
+        _sidebarRelayStatus = null;
         _navHeader.IsVisible = !_compact;
         _navFooter.IsVisible = !_compact;
         if (_compact)
@@ -72,12 +81,12 @@ public sealed partial class ClientView
         {
             var markIcon = TrayGlyph.Icon("spaces", 15);
             markIcon.Classes.Add("mark");
-            var mark = new Border { Width = 22, Height = 22, Child = markIcon };
+            var mark = new Border { Width = WindowsWorkbench ? 32 : 22, Height = WindowsWorkbench ? 32 : 22, Child = markIcon };
             mark.Classes.Add("mark");
             var name = Heading("CommandTray");
             name.Classes.Add("brand");
             name.VerticalAlignment = VerticalAlignment.Center;
-            name.Margin = new Thickness(5, 0, 0, 0);
+            name.Margin = new Thickness(9, 0, 0, 0);
             var brand = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*") };
             brand.Children.Add(mark);
             Grid.SetColumn(name, 1);
@@ -88,7 +97,61 @@ public sealed partial class ClientView
         AutomationProperties.SetName(_navSplitter, L("调整侧栏宽度", "Resize sidebar"));
         foreach (var page in pages.Where(page => page.Id != "settings"))
             _navigation.Children.Add(NavigationButton(page.Id, L(page.Zh, page.En)));
-        _navFooter.Child = NavigationButton("settings", L("设置", "Settings"));
+        var settings = NavigationButton("settings", L("设置", "Settings"));
+        if (WindowsWorkbench && !_sidebarCollapsed)
+        {
+            _sidebarSpaceList = new StackPanel { Spacing = 4 };
+            var group = new Border
+            {
+                BorderThickness = new Thickness(0, 1, 0, 0), Margin = new Thickness(0, 12, 0, 0),
+                Padding = new Thickness(0, 8, 0, 0), Child = _sidebarSpaceList
+            };
+            group.Classes.Add("nav-group");
+            _navigation.Children.Add(group);
+            _sidebarRelayStatus = Muted("");
+            _sidebarRelayStatus.Classes.Add("nav-status");
+            _navFooter.Child = new StackPanel { Spacing = 4, Children = { _sidebarRelayStatus, settings } };
+            UpdateSidebarSpaces();
+        }
+        else _navFooter.Child = settings;
+    }
+
+    private void UpdateSidebarSpaces()
+    {
+        if (_sidebarRelayStatus is { } status)
+        {
+            status.IsVisible = _sidebarPaired.HasValue;
+            status.Text = _sidebarPaired == true ? L("中转已配对", "Relay paired") : L("中转未配对", "Relay unpaired");
+        }
+        if (_sidebarSpaceList is not { } group) return;
+        group.Children.Clear();
+        var label = Muted(L("空间", "Spaces"));
+        label.Classes.Add("nav-status");
+        group.Children.Add(label);
+        foreach (var (id, name) in _sidebarSpaces)
+        {
+            var button = Action(name, async () =>
+            {
+                await Execute("space_activate", new() { ["spaceId"] = id });
+                Navigate("workspace", id);
+            }, name);
+            var text = new TextBlock
+            {
+                Text = name, Margin = new Thickness(8, 0, 0, 0),
+                TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center
+            };
+            Grid.SetColumn(text, 1);
+            var row = new Grid
+            {
+                ColumnDefinitions = new ColumnDefinitions("Auto,*"),
+                Children = { TrayGlyph.Icon("spaces", 15), text }
+            };
+            button.Content = row;
+            button.HorizontalContentAlignment = HorizontalAlignment.Stretch;
+            button.Classes.Add("navigation");
+            if (_page == "workspace" && id == _spaceId) button.Classes.Add("selected");
+            group.Children.Add(button);
+        }
     }
 
     private async Task ToggleSidebarAsync()

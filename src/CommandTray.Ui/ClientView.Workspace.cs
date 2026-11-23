@@ -24,6 +24,12 @@ public sealed partial class ClientView
         _spaceId = selected?.Text("id");
 
         bool paired = relay.Flag("paired");
+        if (WindowsWorkbench)
+        {
+            _sidebarSpaces = spaces.Select(space => (space.Text("id"), space.Text("name"))).ToArray();
+            _sidebarPaired = paired;
+            UpdateSidebarSpaces();
+        }
         if (selected is null)
         {
             Header(L("工作空间", "Workspace"));
@@ -41,7 +47,7 @@ public sealed partial class ClientView
         var more = WorkspaceMenu(selected, paired);
 
         var spaceId = selected.Text("id");
-        if (_compact)
+        if (_compact || WindowsWorkbench)
         {
             var picker = new ComboBox
             {
@@ -59,6 +65,12 @@ public sealed partial class ClientView
                 if (next != _spaceId) await Act(() => SelectSpaceAsync(next));
             };
             Header(picker, sync, more);
+            if (!_compact)
+            {
+                var heading = Heading(selected.Text("name"));
+                heading.Classes.Add("workbench-heading");
+                _contents.Children.Add(heading);
+            }
         }
         else
         {
@@ -146,6 +158,7 @@ public sealed partial class ClientView
     private async Task SyncAsync(string command)
     {
         var page = _loading;
+        Report(L("正在同步…", "Syncing…"));
         var result = await Execute(command, []);
         if (!ReferenceEquals(page, _loading) || _editing) return;
         await LoadAsync();
@@ -251,9 +264,17 @@ public sealed partial class ClientView
             (L("移除", "Remove"), () => Confirm(L("移除该组件？", "Remove component?"), () =>
                 Change("item_remove", new() { ["spaceId"] = spaceId, ["itemId"] = id })))
         };
-        if (kind is "note" or "notes") operations.Insert(0, (L("编辑", "Edit"), () => EditNote(spaceId, item)));
-        if (!OperatingSystem.IsAndroid() && kind is ("todo" or "tasks"))
-            operations.Insert(0, (L("新增待办", "Add task"), () => EditTask(spaceId, item, null)));
+        if (kind is "note" or "notes")
+        {
+            var note = item.Object("data").Text("text");
+            if (note.Length > 0)
+                operations.Insert(0, (L("复制便签", "Copy note"), async () =>
+                {
+                    await Execute("clipboard_local_write", new() { ["text"] = note });
+                    Report(L("已复制到本机剪贴板", "Copied to this device"));
+                }));
+            operations.Insert(0, (L("编辑", "Edit"), () => EditNote(spaceId, item)));
+        }
         var handle = IconLabel(ComponentGlyph(kind), title, prominent: true);
         var iconTone = kind switch
         {
@@ -424,9 +445,7 @@ public sealed partial class ClientView
     {
         var note = item.Object("data").Text("text");
         if (note.Length > 0) return Body(note);
-        return OperatingSystem.IsAndroid()
-            ? Action(L("写便签", "Write note"), () => EditNote(spaceId, item))
-            : Muted(L("空便签", "Empty note"));
+        return Action(L("写便签", "Write note"), () => EditNote(spaceId, item));
     }
 
     private Task EditNote(string spaceId, JsonObject item) =>
@@ -449,9 +468,7 @@ public sealed partial class ClientView
                 (L("删除", "Delete"), () => Confirm(L("删除该待办？", "Delete task?"),
                     () => UpdateTask(spaceId, item, id, null, null))))));
         }
-        if (OperatingSystem.IsAndroid())
-            tasks.Children.Add(Action(L("新增待办", "Add task"), () => EditTask(spaceId, item, null), glyph: "plus"));
-        else if (tasks.Children.Count == 0) tasks.Children.Add(Muted(L("暂无待办", "No tasks")));
+        tasks.Children.Add(Action(L("新增待办", "Add task"), () => EditTask(spaceId, item, null), glyph: "plus"));
         return tasks;
     }
 

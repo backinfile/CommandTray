@@ -125,9 +125,9 @@ internal sealed partial class LinuxCommands
         return uri;
     }
 
-    private static RelayClient Relay()
+    internal static RelayClient Relay(LocalSettings? settings = null)
     {
-        var settings = LocalSettings.Load();
+        settings ??= LocalSettings.Load();
         if (settings.Server is null || settings.Token is null)
             throw new InvalidOperationException("Pair this device with commandtray sync pair before using the relay.");
         return new RelayClient(ParseServer(settings.Server), settings.Token);
@@ -216,7 +216,8 @@ internal sealed partial class LinuxCommands
             "put" => await Relay().PutClipboardAsync(Required(args, 0, "clipboard text", allowEmpty: true), cancellationToken),
             "get" => (await Relay().GetClipboardAsync(cancellationToken))["text"]?.GetValue<string>() ?? string.Empty,
             "status" => await Relay().GetClipboardAsync(cancellationToken),
-            _ => throw new ArgumentException("Use clip put, clip get or clip status.")
+            "history" => await Relay().GetClipboardHistoryAsync(cancellationToken),
+            _ => throw new ArgumentException("Use clip put, clip get, clip status or clip history.")
         };
     }
 

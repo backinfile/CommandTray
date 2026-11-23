@@ -15,9 +15,13 @@ internal sealed class AndroidBackend : IClientBackend
     private readonly string _privateCache;
     private readonly AndroidSettings _settings;
     private readonly AndroidWorkspace _workspace;
+    private readonly ClipboardAutoSync _clipboardSync;
     private readonly HttpClient _http = new(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(35) };
     private WeakReference<Activity>? _focused;
     private AndroidMcpHost? _mcp;
+    private long? _observedClipboard;
+    private string? _observedClipboardText;
+    private const string SensitiveClipboard = "android.content.extra.IS_SENSITIVE";
 
     public AndroidBackend(Context context)
     {
@@ -26,6 +30,16 @@ internal sealed class AndroidBackend : IClientBackend
         var files = context.FilesDir?.AbsolutePath ?? throw new IOException("Android files directory is unavailable.");
         _privateCache = context.CacheDir?.AbsolutePath ?? throw new IOException("Android cache directory is unavailable.");
         _workspace = new AndroidWorkspace(files, _settings);
+        _clipboardSync = new ClipboardAutoSync(ClipboardConnection,
+            cancellation => Dispatcher.UIThread.InvokeAsync(ReadClipboardForSync, DispatcherPriority.Normal, cancellation).GetTask(),
+            (expected, text, cancellation) => Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                if (!_settings.ClipboardAutoSync || ReadClipboardForSync() != expected || FocusedClipboard() is not { } clipboard)
+                    return false;
+                using var clip = ClipData.NewPlainText("CommandTray", text);
+                clipboard.PrimaryClip = clip ?? throw new InvalidOperationException("Android clipboard is unavailable.");
+                return true;
+            }, DispatcherPriority.Normal, cancellation).GetTask());
     }
 
     public ClientFeatures Features => default;
@@ -122,6 +136,7 @@ internal sealed class AndroidBackend : IClientBackend
                     await Client().DeleteFileAsync(Text(args, "id"), cancellation);
                     return null;
                 case "clipboard_read": return await Client().GetClipboardAsync(cancellation);
+                case "clipboard_relay_history": return await Client().GetClipboardHistoryAsync(cancellation);
                 case "clipboard_send": return await Client().PutClipboardAsync(Text(args, "text"), cancellation);
                 case "clipboard_receive":
                 {
@@ -139,6 +154,8 @@ internal sealed class AndroidBackend : IClientBackend
                         _settings.SetLanguage(selected);
                     if (args["mcpEnabled"] is JsonValue enabled && enabled.TryGetValue<bool>(out var on))
                         SetMcp(on);
+                    if (args["clipboardAutoSync"] is JsonValue clipboardSync && clipboardSync.TryGetValue<bool>(out var autoSync))
+                        _settings.SetClipboardAutoSync(autoSync);
                     return ReadSettings();
                 case "mcp_config":
                     if (_mcp is null)
@@ -175,7 +192,10 @@ internal sealed class AndroidBackend : IClientBackend
         finally { _gate.Release(); }
     }
 
-    internal async Task SyncWhileResumedAsync(CancellationToken cancellation)
+    internal Task SyncWhileResumedAsync(CancellationToken cancellation) => Task.WhenAll(
+        SyncWorkspaceWhileResumedAsync(cancellation), _clipboardSync.RunAsync(cancellation));
+
+    private async Task SyncWorkspaceWhileResumedAsync(CancellationToken cancellation)
     {
         try
         {
@@ -191,6 +211,33 @@ internal sealed class AndroidBackend : IClientBackend
             }
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
+    }
+
+    private ClipboardSyncConnection? ClipboardConnection()
+    {
+        if (!_settings.ClipboardAutoSync || !_settings.Paired) return null;
+        var device = _settings.DeviceId;
+        var relay = Client();
+        return _settings.DeviceId == device ? new(device, relay) : null;
+    }
+
+    private ClipboardManager? FocusedClipboard() =>
+        _focused is not null && _focused.TryGetTarget(out var activity) && activity.HasWindowFocus
+            ? _context.GetSystemService(Context.ClipboardService) as ClipboardManager : null;
+
+    private string? ReadClipboardForSync()
+    {
+        if (FocusedClipboard() is not { } clipboard) return null;
+        using var description = clipboard.PrimaryClipDescription;
+        if (description is null) return "";
+        if (description.Extras?.GetBoolean(SensitiveClipboard) == true) return null;
+        if (_observedClipboard != description.Timestamp)
+        {
+            using var clip = clipboard.PrimaryClip;
+            _observedClipboardText = clip?.GetItemAt(0)?.Text;
+            _observedClipboard = description.Timestamp;
+        }
+        return _observedClipboardText;
     }
 
     private void SetMcp(bool enabled)
@@ -228,7 +275,7 @@ internal sealed class AndroidBackend : IClientBackend
                 if (sensitive && clipData.Description is { } description)
                 {
                     using var extras = new global::Android.OS.PersistableBundle();
-                    extras.PutBoolean("android.content.extra.IS_SENSITIVE", true);
+                    extras.PutBoolean(SensitiveClipboard, true);
                     description.Extras = extras;
                 }
                 clipboard.PrimaryClip = clipData;
@@ -263,6 +310,7 @@ internal sealed class AndroidBackend : IClientBackend
     private JsonObject ReadSettings() => new()
     {
         ["language"] = _settings.Language, ["runAtLogin"] = false, ["mcpEnabled"] = _mcp is not null,
+        ["clipboardAutoSync"] = _settings.ClipboardAutoSync,
         ["mcpEndpoint"] = AndroidSettings.McpEndpoint
     };
 

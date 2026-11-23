@@ -6,8 +6,8 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using CommandTray.Sync;
 
-if (args.Length != 1 || !File.Exists(args[0]))
-    throw new ArgumentException("Pass the full path to a built CommandTray.Relay.dll.");
+if (args.Length is < 1 or > 2 || !File.Exists(args[0]) || args.Length == 2 && args[1] != "--clipboard")
+    throw new ArgumentException("Pass the full path to a built CommandTray.Relay.dll, optionally followed by --clipboard.");
 
 string relay = Path.GetFullPath(args[0]);
 string runData = Path.Combine(Path.GetFullPath("artifacts/relay-smoke"), Guid.NewGuid().ToString("N"));
@@ -23,6 +23,12 @@ using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(8) };
 
 try
 {
+    if (args.Length == 2)
+    {
+        await VerifyClipboardAsync();
+        return;
+    }
+
     string backupId;
     const string recordId = "smoke-ssh-key";
     const string vaultPassphrase = "generated smoke fixture only";
@@ -195,6 +201,81 @@ finally
     var expectedParent = Path.GetFullPath("artifacts/relay-smoke");
     if (Path.GetDirectoryName(runData) == expectedParent && Directory.Exists(runData))
         Directory.Delete(runData, recursive: true);
+}
+
+async Task VerifyClipboardAsync()
+{
+    PairingResult receiver;
+    using (var server = await StartRelayAsync())
+    {
+        try
+        {
+            using var unauthenticated = await http.GetAsync(new Uri(uri, "/v1/clipboard/history"));
+            Assert(unauthenticated.StatusCode == HttpStatusCode.Unauthorized, "Clipboard history was available without pairing.");
+            var pairing = new RelayClient(uri, http: http);
+            var sender = await pairing.PairAsync("Windows workstation", pairingCode);
+            receiver = await pairing.PairAsync("Android phone", pairingCode);
+            var windows = new RelayClient(uri, sender.Token, http);
+            var phone = new RelayClient(uri, receiver.Token, http);
+            await windows.PutClipboardAsync("sent by Windows");
+
+            string? local = "text already on the phone";
+            bool enabled = true;
+            var sync = new ClipboardAutoSync(() => enabled ? new(receiver.DeviceId, phone) : null,
+                _ => Task.FromResult<string?>(local), (expected, replacement, _) =>
+                {
+                    if (local != expected) return Task.FromResult(false);
+                    local = replacement;
+                    return Task.FromResult(true);
+                });
+            await sync.SyncOnceAsync(default);
+            await sync.SyncOnceAsync(default);
+            Assert(local == "sent by Windows" && (await windows.GetClipboardHistoryAsync()).Count == 1,
+                "Receiving the initial clipboard echoed it or sent pre-existing local text.");
+
+            local = "sent by Android";
+            await sync.SyncOnceAsync(default);
+            var newest = await windows.GetClipboardAsync();
+            Assert((string?)newest["text"] == local && (string?)newest["deviceName"] == "Android phone",
+                "Automatic upload did not preserve its source.");
+            await phone.PutClipboardAsync(local);
+            Assert((await phone.GetClipboardHistoryAsync()).Count == 2, "An identical retry introduced a duplicate.");
+            await windows.PutClipboardAsync(local);
+            var repeatedFromOtherDevice = await phone.GetClipboardHistoryAsync();
+            Assert(repeatedFromOtherDevice.Count == 3 && (string?)repeatedFromOtherDevice[0]!["deviceId"] == sender.DeviceId,
+                "The same text from a different device lost the new source.");
+
+            // Unreadable/sensitive local clipboard and disabled mode are both excluded from auto sync.
+            local = null;
+            await windows.PutClipboardAsync("latest from Windows");
+            await sync.SyncOnceAsync(default);
+            Assert(local is null, "Automatic download replaced an unavailable local clipboard.");
+            enabled = false;
+            local = "copied while disabled";
+            await sync.SyncOnceAsync(default);
+            Assert((string?)(await windows.GetClipboardAsync())["text"] == "latest from Windows",
+                "Disabled mode sent local text.");
+
+            await windows.DeleteDeviceAsync(sender.DeviceId);
+            await phone.PutClipboardAsync("");
+            Assert((string?)(await phone.GetClipboardAsync())["text"] == "" &&
+                (await phone.GetClipboardHistoryAsync()).Count == 4, "Clearing the current clipboard lost its history.");
+        }
+        finally { await StopAsync(server); }
+    }
+
+    using var restarted = await StartRelayAsync();
+    try
+    {
+        var phone = new RelayClient(uri, receiver.Token, http);
+        var history = await phone.GetClipboardHistoryAsync();
+        Assert(history.Count == 4 && (string?)history[0]!["deviceName"] == "Windows workstation" &&
+            (string?)history[0]!["text"] == "latest from Windows" &&
+            DateTimeOffset.TryParse((string?)history[0]!["updatedAt"], out _),
+            "Clipboard history, time or the former device name was lost after restart.");
+    }
+    finally { await StopAsync(restarted); }
+    Console.WriteLine("Clipboard sync, history, sources, duplicate handling and persistence passed.");
 }
 
 Process Launch(params string[] arguments)

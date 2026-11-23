@@ -701,6 +701,7 @@ public sealed partial class SettingsForm : Form
                 var proposed = new AppConfiguration
                 {
                     Language = _configuration.Language, RunAtLogin = _configuration.RunAtLogin, McpEnabled = _configuration.McpEnabled,
+                    ClipboardAutoSync = _configuration.ClipboardAutoSync,
                     Services = _configuration.Services.Where(service => service.Id != item.Id).ToList()
                 };
                 _store.Save(proposed); _configuration.Services = proposed.Services;
