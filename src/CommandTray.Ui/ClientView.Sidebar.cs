@@ -38,9 +38,24 @@ public sealed partial class ClientView
         _navFooter.IsVisible = !_compact;
         if (_compact)
         {
-            var strip = new UniformGrid { Columns = pages.Count };
-            foreach (var page in pages) strip.Children.Add(NavigationButton(page.Id, L(page.Zh, page.En)));
-            _navigation.Children.Add(strip);
+            if (OperatingSystem.IsAndroid() && _english)
+            {
+                // Give the longer Clipboard label room at large system font sizes.
+                var strip = new Grid { ColumnDefinitions = new ColumnDefinitions("*,0.75*,1.25*,*") };
+                foreach (var page in pages)
+                {
+                    var button = NavigationButton(page.Id, page.En);
+                    Grid.SetColumn(button, strip.Children.Count);
+                    strip.Children.Add(button);
+                }
+                _navigation.Children.Add(strip);
+            }
+            else
+            {
+                var strip = new UniformGrid { Columns = pages.Count };
+                foreach (var page in pages) strip.Children.Add(NavigationButton(page.Id, L(page.Zh, page.En)));
+                _navigation.Children.Add(strip);
+            }
             _navHeader.Content = null;
             _navFooter.Child = null;
             return;

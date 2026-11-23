@@ -10,6 +10,7 @@ namespace CommandTray.Android;
 internal sealed class AndroidBackend : IClientBackend
 {
     private readonly SemaphoreSlim _gate = new(1);
+    private readonly SemaphoreSlim _workspaceSync = new(1);
     private readonly Context _context;
     private readonly string _privateCache;
     private readonly AndroidSettings _settings;
@@ -31,33 +32,60 @@ internal sealed class AndroidBackend : IClientBackend
     internal string CacheDirectory => _privateCache;
 
     public ValueTask<JsonNode?> ExecuteAsync(string operation, JsonObject arguments, CancellationToken cancellationToken = default) =>
-        new(Task.Run(() => ExecuteLockedAsync(operation, arguments, cancellationToken), cancellationToken));
+        new(Task.Run(() => operation is "relay_pair" or "relay_unpair" or "sync_push" or "sync_pull" or "sync_resolve"
+            ? ExecuteWorkspaceSyncAsync(operation, arguments, cancellationToken)
+            : ExecuteLockedAsync(operation, arguments, cancellationToken), cancellationToken));
+
+    private async Task<JsonNode?> ExecuteWorkspaceSyncAsync(string operation, JsonObject args, CancellationToken cancellation)
+    {
+        // Keep the active relay partition stable throughout sync. Local document operations use the disk lock.
+        await _workspaceSync.WaitAsync(cancellation);
+        try
+        {
+            if (operation is "relay_pair" or "relay_unpair")
+                return await ExecuteLockedAsync(operation, args, cancellation);
+
+            var client = Client();
+            var result = operation == "sync_resolve"
+                ? await _workspace.ResolveAsync(client, Text(args, "choice"), cancellation)
+                : await _workspace.SynchronizeAsync(client, operation == "sync_push", cancellation);
+            lock (_workspace.DiskGate) return SyncResult(result);
+        }
+        finally { _workspaceSync.Release(); }
+    }
 
     private async Task<JsonNode?> ExecuteLockedAsync(string operation, JsonObject args, CancellationToken cancellation)
     {
         await _gate.WaitAsync(cancellation);
         try
         {
+            lock (_workspace.DiskGate)
+            {
+                switch (operation)
+                {
+                    case "workspace_read": return _workspace.Document();
+                    case "space_create": return new JsonObject { ["id"] = _workspace.CreateSpace(Text(args, "name")) };
+                    case "space_rename":
+                        _workspace.RenameSpace(Text(args, "spaceId"), Text(args, "name"));
+                        return null;
+                    case "space_delete":
+                        _workspace.DeleteSpace(Text(args, "spaceId"));
+                        return null;
+                    case "space_activate":
+                        _workspace.ActivateSpace(Text(args, "spaceId"));
+                        return null;
+                    case "item_save":
+                        return new JsonObject { ["id"] = _workspace.SaveItem(Text(args, "spaceId"),
+                            args["item"] as JsonObject ?? throw new ArgumentException("Component is required.")) };
+                    case "item_remove":
+                        _workspace.RemoveItem(Text(args, "spaceId"), Text(args, "itemId"));
+                        return null;
+                    case "relay_status": return Status();
+                }
+            }
+
             switch (operation)
             {
-                case "workspace_read": return _workspace.Document();
-                case "space_create": return new JsonObject { ["id"] = _workspace.CreateSpace(Text(args, "name")) };
-                case "space_rename":
-                    _workspace.RenameSpace(Text(args, "spaceId"), Text(args, "name"));
-                    return null;
-                case "space_delete":
-                    _workspace.DeleteSpace(Text(args, "spaceId"));
-                    return null;
-                case "space_activate":
-                    _workspace.ActivateSpace(Text(args, "spaceId"));
-                    return null;
-                case "item_save":
-                    return new JsonObject { ["id"] = _workspace.SaveItem(Text(args, "spaceId"),
-                        args["item"] as JsonObject ?? throw new ArgumentException("Component is required.")) };
-                case "item_remove":
-                    _workspace.RemoveItem(Text(args, "spaceId"), Text(args, "itemId"));
-                    return null;
-                case "relay_status": return Status();
                 case "relay_pair":
                 {
                     var server = AndroidSettings.NormalizeServer(Text(args, "server"));
@@ -76,11 +104,6 @@ internal sealed class AndroidBackend : IClientBackend
                     _settings.ForgetPairing();
                     return Status();
                 case "relay_devices": return await Client().ListDevicesAsync(cancellation);
-                case "sync_push":
-                case "sync_pull":
-                    return SyncResult(await _workspace.SynchronizeAsync(Client(), operation == "sync_push", cancellation));
-                case "sync_resolve":
-                    return SyncResult(await _workspace.ResolveAsync(Client(), Text(args, "choice"), cancellation));
                 case "files_list": return await Client().ListFilesAsync(cancellation);
                 case "file_upload":
                 {

@@ -7,6 +7,8 @@ namespace CommandTray.Android;
 
 internal sealed class AndroidWorkspace(string root, AndroidSettings settings)
 {
+    internal object DiskGate { get; } = new();
+
     private string PartitionPath(string server)
     {
         var key = Convert.ToBase64String(SHA256.HashData(Encoding.UTF8.GetBytes(server)))
@@ -16,7 +18,7 @@ internal sealed class AndroidWorkspace(string root, AndroidSettings settings)
 
     private string StatePath => PartitionPath(settings.Server) + ".json";
     private string JournalPath => PartitionPath(settings.Server) + ".journal.json";
-    private WorkspaceSyncJournal Journal => new(JournalPath);
+    private WorkspaceSyncJournal Journal => new(JournalPath, DiskGate, () => RequireDocument(Read()));
 
     public async Task<string?> StageOfflineSpacesAsync(string server, RelayClient client, CancellationToken cancellation)
     {
@@ -168,7 +170,8 @@ internal sealed class AndroidWorkspace(string root, AndroidSettings settings)
 
     public async Task<WorkspaceSyncResult> SynchronizeAsync(RelayClient client, bool push, CancellationToken cancellation)
     {
-        var state = Read();
+        JsonObject state;
+        lock (DiskGate) state = Read();
         if (state["remote"] is JsonObject)
             throw new InvalidOperationException("Resolve the saved workspace conflict first.");
         var local = RequireDocument(state);
@@ -177,41 +180,46 @@ internal sealed class AndroidWorkspace(string root, AndroidSettings settings)
         if (revision > 0 && state["dirty"]?.GetValue<bool>() == false && !File.Exists(JournalPath))
         {
             var incoming = await client.GetWorkspaceAsync(cancellation);
-            if (Revision(incoming) >= revision)
+            lock (DiskGate)
             {
-                local = RequireDocument(incoming);
-                revision = Revision(incoming);
-                CommitSync(local, revision);
+                var current = Read();
+                if (Revision(incoming) >= revision && JsonNode.DeepEquals(current, state))
+                {
+                    local = RequireDocument(incoming);
+                    revision = Revision(incoming);
+                    CommitSync(local, revision);
+                }
+                else
+                {
+                    local = RequireDocument(current);
+                    revision = Revision(current);
+                }
             }
         }
         // Device navigation is stored separately. It does not dirty the network workspace.
         return await Journal.SynchronizeAsync(client, local, revision, push, CommitSync, cancellation);
     }
 
-    public async Task<WorkspaceSyncResult> ResolveAsync(RelayClient client, string choice, CancellationToken cancellation)
+    public Task<WorkspaceSyncResult> ResolveAsync(RelayClient client, string choice, CancellationToken cancellation)
     {
         if (choice is not ("local" or "remote"))
             throw new ArgumentException("Choose the local or remote version.");
-        var state = Read();
         var journal = Journal;
-        if (journal.ReadConflict() is not null)
-            return await journal.ResolveAsync(client, RequireDocument(state), choice, CommitSync, cancellation);
-
-        // Java's previous cache kept a conflicting relay envelope beside the local document.
-        if (state["remote"] is not JsonObject legacy)
-            throw new InvalidOperationException("There is no workspace conflict.");
-        var incoming = await client.GetWorkspaceAsync(cancellation);
-        var remoteVersion = Revision(incoming);
-        if (remoteVersion < Revision(legacy))
-            throw new InvalidOperationException("The relay workspace revision has moved backwards.");
-        if (choice == "remote")
+        JsonObject local;
+        lock (DiskGate)
         {
-            CommitSync(RequireDocument(incoming), remoteVersion);
-            return await SynchronizeAsync(client, push: false, cancellation);
+            var state = Read();
+            local = RequireDocument(state);
+            // Move the old Android cache's conflict into the journal before resolving it.
+            if (state["remote"] is JsonObject legacy)
+            {
+                if (journal.ReadConflict() is null)
+                    journal.ImportConflict(Revision(state), local, Revision(legacy), RequireDocument(legacy));
+                state.Remove("remote");
+                Write(StatePath, state);
+            }
         }
-        var envelope = await client.PutWorkspaceAsync(remoteVersion, RequireDocument(state), cancellation);
-        CommitSync(RequireDocument(envelope), Revision(envelope));
-        return await SynchronizeAsync(client, push: false, cancellation);
+        return journal.ResolveAsync(client, local, choice, CommitSync, cancellation);
     }
 
     public JsonObject? Conflict()

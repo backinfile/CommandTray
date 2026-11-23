@@ -12,16 +12,28 @@ public sealed class WorkspaceSyncJournal
     private static readonly JsonSerializerOptions Format = new(JsonSerializerDefaults.Web);
     private readonly string _path;
     private readonly SemaphoreSlim _operation = new(1, 1);
-    private readonly object _disk = new();
+    private readonly object _disk;
+    private readonly Func<JsonObject>? _readCurrentLocal;
 
     private sealed record Pending(long Revision, string Id, JsonObject Local, WorkspaceChange[] Changes);
     private sealed record Journal(long Revision, JsonObject Base, Pending? Outbox = null, WorkspaceSyncConflict? Conflict = null);
 
-    public WorkspaceSyncJournal(string statePath) => _path = Path.GetFullPath(statePath);
+    public WorkspaceSyncJournal(string statePath) : this(statePath, new object(), null) { }
+
+    // A client that accepts edits during HTTP requests shares this lock with its local workspace store.
+    public WorkspaceSyncJournal(string statePath, object workspaceLock, Func<JsonObject>? readCurrentLocal)
+    {
+        _path = Path.GetFullPath(statePath);
+        _disk = workspaceLock;
+        _readCurrentLocal = readCurrentLocal;
+    }
 
     public WorkspaceSyncConflict? ReadConflict() => Read()?.Conflict;
 
     public void SetPairingBaseline(long revision, JsonObject remote) => Write(new Journal(revision, Copy(remote)));
+
+    public void ImportConflict(long knownRevision, JsonObject local, long remoteRevision, JsonObject remote) =>
+        KeepConflict(new Journal(knownRevision, Copy(local)), local, remoteRevision, remote);
 
     public async Task<WorkspaceSyncResult> SynchronizeAsync(
         RelayClient client, JsonObject local, long knownRevision, bool push,
@@ -75,6 +87,8 @@ public sealed class WorkspaceSyncJournal
             var state = Read();
             if (state?.Conflict is null) throw new InvalidOperationException("There is no workspace conflict to resolve.");
             var (revision, remote) = Snapshot(await client.GetWorkspaceAsync(cancellationToken));
+            if (revision < state.Conflict.RemoteRevision)
+                throw new InvalidOperationException("The relay workspace revision has moved backwards.");
             if (choice == "remote") return Complete(revision, remote, remote, local, state.Revision, apply);
             var changes = WorkspaceDelta.Between(remote, local);
             if (changes.Length == 0) return Complete(revision, remote, remote, local, state.Revision, apply);
@@ -160,16 +174,28 @@ public sealed class WorkspaceSyncJournal
     private WorkspaceSyncResult Complete(long revision, JsonObject document, JsonObject baseline, JsonObject local,
         long knownRevision, Action<JsonObject, long> apply)
     {
-        if (knownRevision != revision || !JsonNode.DeepEquals(document, local)) apply(Copy(document), revision);
-        Write(new Journal(revision, Copy(baseline)));
-        return new(revision, document, null);
+        lock (_disk)
+        {
+            var current = _readCurrentLocal?.Invoke() ?? local;
+            var state = new Journal(revision, Copy(baseline));
+            if (!JsonNode.DeepEquals(current, local) &&
+                !WorkspaceDelta.TryApply(document, WorkspaceDelta.Between(local, current), out document))
+                return KeepConflict(state, current, revision, baseline);
+            if (knownRevision != revision || !JsonNode.DeepEquals(document, current)) apply(Copy(document), revision);
+            Write(state);
+            return new(revision, document, null);
+        }
     }
 
     private WorkspaceSyncResult KeepConflict(Journal state, JsonObject local, long revision, JsonObject remote)
     {
-        var conflict = new WorkspaceSyncConflict(revision, Copy(local), Copy(remote));
-        Write(state with { Outbox = null, Conflict = conflict });
-        return new(state.Revision, local, conflict);
+        lock (_disk)
+        {
+            var current = _readCurrentLocal?.Invoke() ?? local;
+            var conflict = new WorkspaceSyncConflict(revision, Copy(current), Copy(remote));
+            Write(state with { Outbox = null, Conflict = conflict });
+            return new(state.Revision, current, conflict);
+        }
     }
 
     private Journal? Read()

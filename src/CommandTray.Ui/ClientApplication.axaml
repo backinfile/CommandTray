@@ -39,6 +39,14 @@
           <SolidColorBrush x:Key="NoteMark">#F7CC81</SolidColorBrush>
         </ResourceDictionary>
       </ResourceDictionary.ThemeDictionaries>
+      <x:Double x:Key="TrayFontSmall">11</x:Double>
+      <x:Double x:Key="TrayFontCaption">12</x:Double>
+      <x:Double x:Key="TrayFontDetail">13</x:Double>
+      <x:Double x:Key="TrayFontBody">14</x:Double>
+      <x:Double x:Key="TrayFontSection">15</x:Double>
+      <x:Double x:Key="TrayFontLarge">16</x:Double>
+      <x:Double x:Key="TrayFontTitle">17</x:Double>
+      <x:Double x:Key="TrayReadingLineHeight">22</x:Double>
       <SolidColorBrush x:Key="ShellPaper">#101D32</SolidColorBrush>
       <SolidColorBrush x:Key="ShellInk">#EAF3FF</SolidColorBrush>
       <SolidColorBrush x:Key="ShellMuted">#A7BAD6</SolidColorBrush>
@@ -77,7 +85,7 @@
     <Style Selector="UserControl.tray-root">
       <Setter Property="Background" Value="{DynamicResource TrayPaper}" />
       <Setter Property="Foreground" Value="{DynamicResource TrayInk}" />
-      <Setter Property="FontSize" Value="14" />
+      <Setter Property="FontSize" Value="{DynamicResource TrayFontBody}" />
     </Style>
     <Style Selector="UserControl.tray-root.wide">
       <Setter Property="Background" Value="{DynamicResource TrayCanvas}" />
@@ -108,7 +116,7 @@
     <Style Selector="TextBlock.brand">
       <Setter Property="Foreground" Value="{StaticResource ShellInk}" />
       <Setter Property="FontWeight" Value="SemiBold" />
-      <Setter Property="FontSize" Value="13" />
+      <Setter Property="FontSize" Value="{DynamicResource TrayFontDetail}" />
     </Style>
     <Style Selector="Border.nav-footer">
       <Setter Property="BorderBrush" Value="{StaticResource ShellLine}" />
@@ -194,37 +202,44 @@
     <Style Selector="Grid.compact Button.action.navigation">
       <Setter Property="HorizontalContentAlignment" Value="Center" />
       <Setter Property="Padding" Value="3,3" />
-      <Setter Property="FontSize" Value="12" />
+      <Setter Property="FontSize" Value="{DynamicResource TrayFontCaption}" />
       <Setter Property="MinHeight" Value="48" />
+    </Style>
+    <Style Selector="Grid.android Button.action, Grid.android ComboBox, Grid.android TextBox, MenuItem.android">
+      <Setter Property="FontSize" Value="{DynamicResource TrayFontBody}" />
+    </Style>
+    <Style Selector="Grid.android Button.action.navigation">
+      <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+      <Setter Property="FontSize" Value="{DynamicResource TrayFontCaption}" />
     </Style>
     <Style Selector="Grid.compact ToggleSwitch">
       <Setter Property="MinHeight" Value="48" />
     </Style>
     <Style Selector="TextBlock.muted">
       <Setter Property="Foreground" Value="{DynamicResource TraySecondary}" />
-      <Setter Property="FontSize" Value="12" />
+      <Setter Property="FontSize" Value="{DynamicResource TrayFontCaption}" />
     </Style>
     <Style Selector="TextBlock.form-error">
       <Setter Property="Foreground" Value="{DynamicResource TrayError}" />
-      <Setter Property="FontSize" Value="13" />
+      <Setter Property="FontSize" Value="{DynamicResource TrayFontDetail}" />
     </Style>
     <Style Selector="TextBlock.section">
       <Setter Property="FontWeight" Value="SemiBold" />
-      <Setter Property="FontSize" Value="15" />
+      <Setter Property="FontSize" Value="{DynamicResource TrayFontSection}" />
     </Style>
     <Style Selector="TextBlock.toolbar-title">
-      <Setter Property="FontSize" Value="17" />
+      <Setter Property="FontSize" Value="{DynamicResource TrayFontTitle}" />
       <Setter Property="FontWeight" Value="SemiBold" />
     </Style>
     <Style Selector="TextBlock.column-label">
       <Setter Property="Foreground" Value="{DynamicResource TraySecondary}" />
       <Setter Property="FontWeight" Value="SemiBold" />
-      <Setter Property="FontSize" Value="11" />
+      <Setter Property="FontSize" Value="{DynamicResource TrayFontSmall}" />
       <Setter Property="VerticalAlignment" Value="Center" />
     </Style>
     <Style Selector="SelectableTextBlock.reading">
-      <Setter Property="FontSize" Value="15" />
-      <Setter Property="LineHeight" Value="22" />
+      <Setter Property="FontSize" Value="{DynamicResource TrayFontSection}" />
+      <Setter Property="LineHeight" Value="{DynamicResource TrayReadingLineHeight}" />
     </Style>
     <Style Selector="Border.divider">
       <Setter Property="BorderBrush" Value="{DynamicResource TrayLine}" />
@@ -312,7 +327,7 @@
       <Setter Property="Foreground" Value="{DynamicResource TerminalInk}" />
       <Setter Property="BorderBrush" Value="{DynamicResource TerminalLine}" />
       <Setter Property="CornerRadius" Value="5" />
-      <Setter Property="FontSize" Value="13" />
+      <Setter Property="FontSize" Value="{DynamicResource TrayFontDetail}" />
     </Style>
     <Style Selector="TextBox.terminal-input">
       <Setter Property="Background" Value="{DynamicResource TrayMutedFill}" />
@@ -375,7 +390,7 @@
       <Setter Property="Background" Value="{DynamicResource TrayCanvas}" />
       <Setter Property="BorderBrush" Value="{DynamicResource TrayLine}" />
       <Setter Property="Foreground" Value="{DynamicResource TrayInk}" />
-      <Setter Property="FontSize" Value="16" />
+      <Setter Property="FontSize" Value="{DynamicResource TrayFontLarge}" />
       <Setter Property="Padding" Value="11,8" />
     </Style>
     <Style Selector="ListBox.palette-results">
@@ -399,7 +414,7 @@
     </Style>
     <Style Selector="Border.keycap TextBlock">
       <Setter Property="Foreground" Value="{StaticResource ShellMuted}" />
-      <Setter Property="FontSize" Value="11" />
+      <Setter Property="FontSize" Value="{DynamicResource TrayFontSmall}" />
     </Style>
     <Style Selector="Border.notice">
       <Setter Property="Background" Value="{DynamicResource TraySelection}" />

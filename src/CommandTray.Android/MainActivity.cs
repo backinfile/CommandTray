@@ -1,7 +1,9 @@
 using Android.App;
 using Android.Content.PM;
+using Android.Content.Res;
 using Android.OS;
 using Android.Runtime;
+using Android.Util;
 using Avalonia;
 using Avalonia.Android;
 using Avalonia.Controls.ApplicationLifetimes;
@@ -42,11 +44,40 @@ public sealed class AndroidApplication(nint javaReference, JniHandleOwnership tr
 
 [Activity(Name = "dev.commandtray.android.MainActivity", Label = "CommandTray", Theme = "@style/Theme.AppCompat.Light.NoActionBar",
     MainLauncher = true, Exported = true, LaunchMode = LaunchMode.SingleTop,
-    ConfigurationChanges = ConfigChanges.Orientation | ConfigChanges.ScreenSize | ConfigChanges.KeyboardHidden | ConfigChanges.UiMode)]
+    ConfigurationChanges = ConfigChanges.Orientation | ConfigChanges.ScreenSize | ConfigChanges.KeyboardHidden |
+        ConfigChanges.UiMode | ConfigChanges.FontScale)]
 public sealed class MainActivity : AvaloniaMainActivity
 {
+    private static readonly (string Resource, float Sp)[] TextSizes =
+    [
+        ("TrayFontSmall", 11), ("TrayFontCaption", 12), ("TrayFontDetail", 13), ("TrayFontBody", 14),
+        ("TrayFontSection", 15), ("TrayFontLarge", 16), ("TrayFontTitle", 17), ("TrayReadingLineHeight", 22)
+    ];
+
     private CancellationTokenSource? _foreground;
     private AndroidBackend Backend => ((AndroidApplication)Application!).Backend;
+
+    protected override void OnCreate(Bundle? savedInstanceState)
+    {
+        base.OnCreate(savedInstanceState);
+        UpdateTextSizes();
+    }
+
+    public override void OnConfigurationChanged(Configuration newConfig)
+    {
+        base.OnConfigurationChanged(newConfig);
+        UpdateTextSizes();
+    }
+
+    private void UpdateTextSizes()
+    {
+        if (Avalonia.Application.Current is not { } app || Resources?.DisplayMetrics is not { } metrics) return;
+        foreach (var (resource, sp) in TextSizes)
+        {
+            double size = TypedValue.ApplyDimension(ComplexUnitType.Sp, sp, metrics) / metrics.Density;
+            if (!Equals(app.Resources[resource], size)) app.Resources[resource] = size;
+        }
+    }
 
     protected override void OnResume()
     {

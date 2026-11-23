@@ -15,8 +15,9 @@ public sealed partial class ClientView
     {
         Header(L("工作空间", "Workspace"));
         var document = await Execute("workspace_read", [], token);
-        _displayedWorkspace = document;
         var relay = await Execute("relay_status", [], token);
+        _displayedWorkspace = document;
+        _displayedWorkspaceConflict = HasWorkspaceConflict(relay);
         var spaces = document.Array("spaces").OfType<JsonObject>().ToArray();
         var selected = spaces.FirstOrDefault(space =>
             space.Text("id") == (_spaceId ?? document.Text("activeSpaceId"))) ?? spaces.FirstOrDefault();
@@ -82,7 +83,7 @@ public sealed partial class ClientView
             }, sync, more);
         }
 
-        if (relay is JsonObject relayState && (relayState["conflict"] is JsonObject || relayState.Flag("conflict")))
+        if (_displayedWorkspaceConflict)
         {
             var resolution = Menu(L("同步冲突", "Sync conflict"),
                 (L("保留本机修改", "Keep local changes"), () => Change("sync_resolve", new() { ["choice"] = "local" })),
@@ -144,11 +145,16 @@ public sealed partial class ClientView
 
     private async Task SyncAsync(string command)
     {
+        var page = _loading;
         var result = await Execute(command, []);
+        if (!ReferenceEquals(page, _loading) || _editing) return;
         await LoadAsync();
-        if (result?["conflict"] is not JsonObject && !result.Flag("conflict"))
+        if (!HasWorkspaceConflict(result))
             Report(L("同步操作已完成", "Sync operation finished"));
     }
+
+    private static bool HasWorkspaceConflict(JsonNode? state) =>
+        state?["conflict"] is JsonObject || state.Flag("conflict");
 
     private Task NewSpaceAsync() => Form(L("新建空间", "New space"), L("创建", "Create"), async values =>
     {

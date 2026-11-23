@@ -37,6 +37,7 @@ public sealed partial class ClientView : UserControl
     private bool _english = !CultureInfo.CurrentUICulture.Name.StartsWith("zh", StringComparison.OrdinalIgnoreCase);
     private CancellationTokenSource? _loading;
     private JsonNode? _displayedWorkspace;
+    private bool _displayedWorkspaceConflict;
     private bool _refreshingWorkspace;
     private bool _editing;
     private DateTimeOffset _lastInteraction;
@@ -48,6 +49,7 @@ public sealed partial class ClientView : UserControl
         _backend = backend;
         AvaloniaXamlLoader.Load(this);
         _shell = this.FindControl<Grid>("Shell")!;
+        if (OperatingSystem.IsAndroid()) _shell.Classes.Add("android");
         _toolbar = this.FindControl<Grid>("Toolbar")!;
         _navBorder = this.FindControl<Border>("NavBorder")!;
         _navHeader = this.FindControl<ContentControl>("NavHeader")!;
@@ -217,12 +219,16 @@ public sealed partial class ClientView : UserControl
             DateTimeOffset.UtcNow - _lastInteraction < TimeSpan.FromSeconds(2) ||
             TopLevel.GetTopLevel(this)?.FocusManager?.GetFocusedElement() is TextBox) return;
         var displayed = _displayedWorkspace;
+        bool displayedConflict = _displayedWorkspaceConflict;
         _refreshingWorkspace = true;
         try
         {
             var current = await Execute("workspace_read", []);
-            if (_page == "workspace" && !_editing && ReferenceEquals(displayed, _displayedWorkspace) &&
-                !JsonNode.DeepEquals(current, displayed)) await LoadAsync();
+            bool changed = !JsonNode.DeepEquals(current, displayed);
+            if (!changed && OperatingSystem.IsAndroid())
+                changed = HasWorkspaceConflict(await Execute("relay_status", [])) != displayedConflict;
+            if (changed && _page == "workspace" && !_editing && ReferenceEquals(displayed, _displayedWorkspace))
+                await LoadAsync();
         }
         catch (Exception error) { Report(error.Message); }
         finally { _refreshingWorkspace = false; }
@@ -251,6 +257,13 @@ public sealed partial class ClientView : UserControl
             label.Orientation = Orientation.Vertical;
             label.Spacing = 1;
             label.HorizontalAlignment = HorizontalAlignment.Center;
+            if (OperatingSystem.IsAndroid() && label.Children[1] is TextBlock text)
+            {
+                label.HorizontalAlignment = HorizontalAlignment.Stretch;
+                text.TextWrapping = TextWrapping.Wrap;
+                text.TextTrimming = TextTrimming.None;
+                text.TextAlignment = TextAlignment.Center;
+            }
             button.Content = label;
         }
         else if (_sidebarCollapsed) button.Content = TrayGlyph.Icon(glyph, 19);
@@ -352,6 +365,7 @@ public sealed partial class ClientView : UserControl
         {
             var entry = new MenuItem { Header = option.Label };
             if (_compact) entry.MinHeight = 48;
+            if (OperatingSystem.IsAndroid()) entry.Classes.Add("android");
             entry.Click += async (_, _) => await Act(option.Action);
             items.Items.Add(entry);
         }
@@ -378,6 +392,11 @@ public sealed partial class ClientView : UserControl
     {
         var heading = Heading(title);
         heading.Classes.Add("toolbar-title");
+        if (OperatingSystem.IsAndroid())
+        {
+            heading.TextWrapping = TextWrapping.Wrap;
+            heading.TextTrimming = TextTrimming.None;
+        }
         Header(heading, actions);
     }
 
