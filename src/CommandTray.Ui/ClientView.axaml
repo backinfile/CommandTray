@@ -1,19 +1,24 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              x:Class="CommandTray.Ui.ClientView"
-             Classes="tray-root compact">
-  <Grid x:Name="Shell" ColumnDefinitions="Auto,*" RowDefinitions="Auto,*,Auto,Auto">
-    <Border Grid.Column="1" Classes="chrome" BorderThickness="0,0,0,1">
-      <Grid x:Name="Toolbar" ColumnDefinitions="*,Auto" MinHeight="48" Margin="14,2" />
+             Classes="tray-root compact" Focusable="True">
+  <Grid x:Name="Shell" ColumnDefinitions="Auto,*" RowDefinitions="Auto,*,Auto,Auto"
+        Background="{DynamicResource TrayCanvas}">
+    <Border Grid.Column="1" Classes="chrome topbar" BorderThickness="0,0,0,1">
+      <Grid x:Name="Toolbar" ColumnDefinitions="*,Auto" MinHeight="46" Margin="14,2" />
     </Border>
+    <Border x:Name="WorkspaceGrid" Grid.Column="1" Grid.Row="1" IsHitTestVisible="False" IsVisible="False"
+            Background="{StaticResource TrayDotGrid}" />
     <ScrollViewer x:Name="Viewport" Grid.Column="1" Grid.Row="1"
                   HorizontalScrollBarVisibility="Disabled">
       <StackPanel x:Name="Contents" Margin="14,10" Spacing="8" />
     </ScrollViewer>
     <TextBlock x:Name="StatusLine" Grid.Column="1" Grid.Row="2"
                Margin="14,4" TextWrapping="Wrap" Classes="muted" IsVisible="False" />
-    <Border x:Name="NavBorder" Grid.RowSpan="3" Padding="6" Classes="chrome">
+    <Border x:Name="NavBorder" Grid.RowSpan="3" Padding="6" Classes="chrome sidebar">
       <StackPanel x:Name="Navigation" Orientation="Vertical" Spacing="4" />
     </Border>
+    <Border x:Name="PaletteOverlay" Grid.ColumnSpan="2" Grid.RowSpan="4"
+            Background="#AB060D1B" IsVisible="False" />
   </Grid>
 </UserControl>

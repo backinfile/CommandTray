@@ -43,6 +43,7 @@ public sealed partial class ClientView
                 SelectedIndex = Array.IndexOf(spaces, selected),
                 MaxDropDownHeight = 280
             };
+            picker.Classes.Add("space-picker");
             Avalonia.Automation.AutomationProperties.SetName(picker, L("切换空间", "Switch space"));
             picker.SelectionChanged += async (_, _) =>
             {
@@ -58,7 +59,7 @@ public sealed partial class ClientView
             foreach (var space in spaces)
             {
                 var id = space.Text("id");
-                var tab = Action(space.Text("name"), () => SelectSpaceAsync(id));
+                var tab = Action(space.Text("name"), () => SelectSpaceAsync(id), glyph: "spaces");
                 tab.Classes.Add("space-tab");
                 if (id == spaceId) tab.Classes.Add("selected");
                 tabs.Children.Add(tab);
@@ -155,7 +156,8 @@ public sealed partial class ClientView
             })));
         }
         if (paired) actions.Add((L("从中转拉取", "Pull from relay"), () => SyncAsync("sync_pull")));
-        var menu = Menu(selected is null ? "+" : "⋯", actions.ToArray());
+        var menu = Menu("+", actions.ToArray());
+        menu.Classes.Add("add-component");
         var label = selected is null ? L("新建空间", "New space") : L("添加与空间操作", "Add and manage space");
         ToolTip.SetTip(menu, label);
         Avalonia.Automation.AutomationProperties.SetName(menu, label);
@@ -217,20 +219,15 @@ public sealed partial class ClientView
         };
         if (kind is "note" or "notes") operations.Insert(0, (L("编辑", "Edit"), () => EditNote(spaceId, item)));
         if (kind is "todo" or "tasks") operations.Insert(0, (L("新增待办", "Add task"), () => EditTask(spaceId, item, null)));
-        string glyph = kind switch
+        var handle = IconLabel(ComponentGlyph(kind), title, prominent: true);
+        var iconTone = kind switch
         {
-            "files" or "folder" => "files",
-            "terminal" => "terminal",
-            "note" or "notes" => "note",
-            "todo" or "tasks" => "tasks",
-            "board" or "whiteboard" => "board",
-            "preview" => "file",
-            "commands" or "service" or "log" => "terminal",
-            "captures" => "capture",
-            "sharedFiles" => "files",
-            _ => kind
+            "files" or "folder" or "preview" or "sharedFiles" => "folder-tone",
+            "terminal" or "commands" or "service" or "log" or "ssh" => "terminal-tone",
+            "note" or "notes" => "note-tone",
+            _ => "accent-tone"
         };
-        var handle = IconLabel(glyph, title, prominent: true);
+        handle.Children[0].Classes.Add(iconTone);
         var content = new Grid { RowDefinitions = new RowDefinitions("Auto,*") };
         var heading = TitleRow(handle, Menu("⋯", operations.ToArray()));
         var headingLine = new Border { Child = heading };
@@ -238,8 +235,6 @@ public sealed partial class ClientView
         Grid.SetRow(body, 1);
         content.Children.Add(body);
         var tile = Section(content);
-        if (canvas is null) return tile;
-
         tile.Classes.Remove("divider");
         tile.Classes.Add("tile");
         tile.Padding = new Thickness(0);
@@ -247,29 +242,47 @@ public sealed partial class ClientView
         headingLine.Classes.Add("tile-heading");
         headingLine.Padding = new Thickness(10, 1, 7, 1);
         body.Margin = new Thickness(10, 7, 10, 10);
+        if (id == _componentId)
+        {
+            _componentId = null;
+            tile.Classes.Add("located");
+            tile.AttachedToVisualTree += (_, _) => Avalonia.Threading.Dispatcher.UIThread.Post(() => tile.BringIntoView());
+            tile.PointerPressed += (_, _) => tile.Classes.Remove("located");
+        }
+        if (canvas is null) return tile;
+
         tile.Width = Math.Clamp(item.Integer("width", 320), 220, 3000);
         tile.Height = Math.Clamp(item.Integer("height", 230), 150, 2400);
         Canvas.SetLeft(tile, Math.Max(0, item.Integer("x")));
         Canvas.SetTop(tile, Math.Max(0, item.Integer("y")));
-        var grip = new TextBlock
+        var grip = new Border
         {
-            Text = "◢", FontSize = 14, Margin = new Thickness(0, 0, 3, 0),
+            Child = TrayGlyph.Icon("grip", 11),
+            Background = Brushes.Transparent, Padding = new Thickness(3),
             HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Bottom,
             Cursor = new Cursor(StandardCursorType.BottomRightCorner)
         };
-        grip.Classes.Add("muted");
         Grid.SetRowSpan(grip, 2);
         content.Children.Add(grip);
         handle.Cursor = new Cursor(StandardCursorType.SizeAll);
+        ToolTip.SetTip(handle, L("拖动移动，按住 Shift 吸附网格", "Drag to move, hold Shift to snap"));
+        ToolTip.SetTip(grip, L("拖动调整大小，按住 Shift 吸附网格", "Drag to resize, hold Shift to snap"));
         AttachGesture(handle, canvas, tile, item, spaceId, resize: false);
         AttachGesture(grip, canvas, tile, item, spaceId, resize: true);
-        if (id == _componentId)
-        {
-            _componentId = null;
-            tile.AttachedToVisualTree += (_, _) => Avalonia.Threading.Dispatcher.UIThread.Post(() => tile.BringIntoView());
-        }
         return tile;
     }
+
+    private static string ComponentGlyph(string kind) => kind switch
+    {
+        "files" or "folder" or "sharedFiles" => "folder-open",
+        "terminal" or "commands" or "service" or "log" => "terminal",
+        "note" or "notes" => "note",
+        "todo" or "tasks" => "tasks",
+        "board" or "whiteboard" => "board",
+        "preview" => "file",
+        "captures" => "capture",
+        _ => kind
+    };
 
     private void AttachGesture(Control handle, Canvas canvas, Border tile, JsonObject item, string spaceId, bool resize)
     {
@@ -281,21 +294,25 @@ public sealed partial class ClientView
             origin = e.GetPosition(canvas);
             previous = new Rect(Canvas.GetLeft(tile), Canvas.GetTop(tile), tile.Width, tile.Height);
             e.Pointer.Capture(handle);
+            tile.Classes.Add("dragging");
+            tile.ZIndex = 1;
             e.Handled = true;
         };
         handle.PointerMoved += (_, e) =>
         {
             if (origin is not Point start) return;
             var delta = e.GetPosition(canvas) - start;
+            bool snap = e.KeyModifiers.HasFlag(KeyModifiers.Shift);
+            static double GridPosition(double value, bool snap) => snap ? Math.Round(value / 24) * 24 : value;
             if (resize)
             {
-                tile.Width = Math.Clamp(previous.Width + delta.X, 220, 3000);
-                tile.Height = Math.Clamp(previous.Height + delta.Y, 150, 2400);
+                tile.Width = Math.Clamp(GridPosition(previous.Width + delta.X, snap), 220, 3000);
+                tile.Height = Math.Clamp(GridPosition(previous.Height + delta.Y, snap), 150, 2400);
             }
             else
             {
-                Canvas.SetLeft(tile, Math.Clamp(previous.X + delta.X, 0, 20000));
-                Canvas.SetTop(tile, Math.Clamp(previous.Y + delta.Y, 0, 20000));
+                Canvas.SetLeft(tile, Math.Clamp(GridPosition(previous.X + delta.X, snap), 0, 20000));
+                Canvas.SetTop(tile, Math.Clamp(GridPosition(previous.Y + delta.Y, snap), 0, 20000));
             }
             MeasureCanvas(canvas);
         };
@@ -332,7 +349,18 @@ public sealed partial class ClientView
                 }
             });
         };
-        handle.PointerCaptureLost += (_, _) => origin = null;
+        handle.PointerCaptureLost += (_, _) =>
+        {
+            tile.Classes.Remove("dragging");
+            tile.ZIndex = 0;
+            if (origin is null) return;
+            origin = null;
+            Canvas.SetLeft(tile, previous.X);
+            Canvas.SetTop(tile, previous.Y);
+            tile.Width = previous.Width;
+            tile.Height = previous.Height;
+            MeasureCanvas(canvas);
+        };
     }
 
     private static void MeasureCanvas(Canvas canvas)

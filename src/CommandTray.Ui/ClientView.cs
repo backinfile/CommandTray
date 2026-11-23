@@ -22,6 +22,8 @@ public sealed partial class ClientView : UserControl
     private readonly ScrollViewer _viewport;
     private readonly StackPanel _contents;
     private readonly TextBlock _status;
+    private readonly Border _workspaceGrid;
+    private readonly Border _paletteOverlay;
     private readonly List<TerminalTile> _terminals = [];
     private readonly DispatcherTimer _terminalTimer;
     private readonly DispatcherTimer _workspaceTimer;
@@ -47,6 +49,12 @@ public sealed partial class ClientView : UserControl
         _viewport = this.FindControl<ScrollViewer>("Viewport")!;
         _contents = this.FindControl<StackPanel>("Contents")!;
         _status = this.FindControl<TextBlock>("StatusLine")!;
+        _workspaceGrid = this.FindControl<Border>("WorkspaceGrid")!;
+        _paletteOverlay = this.FindControl<Border>("PaletteOverlay")!;
+        _paletteOverlay.PointerPressed += (_, args) =>
+        {
+            if (ReferenceEquals(args.Source, _paletteOverlay)) ClosePalette();
+        };
 
         _terminalTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(450) };
         _terminalTimer.Tick += async (_, _) => await RefreshTerminalsAsync();
@@ -56,7 +64,7 @@ public sealed partial class ClientView : UserControl
             Avalonia.Interactivity.RoutingStrategies.Tunnel);
         AddHandler(PointerReleasedEvent, (_, _) => _lastInteraction = DateTimeOffset.UtcNow,
             Avalonia.Interactivity.RoutingStrategies.Tunnel);
-        AddHandler(KeyDownEvent, (_, _) => _lastInteraction = DateTimeOffset.UtcNow,
+        AddHandler(KeyDownEvent, HandleWindowKey,
             Avalonia.Interactivity.RoutingStrategies.Tunnel);
         AttachedToVisualTree += async (_, _) =>
         {
@@ -69,11 +77,13 @@ public sealed partial class ClientView : UserControl
             }
             catch (Exception error) { Report(error.Message); }
             await LoadAsync();
+            if (!_compact && TopLevel.GetTopLevel(this)?.FocusManager?.GetFocusedElement() is null) Focus();
             _terminalTimer.Start();
             _workspaceTimer.Start();
         };
         DetachedFromVisualTree += (_, _) =>
         {
+            ClosePalette(restoreFocus: false);
             _loading?.Cancel();
             _terminalTimer.Stop();
             _workspaceTimer.Stop();
@@ -104,7 +114,11 @@ public sealed partial class ClientView : UserControl
         if (spaceId is not null) _spaceId = spaceId;
         _componentId = componentId;
         _viewport.Offset = default;
-        if (TopLevel.GetTopLevel(this) is not null) _ = LoadAsync();
+        if (TopLevel.GetTopLevel(this) is not null)
+        {
+            if (!_compact) Focus();
+            _ = LoadAsync();
+        }
     }
 
     private bool ApplyWidth(double width)
@@ -117,10 +131,10 @@ public sealed partial class ClientView : UserControl
         Grid.SetColumn(_navBorder, _compact ? 1 : 0);
         Grid.SetRow(_navBorder, _compact ? 3 : 0);
         Grid.SetRowSpan(_navBorder, _compact ? 1 : 3);
-        _navBorder.Width = _compact ? double.NaN : 154;
+        _navBorder.Width = _compact ? double.NaN : 146;
         _navBorder.BorderThickness = _compact ? new Thickness(0, 1, 0, 0) : new Thickness(0, 0, 1, 0);
         _navBorder.Padding = _compact ? new Thickness(5, 3) : new Thickness(9, 12);
-        _contents.Margin = _compact ? new Thickness(14, 10) : new Thickness(16);
+        _contents.Margin = _compact ? new Thickness(12, 10) : new Thickness(16);
         return true;
     }
 
@@ -135,6 +149,7 @@ public sealed partial class ClientView : UserControl
         RenderNavigation();
         _toolbar.Children.Clear();
         _contents.Children.Clear();
+        _workspaceGrid.IsVisible = !_compact && _page == "workspace" && Has(ClientFeatures.Layout);
         _viewport.HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled;
         Report("");
         try
@@ -156,7 +171,7 @@ public sealed partial class ClientView : UserControl
 
     private async Task RefreshWorkspaceAsync()
     {
-        if (_page != "workspace" || _displayedWorkspace is null || _editing || _refreshingWorkspace ||
+        if (_page != "workspace" || _displayedWorkspace is null || _editing || _refreshingWorkspace || _paletteOverlay.IsVisible ||
             DateTimeOffset.UtcNow - _lastInteraction < TimeSpan.FromSeconds(2) ||
             TopLevel.GetTopLevel(this)?.FocusManager?.GetFocusedElement() is TextBox) return;
         var displayed = _displayedWorkspace;
@@ -171,17 +186,22 @@ public sealed partial class ClientView : UserControl
         finally { _refreshingWorkspace = false; }
     }
 
-    private void RenderNavigation()
+    private List<(string Id, string Zh, string En)> NavigationPages()
     {
         var pages = new List<(string Id, string Zh, string En)>
         {
             ("workspace", "空间", "Spaces"), ("files", "文件", "Files"), ("clipboard", "剪贴板", "Clipboard")
         };
-        if (!_compact && Has(ClientFeatures.Commands)) pages.Insert(0, ("commands", "命令", "Commands"));
+        if (!_compact && Has(ClientFeatures.Commands)) pages.Insert(1, ("commands", "命令", "Commands"));
         if (!_compact && Has(ClientFeatures.Capture)) pages.Add(("capture", "捕获", "Capture"));
         if (!_compact && Has(ClientFeatures.Ssh)) pages.Add(("ssh", "SSH", "SSH"));
         pages.Add(("settings", "设置", "Settings"));
+        return pages;
+    }
 
+    private void RenderNavigation()
+    {
+        var pages = NavigationPages();
         _navigation.Children.Clear();
         if (_compact)
         {
@@ -193,18 +213,18 @@ public sealed partial class ClientView : UserControl
         }
         else
         {
-            _navigation.HorizontalAlignment = HorizontalAlignment.Left;
+            _navigation.HorizontalAlignment = HorizontalAlignment.Stretch;
             _navigation.Orientation = Orientation.Vertical;
             var markIcon = TrayGlyph.Icon("spaces", 15);
             markIcon.Classes.Add("mark");
-            var mark = new Border { Width = 27, Height = 27, Child = markIcon };
+            var mark = new Border { Width = 28, Height = 28, Child = markIcon };
             mark.Classes.Add("mark");
             var name = Heading("CommandTray");
             name.Classes.Add("brand");
             name.VerticalAlignment = VerticalAlignment.Center;
             var brand = Row(mark, name);
             brand.Spacing = 7;
-            brand.Margin = new Thickness(3, 0, 0, 9);
+            brand.Margin = new Thickness(1, 0, 0, 14);
             _navigation.Children.Add(brand);
             foreach (var page in pages) _navigation.Children.Add(NavigationButton(page.Id, L(page.Zh, page.En)));
         }
@@ -212,9 +232,9 @@ public sealed partial class ClientView : UserControl
 
     private Button NavigationButton(string id, string name)
     {
-        string glyph = id switch { "workspace" => "spaces", "commands" => "terminal", _ => id };
+        string glyph = PageGlyph(id);
         var button = Action(name, () => { Navigate(id); return Task.CompletedTask; }, glyph: glyph);
-        if (_compact && _english)
+        if (_compact)
         {
             var label = IconLabel(glyph, name);
             label.Orientation = Orientation.Vertical;
@@ -226,6 +246,8 @@ public sealed partial class ClientView : UserControl
         if (_page == id) button.Classes.Add("selected");
         return button;
     }
+
+    private static string PageGlyph(string id) => id switch { "workspace" => "spaces", "commands" => "terminal", _ => id };
 
     private bool Has(ClientFeatures feature) => (_backend.Features & feature) != 0;
     private string L(string zh, string en) => _english ? en : zh;
@@ -320,6 +342,7 @@ public sealed partial class ClientView : UserControl
         title.VerticalAlignment = VerticalAlignment.Center;
         _toolbar.Children.Add(title);
         var row = Row(actions);
+        if (!_compact) row.Children.Insert(0, PaletteButton());
         Grid.SetColumn(row, 1);
         _toolbar.Children.Add(row);
     }
@@ -393,6 +416,7 @@ public sealed partial class ClientView : UserControl
     private Task Form(string title, Func<JsonObject, Task> save, params Field[] fields)
     {
         _editing = true;
+        _workspaceGrid.IsVisible = false;
         _terminals.Clear();
         _contents.Children.Clear();
         Header(title, Action(L("取消", "Cancel"), LoadAsync));

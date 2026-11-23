@@ -2,31 +2,34 @@
 name: CommandTray
 description: Shared desktop and mobile workspace
 colors:
-  canvas: "#EDF1EF"
-  paper: "#FDFEFC"
-  chrome: "#F6F8F5"
-  text: "#172823"
-  secondary: "#4E625B"
-  line: "#D8E1DB"
-  accent: "#28624F"
-  selected: "#DCECE2"
-  terminal: "#15231E"
+  chrome: "#101D32"
+  shell-accent: "#7BE8F7"
+  dark-canvas: "#0A1426"
+  dark-panel: "#14233A"
+  light-canvas: "#E8EFF9"
+  light-panel: "#F9FCFF"
+  terminal: "#080F1E"
 ---
 
 # CommandTray 界面设计
 
-## 内容和操作
+## 工作区
 
-空间、共享文件和剪贴板直接显示用户内容。顶栏只放当前空间或页面名称及当前操作。状态紧邻对应对象，例如命令的运行状态和设置内的配对状态。
+桌面在点阵画布上并排显示目录和终端。窄工具栏集中放置空间页签、快速查找、同步和添加组件。拖动标题移动组件，拖动右下角调整大小。按住 Shift 时，位置和尺寸以 24 像素为步长吸附。
 
-## 桌面和手机
+用 `Ctrl+K` 搜索页面、空间、组件和当前可用的添加操作。方向键选择，Enter 跳转，Esc 关闭并回到先前的焦点。跳到组件时高亮边框。目录组件支持点路径返回上一级，并能在当前目录添加终端组件。
 
-桌面使用窄侧栏和工作区切签。多个目录与终端在画布上并排显示，边框和组件标题用于定位与操作。命令页使用表格式布局。共享文件按目录分组，下载按钮和该文件同一行。
+## 视觉和移动端
 
-手机使用同一份页面和数据。底部为四个常用入口，工作区紧凑排列便签、待办、画板和 SSH 主机资料。空间切换和同步放在同一行。
+深蓝色用于工具栏和导航，青色标记当前空间、焦点与快捷入口。不同组件用图标和颜色区分。内容表单、列表和面板跟随系统明暗主题，终端使用独立的深色输出区和等宽字体。
 
-## 颜色和字号
+手机顶部保留一行空间切换、同步和添加入口，底部放四个常用页面。便签、待办和画板在同一条滚动流中。共享文件保留文件名、目录和行内下载操作，剪贴板首屏显示正文。
 
-绿色用于主要动作及当前选择，浅色分隔线用于组织列表。终端采用独立深色底，选中文字可复制。应用明暗主题跟随系统。具备焦点、悬停与按压状态的控件同时使用文字或图标传递含义。
+## 参考
+
+- 命令入口优先支持键盘搜索、选中和执行。拖动时才通过 Shift 启用吸附。[PowerToys Command Palette](https://learn.microsoft.com/en-us/windows/powertoys/command-palette/overview) · [FancyZones](https://learn.microsoft.com/en-us/windows/powertoys/fancyzones)
+- 目录与终端都能作为同一级工作区组件，同屏切换相邻任务。[Wave Terminal](https://github.com/wavetermdev/waveterm) · [Zed 终端文档](https://zed.dev/docs/terminal) · [Files 双栏文档](https://www.files.community/docs/features/dual-pane)
+- 空间内的内容具有各自的坐标和尺寸，用点阵辅助辨认位置。[Obsidian JSON Canvas](https://github.com/obsidianmd/jsoncanvas)
+- 键盘焦点可见，窗口变窄时将侧栏移至底部。[W3C Focus Visible](https://www.w3.org/WAI/WCAG22/Understanding/focus-visible.html) · [Android 自适应导航](https://developer.android.com/develop/ui/compose/layouts/adaptive/build-adaptive-navigation)
 
 样式和布局分别定义于 [应用样式](src/CommandTray.Ui/ClientApplication.axaml) 和 [共享页面](src/CommandTray.Ui/ClientView.axaml)。

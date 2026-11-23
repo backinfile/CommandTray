@@ -34,6 +34,10 @@ internal static class TrayGlyph
                 "play" => "M8,4 L19,12 L8,20 Z",
                 "stop" => "M6,6 H18 V18 H6 Z",
                 "chevron" => "M7,9 L12,14 L17,9",
+                "search" => "M15,10 A5,5 0 1 1 5,10 A5,5 0 1 1 15,10 M14,14 L20,20",
+                "close" => "M6,6 L18,18 M18,6 L6,18",
+                "next" => "M9,6 L15,12 L9,18",
+                "grip" => "M9,20 L20,9 M14,20 L20,14",
                 _ => "M4,7 H10 L13,10 H20 V18 H4 Z M8,14 H16"
             }),
             Width = size,

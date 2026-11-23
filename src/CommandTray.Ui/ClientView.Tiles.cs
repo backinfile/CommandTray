@@ -136,7 +136,8 @@ public sealed partial class ClientView
             var result = await Execute("local_list", new() { ["path"] = folder });
             contents.Children.Clear();
             path = result.Text("path", folder);
-            var quick = Menu("⋯",
+            var options = new List<(string Label, Func<Task> Action)>
+            {
                 (L("选择目录", "Choose folder"), async () =>
                 {
                     var folders = await RequireTopLevel().StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions());
@@ -150,25 +151,50 @@ public sealed partial class ClientView
                     var name = values.RequireText("name");
                     if (name != Path.GetFileName(name) || name is "." or "..") throw new ArgumentException(L("请输入目录名。", "Enter a folder name."));
                     await Change("local_mkdir", new() { ["path"] = Path.Combine(path, name) });
-                }, new Field("name", L("名称", "Name")))));
-            var location = Muted(path);
-            location.TextWrapping = TextWrapping.NoWrap;
-            location.TextTrimming = TextTrimming.CharacterEllipsis;
-            var navigation = Row();
-            if (Directory.GetParent(path)?.FullName is string parent)
-                navigation.Children.Add(IconButton("up", L("上一级", "Parent folder"), () => SaveTilePath(spaceId, item, parent)));
-            navigation.Children.Add(quick);
-            contents.Children.Add(TitleRow(location, navigation));
+                }, new Field("name", L("名称", "Name"))))
+            };
+            if (Has(ClientFeatures.Terminals))
+                options.Add((L("在此目录添加终端", "Add terminal here"), () =>
+                    SaveItem(spaceId, NewItem("terminal", L("终端", "Terminal"), new()
+                    {
+                        ["workingDirectory"] = path, ["shell"] = OperatingSystem.IsWindows() ? "cmd" : "/bin/sh"
+                    }))));
+            var location = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,Auto,*") };
+            if (Directory.GetParent(path) is { } parent)
+            {
+                var crumb = Action(parent.Name, () => SaveTilePath(spaceId, item, parent.FullName), parent.FullName);
+                crumb.MaxWidth = 130;
+                crumb.Content = new TextBlock { Text = parent.Name, TextTrimming = TextTrimming.CharacterEllipsis };
+                location.Children.Add(crumb);
+                var separator = TrayGlyph.Icon("next", 11);
+                Grid.SetColumn(separator, 1);
+                location.Children.Add(separator);
+            }
+            var current = new TextBlock
+            {
+                Text = new DirectoryInfo(path).Name, TextTrimming = TextTrimming.CharacterEllipsis,
+                FontWeight = FontWeight.SemiBold, Margin = new Thickness(6, 0),
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            Grid.SetColumn(current, 2);
+            location.Children.Add(current);
+            ToolTip.SetTip(location, path);
+            var pathBar = new Border { Child = TitleRow(location, Menu("⋯", options.ToArray())) };
+            pathBar.Classes.Add("file-path");
+            contents.Children.Add(pathBar);
             foreach (var entry in result.Array("entries").OfType<JsonObject>())
             {
                 var leaf = entry.Text("path");
                 var name = entry.Text("name");
-                var link = Action(name, entry.Flag("isDirectory")
-                    ? () => SaveTilePath(spaceId, item, leaf) : () => PreviewAsync(leaf), glyph: entry.Flag("isDirectory") ? "files" : "file");
-                link.HorizontalAlignment = HorizontalAlignment.Left;
+                bool directory = entry.Flag("isDirectory");
+                var link = Action(name, directory
+                    ? () => SaveTilePath(spaceId, item, leaf) : () => PreviewAsync(leaf), glyph: directory ? "files" : "file");
+                if (directory) link.Classes.Add("folder-entry");
+                link.Classes.Add("file-entry");
                 var menu = Menu("⋯", (L("复制到…", "Copy to…"), () => Form(name, values => Change("local_copy",
                     new() { ["source"] = leaf, ["destination"] = values.RequireText("path") }),
                     new Field("path", L("目标路径", "Destination")))));
+                menu.Classes.Add("file-entry-menu");
                 contents.Children.Add(TitleRow(link, menu));
             }
         }
@@ -212,7 +238,7 @@ public sealed partial class ClientView
             IsReadOnly = true,
             AcceptsReturn = true,
             TextWrapping = TextWrapping.NoWrap,
-            FontFamily = new FontFamily("monospace")
+            FontFamily = new FontFamily(OperatingSystem.IsWindows() ? "Cascadia Mono,Consolas" : "DejaVu Sans Mono,monospace")
         });
         terminal.Output.Classes.Add("terminal");
         ScrollViewer.SetHorizontalScrollBarVisibility(terminal.Output, ScrollBarVisibility.Auto);
@@ -220,6 +246,7 @@ public sealed partial class ClientView
         _terminals.Add(terminal);
         var input = new TextBox { PlaceholderText = L("输入命令后按 Enter", "Type and press Enter") };
         input.Classes.Add("entry");
+        input.Classes.Add("terminal-input");
 
         async Task Start(string? passphrase = null)
         {
@@ -271,7 +298,8 @@ public sealed partial class ClientView
         layout.Children.Add(controls);
         Grid.SetRow(terminal.Output, 1);
         layout.Children.Add(terminal.Output);
-        var command = TitleRow(input, Action(L("发送", "Send"), Send));
+        var command = TitleRow(input, IconButton("send", L("发送", "Send"), Send));
+        command.Margin = new Thickness(0, 4, 0, 0);
         Grid.SetRow(command, 2);
         layout.Children.Add(command);
         terminal.Output.SizeChanged += async (_, _) =>
