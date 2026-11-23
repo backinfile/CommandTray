@@ -35,6 +35,7 @@
     <AndroidSigningKeyPass>env:COMMANDTRAY_ANDROID_KEY_PASSWORD</AndroidSigningKeyPass>
   </PropertyGroup>
   <ItemGroup>
+    <AvaloniaResource Include="Assets/Fonts/*.otf;Assets/Fonts/OFL.txt" />
     <PackageReference Include="Avalonia.Android" Version="12.1.6" />
     <ProjectReference Include="../CommandTray.Core/CommandTray.Core.csproj" />
     <ProjectReference Include="../CommandTray.Sync/CommandTray.Sync.csproj" />

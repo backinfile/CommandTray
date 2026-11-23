@@ -40,6 +40,8 @@ public sealed partial class ClientView : UserControl
     private bool _refreshingWorkspace;
     private bool _editing;
     private DateTimeOffset _lastInteraction;
+    private TopLevel? _backHost;
+    private MenuFlyout? _openMenu;
 
     public ClientView(IClientBackend backend)
     {
@@ -80,6 +82,11 @@ public sealed partial class ClientView : UserControl
             Avalonia.Interactivity.RoutingStrategies.Tunnel);
         AttachedToVisualTree += async (_, _) =>
         {
+            if (OperatingSystem.IsAndroid() && TopLevel.GetTopLevel(this) is { } host)
+            {
+                _backHost = host;
+                host.BackRequested += HandleAndroidBack;
+            }
             ApplyWidth(Bounds.Width);
             try
             {
@@ -98,6 +105,8 @@ public sealed partial class ClientView : UserControl
         };
         DetachedFromVisualTree += (_, _) =>
         {
+            if (_backHost is { } host) host.BackRequested -= HandleAndroidBack;
+            _backHost = null;
             ClosePalette(restoreFocus: false);
             _loading?.Cancel();
             _terminalTimer.Stop();
@@ -105,8 +114,19 @@ public sealed partial class ClientView : UserControl
         };
         SizeChanged += (_, args) =>
         {
-            if (ApplyWidth(args.NewSize.Width)) _ = LoadAsync();
+            if (ApplyWidth(args.NewSize.Width) && (!OperatingSystem.IsAndroid() || !_editing)) _ = LoadAsync();
         };
+    }
+
+    private void HandleAndroidBack(object? sender, Avalonia.Interactivity.RoutedEventArgs args)
+    {
+        if (_openMenu is { IsOpen: true } menu) menu.Hide();
+        else if (_toolbar.Children.OfType<ComboBox>().FirstOrDefault() is { IsDropDownOpen: true } picker)
+            picker.IsDropDownOpen = false;
+        else if (_editing) _ = LoadAsync();
+        else if (_page != "workspace") Navigate("workspace");
+        else return;
+        args.Handled = true;
     }
 
     public void Navigate(string page, string? spaceId = null, string? componentId = null)
@@ -251,6 +271,14 @@ public sealed partial class ClientView : UserControl
         return result;
     }
 
+    private async Task<JsonNode?> ReadPageContent(string operation, CancellationToken token)
+    {
+        var loading = Muted(L("正在加载…", "Loading…"));
+        _contents.Children.Add(loading);
+        try { return await Execute(operation, [], token); }
+        finally { _contents.Children.Remove(loading); }
+    }
+
     private async Task Change(string operation, JsonObject arguments)
     {
         await Execute(operation, arguments);
@@ -298,14 +326,39 @@ public sealed partial class ClientView : UserControl
         return button;
     }
 
+    private Button PrimaryAction(string label, Func<Task> action, string? glyph = null)
+    {
+        var button = Action(label, action, glyph: glyph);
+        button.Classes.Add("primary");
+        return button;
+    }
+
+    private Border EmptyState(string glyph, string title, params Control[] actions)
+    {
+        var content = new StackPanel { Spacing = 10 };
+        content.Children.Add(IconLabel(glyph, title, prominent: true));
+        var buttons = new WrapPanel { ItemSpacing = 6, LineSpacing = 4 };
+        foreach (var action in actions) buttons.Children.Add(action);
+        content.Children.Add(buttons);
+        var card = Table(content);
+        card.Padding = new Thickness(14);
+        return card;
+    }
+
     private Button Menu(string caption, params (string Label, Func<Task> Action)[] actions)
     {
         var items = new MenuFlyout();
         foreach (var option in actions)
         {
             var entry = new MenuItem { Header = option.Label };
+            if (_compact) entry.MinHeight = 48;
             entry.Click += async (_, _) => await Act(option.Action);
             items.Items.Add(entry);
+        }
+        if (OperatingSystem.IsAndroid())
+        {
+            items.Opened += (_, _) => _openMenu = items;
+            items.Closed += (_, _) => { if (ReferenceEquals(_openMenu, items)) _openMenu = null; };
         }
         var glyph = caption switch { "⋯" => "more", "+" => "plus", "↻" => "sync", _ => null };
         var button = new Button { Content = glyph is null ? caption : TrayGlyph.Icon(glyph),
@@ -405,13 +458,20 @@ public sealed partial class ClientView : UserControl
     private readonly record struct Field(string Key, string Label, string Value = "", bool Secret = false,
         bool Multiline = false, bool Toggle = false);
 
-    private Task Form(string title, Func<JsonObject, Task> save, params Field[] fields)
+    private Task Form(string title, Func<JsonObject, Task> save, params Field[] fields) =>
+        Form(title, L("保存", "Save"), save, fields);
+
+    private Task Form(string title, string submitLabel, Func<JsonObject, Task> save, params Field[] fields)
     {
         _editing = true;
         _workspaceGrid.IsVisible = false;
         _terminals.Clear();
         _contents.Children.Clear();
+        _viewport.Offset = default;
+        Report("");
         Header(title, Action(L("取消", "Cancel"), LoadAsync));
+        var error = new TextBlock { IsVisible = false, TextWrapping = TextWrapping.Wrap };
+        error.Classes.Add("form-error");
         var inputs = new List<(string Key, Func<JsonNode?> Value)>();
         foreach (var field in fields)
         {
@@ -429,18 +489,30 @@ public sealed partial class ClientView : UserControl
             };
             input.Classes.Add("entry");
             Avalonia.Automation.AutomationProperties.SetName(input, field.Label);
+            input.TextChanged += (_, _) => error.IsVisible = false;
             _contents.Children.Add(Muted(field.Label));
             _contents.Children.Add(input);
             inputs.Add((field.Key, () => JsonValue.Create(input.Text ?? "")));
         }
-        var button = Action(L("保存", "Save"), async () =>
+        bool submitting = false;
+        var button = PrimaryAction(submitLabel, async () =>
         {
+            if (submitting) return;
             var values = new JsonObject();
             foreach (var input in inputs) values[input.Key] = input.Value();
-            await save(values);
+            error.IsVisible = false;
+            submitting = true;
+            try { await save(values); }
+            catch (Exception failure) when (failure is not OperationCanceledException)
+            {
+                error.Text = failure.Message;
+                error.IsVisible = true;
+                error.BringIntoView();
+            }
+            finally { submitting = false; }
         });
-        button.Classes.Add("primary");
         _contents.Children.Add(button);
+        _contents.Children.Add(error);
         return Task.CompletedTask;
     }
 }

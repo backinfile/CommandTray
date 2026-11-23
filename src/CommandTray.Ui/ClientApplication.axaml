@@ -13,6 +13,7 @@
           <SolidColorBrush x:Key="TrayLine">#CEDAEA</SolidColorBrush>
           <SolidColorBrush x:Key="TrayAccent">#086477</SolidColorBrush>
           <SolidColorBrush x:Key="TrayAccentOn">#F8FFFF</SolidColorBrush>
+          <SolidColorBrush x:Key="TrayError">#A12D25</SolidColorBrush>
           <SolidColorBrush x:Key="TraySelection">#D4ECF3</SolidColorBrush>
           <SolidColorBrush x:Key="TrayHover">#E1EBFA</SolidColorBrush>
           <SolidColorBrush x:Key="TrayMutedFill">#E7EFFB</SolidColorBrush>
@@ -29,6 +30,7 @@
           <SolidColorBrush x:Key="TrayLine">#2C405B</SolidColorBrush>
           <SolidColorBrush x:Key="TrayAccent">#67DDF1</SolidColorBrush>
           <SolidColorBrush x:Key="TrayAccentOn">#082333</SolidColorBrush>
+          <SolidColorBrush x:Key="TrayError">#FFB4AB</SolidColorBrush>
           <SolidColorBrush x:Key="TraySelection">#173B51</SolidColorBrush>
           <SolidColorBrush x:Key="TrayHover">#203652</SolidColorBrush>
           <SolidColorBrush x:Key="TrayMutedFill">#1D304C</SolidColorBrush>
@@ -181,22 +183,30 @@
       <Setter Property="FontWeight" Value="SemiBold" />
     </Style>
     <Style Selector="Grid.compact Button.action">
-      <Setter Property="MinHeight" Value="44" />
+      <Setter Property="MinHeight" Value="48" />
       <Setter Property="Padding" Value="7,3" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
     </Style>
     <Style Selector="Grid.compact Button.action.icon-only">
-      <Setter Property="Width" Value="44" />
+      <Setter Property="Width" Value="48" />
       <Setter Property="Padding" Value="0" />
     </Style>
     <Style Selector="Grid.compact Button.action.navigation">
       <Setter Property="HorizontalContentAlignment" Value="Center" />
       <Setter Property="Padding" Value="3,3" />
       <Setter Property="FontSize" Value="12" />
-      <Setter Property="MinHeight" Value="46" />
+      <Setter Property="MinHeight" Value="48" />
+    </Style>
+    <Style Selector="Grid.compact ToggleSwitch">
+      <Setter Property="MinHeight" Value="48" />
     </Style>
     <Style Selector="TextBlock.muted">
       <Setter Property="Foreground" Value="{DynamicResource TraySecondary}" />
       <Setter Property="FontSize" Value="12" />
+    </Style>
+    <Style Selector="TextBlock.form-error">
+      <Setter Property="Foreground" Value="{DynamicResource TrayError}" />
+      <Setter Property="FontSize" Value="13" />
     </Style>
     <Style Selector="TextBlock.section">
       <Setter Property="FontWeight" Value="SemiBold" />
@@ -239,7 +249,7 @@
       <Setter Property="Width" Value="30" />
     </Style>
     <Style Selector="Grid.compact Border.tile-heading Button.action.icon-only">
-      <Setter Property="Width" Value="44" />
+      <Setter Property="Width" Value="48" />
     </Style>
     <Style Selector="Border.tile-heading">
       <Setter Property="Background" Value="{DynamicResource TrayChrome}" />

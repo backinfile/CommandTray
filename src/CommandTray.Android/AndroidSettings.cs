@@ -25,14 +25,14 @@ internal sealed class AndroidSettings(Context context)
     public bool Paired => Server.Length != 0 && _preferences.Contains("relayToken");
     public bool McpEnabled => _preferences.GetBoolean("mcpEnabled", false);
 
-    public void SavePairing(string server, string name, string deviceId, string token)
+    public void SavePairing(string server, string name, string deviceId, string token, string? activeSpace)
     {
-        if (deviceId.Length == 0 || token.Length == 0)
-            throw new InvalidDataException("The relay returned incomplete pairing credentials.");
-
         using var edit = Edit();
         if (!server.Equals(Server, StringComparison.Ordinal))
-            edit.Remove("activeSpace");
+        {
+            if (activeSpace is null) edit.Remove("activeSpace");
+            else edit.PutString("activeSpace", activeSpace);
+        }
         edit.PutString("server", server);
         edit.PutString("name", name);
         edit.PutString("deviceId", deviceId);

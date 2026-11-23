@@ -22,16 +22,22 @@ public sealed partial class ClientView
             space.Text("id") == (_spaceId ?? document.Text("activeSpaceId"))) ?? spaces.FirstOrDefault();
         _spaceId = selected?.Text("id");
 
-        var sync = relay.Flag("paired")
-            ? Action(_compact ? "↻" : L("同步", "Sync"), () => SyncAsync("sync_push"), L("同步", "Sync"), "sync")
-            : Action(L("连接", "Connect"), () => { Navigate("settings"); return Task.CompletedTask; });
-        var more = WorkspaceMenu(selected, relay.Flag("paired"));
+        bool paired = relay.Flag("paired");
         if (selected is null)
         {
-            Header(L("工作空间", "Workspace"), sync, more);
-            _contents.Children.Add(Muted(L("暂无空间", "No spaces")));
+            Header(L("工作空间", "Workspace"));
+            var other = paired
+                ? Action(L("从中转拉取", "Pull from relay"), () => SyncAsync("sync_pull"), glyph: "sync")
+                : Action(L("连接中转", "Connect to relay"), () => PairForm(relay));
+            _contents.Children.Add(EmptyState("spaces", L("暂无空间", "No spaces"),
+                PrimaryAction(L("新建空间", "New space"), NewSpaceAsync, "plus"), other));
             return;
         }
+
+        var sync = paired
+            ? Action(_compact ? "↻" : L("同步", "Sync"), () => SyncAsync("sync_push"), L("同步", "Sync"), "sync")
+            : Action(L("连接", "Connect"), () => PairForm(relay));
+        var more = WorkspaceMenu(selected, paired);
 
         var spaceId = selected.Text("id");
         if (_compact)
@@ -87,7 +93,7 @@ public sealed partial class ClientView
 
         var entries = selected.Array("items").OfType<JsonObject>().ToArray();
         if (_focusedPanelId is { } focused && !entries.Any(item => item.Text("id") == focused)) _focusedPanelId = null;
-        if (entries.Length == 0) _contents.Children.Add(Muted(L("暂无组件", "No components")));
+        int visibleComponents = 0;
         if (!_compact && Has(ClientFeatures.Layout) && entries.Length > 0)
         {
             var canvas = new Canvas { HorizontalAlignment = HorizontalAlignment.Left };
@@ -105,8 +111,18 @@ public sealed partial class ClientView
             foreach (var item in entries)
             {
                 var tile = Component(spaceId, item, null);
-                if (tile is not null) _contents.Children.Add(tile);
+                if (tile is null) continue;
+                _contents.Children.Add(tile);
+                visibleComponents++;
             }
+        }
+        if (entries.Length == 0 || _compact && visibleComponents == 0)
+        {
+            var message = entries.Length == 0 ? L("暂无组件", "No components")
+                : L("此设备暂无可用组件", "No components available on this device");
+            _contents.Children.Add(EmptyState("spaces", message,
+                Action(L("添加便签", "Add note"), () => ItemForm(spaceId, "note", L("便签", "Note")), glyph: "note"),
+                Action(L("添加待办", "Add checklist"), () => ItemForm(spaceId, "todo", L("待办", "Checklist")), glyph: "tasks")));
         }
 
         if (_compact || !Has(ClientFeatures.Ssh))
@@ -128,48 +144,48 @@ public sealed partial class ClientView
 
     private async Task SyncAsync(string command)
     {
-        await Change(command, []);
-        Report(L("同步操作已完成", "Sync operation finished"));
+        var result = await Execute(command, []);
+        await LoadAsync();
+        if (result?["conflict"] is not JsonObject && !result.Flag("conflict"))
+            Report(L("同步操作已完成", "Sync operation finished"));
     }
 
-    private Button WorkspaceMenu(JsonObject? selected, bool paired)
+    private Task NewSpaceAsync() => Form(L("新建空间", "New space"), L("创建", "Create"), async values =>
     {
+        if (string.IsNullOrWhiteSpace(values.Text("name")))
+            throw new InvalidOperationException(L("请输入空间名称。", "Enter a space name."));
+        var result = await Execute("space_create", values);
+        if (result.Text("id") is { Length: > 0 } id) await SelectSpaceAsync(id);
+        else await LoadAsync();
+    }, new Field("name", L("空间名称", "Space name")));
+
+    private Button WorkspaceMenu(JsonObject selected, bool paired)
+    {
+        var id = selected.Text("id");
         var actions = new List<(string Label, Func<Task> Action)>
         {
-            (L("新建空间", "New space"), () => Form(L("新建空间", "New space"), async values =>
-            {
-                var result = await Execute("space_create", values);
-                if (result.Text("id") is { Length: > 0 } id) await SelectSpaceAsync(id);
-                else await LoadAsync();
-            }, new Field("name", L("空间名称", "Space name"))))
+            (L("添加便签", "Add note"), () => ItemForm(id, "note", L("便签", "Note"))),
+            (L("添加待办", "Add checklist"), () => ItemForm(id, "todo", L("待办", "Checklist"))),
+            (L("新建空间", "New space"), NewSpaceAsync)
         };
-        if (selected is not null)
+        if (Has(ClientFeatures.LocalFiles))
+            actions.Add((L("添加目录", "Add folder"), () => ItemForm(id, "files", L("目录", "Folder"))));
+        if (Has(ClientFeatures.Terminals))
+            actions.Add((L("添加终端", "Add terminal"), () => ItemForm(id, "terminal", L("终端", "Terminal"))));
+        if (Has(ClientFeatures.Layout))
+            actions.Add((L("添加画板", "Add board"), () => ItemForm(id, "board", L("画板", "Board"))));
+        actions.Add((L("重命名空间", "Rename space"), () => Form(L("重命名空间", "Rename space"), values =>
+            Change("space_rename", new() { ["spaceId"] = id, ["name"] = values.Text("name") }),
+            new Field("name", L("名称", "Name"), selected.Text("name")))));
+        actions.Add((L("删除空间", "Delete space"), () => Confirm(L("删除该空间？", "Delete this space?"), async () =>
         {
-            var id = selected.Text("id");
-            actions.InsertRange(0, new (string Label, Func<Task> Action)[]
-            {
-                (L("添加便签", "Add note"), () => ItemForm(id, "note", L("便签", "Note"))),
-                (L("添加待办", "Add checklist"), () => ItemForm(id, "todo", L("待办", "Checklist")))
-            });
-            if (Has(ClientFeatures.LocalFiles))
-                actions.Add((L("添加目录", "Add folder"), () => ItemForm(id, "files", L("目录", "Folder"))));
-            if (Has(ClientFeatures.Terminals))
-                actions.Add((L("添加终端", "Add terminal"), () => ItemForm(id, "terminal", L("终端", "Terminal"))));
-            if (Has(ClientFeatures.Layout))
-                actions.Add((L("添加画板", "Add board"), () => ItemForm(id, "board", L("画板", "Board"))));
-            actions.Add((L("重命名空间", "Rename space"), () => Form(L("重命名空间", "Rename space"), values =>
-                Change("space_rename", new() { ["spaceId"] = id, ["name"] = values.Text("name") }),
-                new Field("name", L("名称", "Name"), selected.Text("name")))));
-            actions.Add((L("删除空间", "Delete space"), () => Confirm(L("删除该空间？", "Delete this space?"), async () =>
-            {
-                _spaceId = null;
-                await Change("space_delete", new() { ["spaceId"] = id });
-            })));
-        }
+            _spaceId = null;
+            await Change("space_delete", new() { ["spaceId"] = id });
+        })));
         if (paired) actions.Add((L("从中转拉取", "Pull from relay"), () => SyncAsync("sync_pull")));
         var menu = Menu("+", actions.ToArray());
         menu.Classes.Add("add-component");
-        var label = selected is null ? L("新建空间", "New space") : L("添加与空间操作", "Add and manage space");
+        var label = L("添加与空间操作", "Add and manage space");
         ToolTip.SetTip(menu, label);
         Avalonia.Automation.AutomationProperties.SetName(menu, label);
         return menu;
@@ -178,6 +194,7 @@ public sealed partial class ClientView
     private Task ItemForm(string spaceId, string kind, string name)
     {
         var fields = new List<Field> { new("title", L("名称", "Name"), name) };
+        if (kind == "note") fields.Add(new("text", L("便签正文", "Note"), Multiline: true));
         if (kind is "files" or "terminal") fields.Add(new("path", L("目录", "Directory")));
         if (kind == "terminal")
             fields.Add(new("shell", L("Shell", "Shell"), OperatingSystem.IsWindows() ? "cmd" : "/bin/sh"));
@@ -188,7 +205,7 @@ public sealed partial class ClientView
             {
                 "files" => new JsonObject { ["path"] = values.Text("path") },
                 "terminal" => new JsonObject { ["workingDirectory"] = values.Text("path"), ["shell"] = values.Text("shell") },
-                "note" => new JsonObject { ["text"] = "" },
+                "note" => new JsonObject { ["text"] = values.Text("text") },
                 "todo" => new JsonObject { ["tasks"] = new JsonArray() },
                 _ => new JsonObject()
             };
@@ -229,7 +246,8 @@ public sealed partial class ClientView
                 Change("item_remove", new() { ["spaceId"] = spaceId, ["itemId"] = id })))
         };
         if (kind is "note" or "notes") operations.Insert(0, (L("编辑", "Edit"), () => EditNote(spaceId, item)));
-        if (kind is "todo" or "tasks") operations.Insert(0, (L("新增待办", "Add task"), () => EditTask(spaceId, item, null)));
+        if (!OperatingSystem.IsAndroid() && kind is ("todo" or "tasks"))
+            operations.Insert(0, (L("新增待办", "Add task"), () => EditTask(spaceId, item, null)));
         var handle = IconLabel(ComponentGlyph(kind), title, prominent: true);
         var iconTone = kind switch
         {
@@ -240,7 +258,9 @@ public sealed partial class ClientView
         };
         handle.Children[0].Classes.Add(iconTone);
         var content = new Grid { RowDefinitions = new RowDefinitions("Auto,*") };
-        var actions = Row(Menu("⋯", operations.ToArray()));
+        var actions = Row();
+        if (!OperatingSystem.IsAndroid() || kind is "note" or "notes" or "todo" or "tasks")
+            actions.Children.Add(Menu("⋯", operations.ToArray()));
         var heading = TitleRow(handle, actions);
         var headingLine = new Border { Child = heading };
         content.Children.Add(headingLine);
@@ -397,7 +417,10 @@ public sealed partial class ClientView
     private Control NoteComponent(string spaceId, JsonObject item)
     {
         var note = item.Object("data").Text("text");
-        return note.Length > 0 ? Body(note) : Muted(L("空便签", "Empty note"));
+        if (note.Length > 0) return Body(note);
+        return OperatingSystem.IsAndroid()
+            ? Action(L("写便签", "Write note"), () => EditNote(spaceId, item))
+            : Muted(L("空便签", "Empty note"));
     }
 
     private Task EditNote(string spaceId, JsonObject item) =>
@@ -413,14 +436,16 @@ public sealed partial class ClientView
         foreach (var task in item.Object("data").Array("tasks").OfType<JsonObject>())
         {
             var id = task.Text("id");
-            var check = new CheckBox { Content = Body(task.Text("text")), IsChecked = task.Flag("completed"), MinHeight = 40 };
+            var check = new CheckBox { Content = Body(task.Text("text")), IsChecked = task.Flag("completed"), MinHeight = _compact ? 48 : 40 };
             check.Click += async (_, _) => await Act(() => UpdateTask(spaceId, item, id, null, check.IsChecked));
             tasks.Children.Add(TitleRow(check, Menu("⋯",
                 (L("编辑", "Edit"), () => EditTask(spaceId, item, task)),
                 (L("删除", "Delete"), () => Confirm(L("删除该待办？", "Delete task?"),
                     () => UpdateTask(spaceId, item, id, null, null))))));
         }
-        if (tasks.Children.Count == 0) tasks.Children.Add(Muted(L("暂无待办", "No tasks")));
+        if (OperatingSystem.IsAndroid())
+            tasks.Children.Add(Action(L("新增待办", "Add task"), () => EditTask(spaceId, item, null), glyph: "plus"));
+        else if (tasks.Children.Count == 0) tasks.Children.Add(Muted(L("暂无待办", "No tasks")));
         return tasks;
     }
 

@@ -5,6 +5,7 @@ using Android.Runtime;
 using Avalonia;
 using Avalonia.Android;
 using Avalonia.Controls.ApplicationLifetimes;
+using Avalonia.Media;
 using CommandTray.Ui;
 
 namespace CommandTray.Android;
@@ -26,7 +27,13 @@ public sealed class AndroidApplication(nint javaReference, JniHandleOwnership tr
     }
 
     protected override AppBuilder CustomizeAppBuilder(AppBuilder builder) =>
-        base.CustomizeAppBuilder(builder).AfterSetup(configured =>
+        base.CustomizeAppBuilder(builder)
+        // Some Android system fonts lose CJK glyphs when Avalonia mixes font weights.
+        .With(new FontManagerOptions
+        {
+            DefaultFamilyName = "avares://CommandTray.Android/Assets/Fonts#Noto Sans SC"
+        })
+        .AfterSetup(configured =>
         {
             if (configured.Instance?.ApplicationLifetime is IActivityApplicationLifetime lifetime)
                 lifetime.MainViewFactory = () => new ClientView(Backend);

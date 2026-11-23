@@ -17,15 +17,19 @@ public sealed partial class ClientView
         if (!relay.Flag("paired"))
         {
             Header(L("共享文件", "Shared files"));
-            PairPrompt();
+            PairPrompt(relay);
             return;
         }
-        var upload = Action(_compact ? "+" : L("上传", "Upload"), () => Form(L("上传文件", "Upload files"), UploadAsync,
-            new Field("folder", L("共享目录（可选）", "Shared folder (optional)"))), L("上传文件", "Upload files"), "plus");
+        Task ChooseFile() => Form(L("上传文件", "Upload files"), L("选择文件", "Choose files"), UploadAsync,
+            new Field("folder", L("共享目录（可选）", "Shared folder (optional)")));
+
+        var upload = Action(_compact ? "+" : L("上传", "Upload"), ChooseFile, L("上传文件", "Upload files"), "plus");
         if (!_compact) upload.Classes.Add("primary");
         Header(L("共享文件", "Shared files"), IconButton("sync", L("刷新", "Refresh"), LoadAsync), upload);
-        var files = await Execute("files_list", [], token) as JsonArray ?? [];
-        if (files.Count == 0) _contents.Children.Add(Muted(L("暂无共享文件", "No shared files")));
+        var files = await ReadPageContent("files_list", token) as JsonArray ?? [];
+        if (files.Count == 0)
+            _contents.Children.Add(EmptyState("files", L("暂无共享文件", "No shared files"),
+                PrimaryAction(L("上传文件", "Upload files"), ChooseFile, "plus")));
         foreach (var group in files.OfType<JsonObject>().GroupBy(file => file.Text("folder")).OrderBy(group => group.Key))
         {
             if (group.Key.Length > 0) _contents.Children.Add(IconLabel("files", group.Key, prominent: true));
@@ -35,7 +39,15 @@ public sealed partial class ClientView
                 var id = file.Text("id");
                 var name = file.Text("name");
                 var summary = new StackPanel { Spacing = 2 };
-                summary.Children.Add(IconLabel("file", name, prominent: true));
+                var fileName = Heading(name);
+                fileName.VerticalAlignment = VerticalAlignment.Center;
+                fileName.Margin = new Thickness(7, 0, 0, 0);
+                Grid.SetColumn(fileName, 1);
+                summary.Children.Add(new Grid
+                {
+                    ColumnDefinitions = new ColumnDefinitions("Auto,*"),
+                    Children = { TrayGlyph.Icon("file", 15), fileName }
+                });
                 summary.Children.Add(Muted(FileSize(file["size"])));
                 var row = Section(TitleRow(summary, Row(
                     IconButton("download", L("下载", "Download"), () => DownloadAsync(id, name)),
@@ -52,6 +64,7 @@ public sealed partial class ClientView
     {
         var storage = RequireTopLevel().StorageProvider;
         var inputs = await storage.OpenFilePickerAsync(new FilePickerOpenOptions { AllowMultiple = true });
+        if (inputs.Count == 0) return;
         foreach (var input in inputs)
         {
             var path = TemporaryFile(input.Name);
@@ -68,6 +81,7 @@ public sealed partial class ClientView
             finally { RemoveTemporary(path); }
         }
         await LoadAsync();
+        Report(L("已上传", "Uploaded"));
     }
 
     private async Task DownloadAsync(string id, string name)
@@ -85,6 +99,7 @@ public sealed partial class ClientView
             await source.CopyToAsync(output);
         }
         finally { RemoveTemporary(path); }
+        Report(L("已保存到本机", "Saved to this device"));
     }
 
     private static string FileSize(JsonNode? node)
@@ -127,7 +142,7 @@ public sealed partial class ClientView
         if (!relay.Flag("paired"))
         {
             Header(L("剪贴板", "Clipboard"));
-            PairPrompt();
+            PairPrompt(relay);
         }
         else
         {
@@ -138,19 +153,20 @@ public sealed partial class ClientView
                     var local = TextOf(await Execute("clipboard_local_read", []));
                     if (local.Length == 0) throw new InvalidOperationException(L("剪贴板没有文本。", "The clipboard has no text."));
                     await Change("clipboard_send", new() { ["text"] = local });
-                }),
-                IconButton("copy", L("接收并复制", "Receive and copy"), async () =>
-                {
-                    await Execute("clipboard_receive", []);
-                    Report(L("已复制到本机剪贴板", "Copied to this device"));
                 }));
-            var clip = await Execute("clipboard_read", [], token);
+            var clip = await ReadPageContent("clipboard_read", token);
             string text = clip.Text("text");
             var preview = new StackPanel { Spacing = 6, Margin = new Thickness(_compact ? 0 : 12, 6) };
             preview.Children.Add(text.Length > 0 ? Body(text) : Muted(L("暂无同步文本", "No synchronized text")));
             if (DateTimeOffset.TryParse(clip.Text("updatedAt"), CultureInfo.InvariantCulture, out var updated) &&
                 updated > DateTimeOffset.UnixEpoch)
                 preview.Children.Add(Muted(updated.ToLocalTime().ToString("g")));
+            if (text.Length > 0)
+                preview.Children.Add(PrimaryAction(L("复制到本机", "Copy to this device"), async () =>
+                {
+                    await Execute("clipboard_local_write", new() { ["text"] = text });
+                    Report(L("已复制到本机剪贴板", "Copied to this device"));
+                }, "copy"));
             _contents.Children.Add(_compact ? preview : Table(preview));
         }
         if (Has(ClientFeatures.ClipboardHistory))
@@ -168,8 +184,8 @@ public sealed partial class ClientView
         }
     }
 
-    private void PairPrompt() => _contents.Children.Add(Action(L("连接中转服务器", "Connect to a relay"),
-        () => { Navigate("settings"); return Task.CompletedTask; }));
+    private void PairPrompt(JsonNode? relay) => _contents.Children.Add(EmptyState("files", L("尚未配对", "Unpaired"),
+        PrimaryAction(L("连接中转服务器", "Connect to a relay"), () => PairForm(relay))));
 
     private async Task RenderSettingsAsync(CancellationToken token)
     {
@@ -180,16 +196,16 @@ public sealed partial class ClientView
         var details = new StackPanel { Spacing = 4 };
         string relayName = relay.Text("deviceName");
         bool paired = relay.Flag("paired");
-        details.Children.Add(Heading(relayName.Length > 0 ? relayName : paired
-            ? L("已配对", "Paired") : L("未配对", "Unpaired")));
-        if (relay.Text("server") is { Length: > 0 } server) details.Children.Add(Body(server));
+        details.Children.Add(Heading(paired ? L("已配对", "Paired") : L("未配对", "Unpaired")));
+        if (paired && relayName.Length > 0) details.Children.Add(Muted(relayName));
+        if (paired && relay.Text("server") is { Length: > 0 } server) details.Children.Add(Body(server));
         var connectionRow = Section(TitleRow(details, paired
             ? Menu("⋯",
                 (L("编辑连接", "Edit connection"), () => PairForm(relay)),
                 (L("已配对设备", "Paired devices"), ShowDevicesAsync),
                 (L("解除配对", "Unpair"), () => Confirm(L("解除本机配对？", "Unpair this device?"),
                     () => Change("relay_unpair", []))))
-            : Action(L("配对", "Pair"), () => PairForm(relay))));
+            : PrimaryAction(L("配对", "Pair"), () => PairForm(relay))));
         if (!_compact)
         {
             connectionRow.Classes.Remove("divider");
@@ -236,7 +252,9 @@ public sealed partial class ClientView
     private async Task ShowDevicesAsync()
     {
         var devices = await Execute("relay_devices", []) as JsonArray ?? [];
+        _editing = true;
         _contents.Children.Clear();
+        _viewport.Offset = default;
         Header(L("已配对设备", "Paired devices"), Action(L("返回", "Back"), LoadAsync));
         foreach (var device in devices) _contents.Children.Add(Heading(device.Text("name", device.Text("id"))));
     }
@@ -248,18 +266,38 @@ public sealed partial class ClientView
         await LoadAsync();
     }
 
-    private Task PairForm(JsonNode? relay) => Form(L("连接中转服务器", "Connect to a relay"),
-        values => Change("relay_pair", values),
+    private Task PairForm(JsonNode? relay) => Form(L("连接中转服务器", "Connect to a relay"), L("配对", "Pair"),
+        PairAsync,
         new Field("server", L("服务器地址", "Server address"), relay.Text("server")),
         new Field("deviceName", L("设备名称", "Device name"), relay.Text("deviceName", Environment.MachineName)),
         new Field("pairingCode", L("配对码", "Pairing code"), Secret: true));
+
+    private async Task PairAsync(JsonObject values)
+    {
+        foreach (var (key, message) in new[]
+        {
+            ("server", L("请输入服务器地址。", "Enter the server address.")),
+            ("deviceName", L("请输入设备名称。", "Enter the device name.")),
+            ("pairingCode", L("请输入配对码。", "Enter the pairing code."))
+        })
+        {
+            if (string.IsNullOrWhiteSpace(values.Text(key))) throw new InvalidOperationException(message);
+        }
+
+        try { await Change("relay_pair", values); }
+        catch (HttpRequestException error) when (error.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+        {
+            throw new InvalidOperationException(L("配对码不正确。", "The pairing code is incorrect."), error);
+        }
+    }
 
     private Task Confirm(string message, Func<Task> action)
     {
         _editing = true;
         _contents.Children.Clear();
+        _viewport.Offset = default;
         Header(message, Action(L("取消", "Cancel"), LoadAsync));
-        _contents.Children.Add(Action(L("确认", "Confirm"), action));
+        _contents.Children.Add(PrimaryAction(L("确认", "Confirm"), action));
         return Task.CompletedTask;
     }
 

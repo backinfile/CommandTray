@@ -65,7 +65,11 @@ internal sealed class AndroidBackend : IClientBackend
                     if (device.Length is 0 or > 120 || device.Any(char.IsControl))
                         throw new ArgumentException("Use a device name between 1 and 120 characters.");
                     var response = await new RelayClient(new Uri(server), http: _http).PairAsync(device, Text(args, "pairingCode"), cancellation);
-                    _settings.SavePairing(server, device, response.DeviceId, response.Token);
+                    if (string.IsNullOrEmpty(response.DeviceId) || string.IsNullOrEmpty(response.Token))
+                        throw new InvalidDataException("The relay returned incomplete pairing credentials.");
+                    var client = new RelayClient(new Uri(server), response.Token, _http);
+                    var activeSpace = await _workspace.StageOfflineSpacesAsync(server, client, cancellation);
+                    _settings.SavePairing(server, device, response.DeviceId, response.Token, activeSpace);
                     return Status();
                 }
                 case "relay_unpair":

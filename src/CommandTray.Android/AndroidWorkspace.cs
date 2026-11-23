@@ -7,11 +7,42 @@ namespace CommandTray.Android;
 
 internal sealed class AndroidWorkspace(string root, AndroidSettings settings)
 {
-    private string PartKey => Convert.ToBase64String(SHA256.HashData(Encoding.UTF8.GetBytes(settings.Server)))
-        .TrimEnd('=').Replace('+', '-').Replace('/', '_');
-    private string StatePath => Path.Combine(root, "workspace-" + PartKey + ".json");
-    private string JournalPath => Path.Combine(root, "workspace-" + PartKey + ".journal.json");
+    private string PartitionPath(string server)
+    {
+        var key = Convert.ToBase64String(SHA256.HashData(Encoding.UTF8.GetBytes(server)))
+            .TrimEnd('=').Replace('+', '-').Replace('/', '_');
+        return Path.Combine(root, "workspace-" + key);
+    }
+
+    private string StatePath => PartitionPath(settings.Server) + ".json";
+    private string JournalPath => PartitionPath(settings.Server) + ".journal.json";
     private WorkspaceSyncJournal Journal => new(JournalPath);
+
+    public async Task<string?> StageOfflineSpacesAsync(string server, RelayClient client, CancellationToken cancellation)
+    {
+        // Pairing switches partitions. Carry offline spaces into the first relay without replacing its contents.
+        if (settings.Server.Length != 0) return null;
+        var local = Document();
+        if (Spaces(local).Count == 0) return null;
+        var partition = PartitionPath(server);
+        var path = partition + ".json";
+        if (File.Exists(path) || File.Exists(path + ".bak")) return null;
+
+        var incoming = await client.GetWorkspaceAsync(cancellation);
+        var baseline = RequireDocument(incoming);
+        var combined = (JsonObject)baseline.DeepClone();
+        var spaces = Spaces(combined);
+        foreach (var space in Spaces(local).OfType<JsonObject>())
+        {
+            if (FindOptional(spaces, Text(space["id"])) is null)
+                spaces.Add(space.DeepClone());
+        }
+
+        var revision = Revision(incoming);
+        new WorkspaceSyncJournal(partition + ".journal.json").SetPairingBaseline(revision, baseline);
+        Write(path, new JsonObject { ["revision"] = revision, ["document"] = combined, ["dirty"] = true });
+        return Text(local["activeSpaceId"]);
+    }
 
     public JsonObject Read()
     {
@@ -88,7 +119,7 @@ internal sealed class AndroidWorkspace(string root, AndroidSettings settings)
         var existing = FindOptional(items, id);
         if (kind.Length == 0)
             kind = Text(existing?["kind"]);
-        if (kind is not ("note" or "todo") || (existing is not null && Text(existing["kind"]) != kind))
+        if (kind is not ("note" or "notes" or "todo" or "tasks") || (existing is not null && Text(existing["kind"]) != kind))
             throw new ArgumentException("Android can edit notes and to-dos.");
         var title = requested["title"] is null ? Text(existing?["title"]) : Text(requested["title"]);
         if (title.Length > 128)
@@ -114,7 +145,7 @@ internal sealed class AndroidWorkspace(string root, AndroidSettings settings)
             replacement["y"] ??= 0;
             replacement["width"] ??= 320;
             replacement["height"] ??= 240;
-            replacement["data"] ??= kind == "note"
+            replacement["data"] ??= kind is "note" or "notes"
                 ? new JsonObject { ["text"] = "" }
                 : new JsonObject { ["tasks"] = new JsonArray() };
             items.Add(replacement);
@@ -129,7 +160,7 @@ internal sealed class AndroidWorkspace(string root, AndroidSettings settings)
         var space = Find(Spaces(doc), spaceId);
         var items = space["items"] as JsonArray ?? throw new InvalidDataException("The space has no components array.");
         var item = Find(items, itemId);
-        if (Text(item["kind"]) is not ("note" or "todo"))
+        if (Text(item["kind"]) is not ("note" or "notes" or "todo" or "tasks"))
             throw new ArgumentException("Android can remove notes and to-dos.");
         items.Remove(item);
         SaveEdit(doc);
@@ -207,19 +238,18 @@ internal sealed class AndroidWorkspace(string root, AndroidSettings settings)
         envelope["revision"] is JsonValue number && number.TryGetValue<long>(out var revision) ? revision : 0;
 
     private void CommitSync(JsonObject document, long revision) =>
-        Write(new JsonObject { ["revision"] = revision, ["document"] = document.DeepClone(), ["dirty"] = false });
+        Write(StatePath, new JsonObject { ["revision"] = revision, ["document"] = document.DeepClone(), ["dirty"] = false });
 
     private void SaveEdit(JsonObject document)
     {
         var envelope = Read();
         envelope["document"] = document.DeepClone();
         envelope["dirty"] = true;
-        Write(envelope);
+        Write(StatePath, envelope);
     }
 
-    private void Write(JsonObject value)
+    private static void Write(string path, JsonObject value)
     {
-        var path = StatePath;
         var temp = path + "." + NewId() + ".tmp";
         try
         {

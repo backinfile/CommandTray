@@ -21,6 +21,8 @@ public sealed class WorkspaceSyncJournal
 
     public WorkspaceSyncConflict? ReadConflict() => Read()?.Conflict;
 
+    public void SetPairingBaseline(long revision, JsonObject remote) => Write(new Journal(revision, Copy(remote)));
+
     public async Task<WorkspaceSyncResult> SynchronizeAsync(
         RelayClient client, JsonObject local, long knownRevision, bool push,
         Action<JsonObject, long> apply, CancellationToken cancellationToken = default)
