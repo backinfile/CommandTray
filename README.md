@@ -1,8 +1,8 @@
-# CommandTray
+# CommandTray Suite
 
-[English](README.en.md) · [下载](https://github.com/backinfile/CommandTray/releases/latest)
+[English](README.en.md) · [套件下载](https://github.com/backinfile/CommandTray/releases?q=suite-v) · [原版 Windows CommandTray](https://github.com/backinfile/CommandTray/tree/dev)
 
-[![Release](https://github.com/backinfile/CommandTray/actions/workflows/release.yml/badge.svg)](https://github.com/backinfile/CommandTray/actions/workflows/release.yml)
+[![Suite Release](https://github.com/backinfile/CommandTray/actions/workflows/release-suite.yml/badge.svg)](https://github.com/backinfile/CommandTray/actions/workflows/release-suite.yml)
 
 CommandTray 的 Windows、Linux 桌面与 Android 客户端共用一套 Avalonia 界面。桌面空间可以并排摆放目录和终端，Android 优先显示便签、待办、画板和共享内容。Linux 也可通过 CLI 在无桌面环境使用。
 
@@ -31,10 +31,11 @@ Windows 截图和贴图可直接使用。录屏使用 PATH 上的 ffmpeg，OCR �
 
 ## 下载与安装
 
-前往 [Releases](https://github.com/backinfile/CommandTray/releases/latest) 下载最新版：
+从 [套件发布](https://github.com/backinfile/CommandTray/releases?q=suite-v) 选择以 `suite-v` 开头的标签。
 
-- `CommandTray-X.Y.Z-win-x64-setup.exe`：推荐，使用安装向导安装。
-- `CommandTray-X.Y.Z-win-x64.zip`：便携版，解压后直接运行 `CommandTray.exe`。
+- `CommandTray-Suite-X.Y.Z-win-x64-setup.exe` 为 Windows 安装版。
+- `CommandTray-Suite-X.Y.Z-win-x64.zip` 为 Windows 便携版，解压后运行 `CommandTray.exe`。
+- 同一发布还包含 Linux CLI 和桌面版、Android APK、中转服务及 Compose 配置。
 - `SHA256SUMS.txt`：用于校验下载文件完整性。
 
 当前发布包尚未进行 Authenticode 签名，首次运行时 Windows 可能显示 SmartScreen 提示。请从官方 Releases 下载并核对随附的 SHA-256 校验值；签名进度见[代码签名政策](CODE_SIGNING_POLICY.md)。

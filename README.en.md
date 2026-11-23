@@ -1,8 +1,8 @@
-# CommandTray
+# CommandTray Suite
 
-[中文](README.md) · [Download](https://github.com/backinfile/CommandTray/releases/latest)
+[中文](README.md) · [Suite downloads](https://github.com/backinfile/CommandTray/releases?q=suite-v) · [Original Windows CommandTray](https://github.com/backinfile/CommandTray/tree/dev)
 
-[![Release](https://github.com/backinfile/CommandTray/actions/workflows/release.yml/badge.svg)](https://github.com/backinfile/CommandTray/actions/workflows/release.yml)
+[![Suite Release](https://github.com/backinfile/CommandTray/actions/workflows/release-suite.yml/badge.svg)](https://github.com/backinfile/CommandTray/actions/workflows/release-suite.yml)
 
 CommandTray uses one Avalonia UI across Windows, Linux desktop, and Android. Desktop workspaces show multiple folders and terminals together. Android puts notes, checklists, boards, and shared files first. Linux also has a headless CLI.
 
@@ -22,10 +22,11 @@ CommandTray uses one Avalonia UI across Windows, Linux desktop, and Android. Des
 
 ## Download and install
 
-Download the latest version from [Releases](https://github.com/backinfile/CommandTray/releases/latest):
+Choose a tag beginning with `suite-v` from the [suite releases](https://github.com/backinfile/CommandTray/releases?q=suite-v).
 
-- `CommandTray-X.Y.Z-win-x64-setup.exe`: recommended installer.
-- `CommandTray-X.Y.Z-win-x64.zip`: portable build; extract it and run `CommandTray.exe`.
+- `CommandTray-Suite-X.Y.Z-win-x64-setup.exe` is the Windows installer.
+- `CommandTray-Suite-X.Y.Z-win-x64.zip` is the Windows portable build. Extract it and run `CommandTray.exe`.
+- The same release includes the Linux CLI and desktop app, the Android APK, and the relay with its Compose configuration.
 - `SHA256SUMS.txt`: checksums for verifying downloads.
 
 Current release packages are not yet Authenticode-signed, so Windows may display a SmartScreen warning on first launch. Download only from the official Releases page and verify the included SHA-256 checksums. See the [code signing policy](CODE_SIGNING_POLICY.md) for status.
