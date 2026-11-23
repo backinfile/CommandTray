@@ -16,6 +16,9 @@ internal sealed class AndroidBackend : IClientBackend
     private readonly AndroidSettings _settings;
     private readonly AndroidWorkspace _workspace;
     private readonly ClipboardAutoSync _clipboardSync;
+    private readonly SuiteUpdates _updates;
+    private readonly object _updateSchedule = new();
+    private DateTimeOffset _nextUpdateCheck;
     private readonly HttpClient _http = new(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(35) };
     private WeakReference<Activity>? _focused;
     private AndroidMcpHost? _mcp;
@@ -30,6 +33,10 @@ internal sealed class AndroidBackend : IClientBackend
         var files = context.FilesDir?.AbsolutePath ?? throw new IOException("Android files directory is unavailable.");
         _privateCache = context.CacheDir?.AbsolutePath ?? throw new IOException("Android cache directory is unavailable.");
         _workspace = new AndroidWorkspace(files, _settings);
+        var packageName = context.PackageName ?? throw new InvalidOperationException("Android package name is unavailable.");
+        var packageVersion = context.PackageManager?.GetPackageInfo(packageName, 0)?.VersionName;
+        _updates = new SuiteUpdates(files, "android", Version.TryParse(packageVersion, out var version) && version.Build >= 0
+            ? new Version(version.Major, version.Minor, version.Build) : new Version(0, 0, 0));
         _clipboardSync = new ClipboardAutoSync(ClipboardConnection,
             cancellation => Dispatcher.UIThread.InvokeAsync(ReadClipboardForSync, DispatcherPriority.Normal, cancellation).GetTask(),
             (expected, text, cancellation) => Dispatcher.UIThread.InvokeAsync(() =>
@@ -42,12 +49,14 @@ internal sealed class AndroidBackend : IClientBackend
             }, DispatcherPriority.Normal, cancellation).GetTask());
     }
 
-    public ClientFeatures Features => default;
+    public ClientFeatures Features => ClientFeatures.Updates;
     internal string CacheDirectory => _privateCache;
 
     public ValueTask<JsonNode?> ExecuteAsync(string operation, JsonObject arguments, CancellationToken cancellationToken = default) =>
         new(Task.Run(() => operation is "relay_pair" or "relay_unpair" or "sync_push" or "sync_pull" or "sync_resolve"
             ? ExecuteWorkspaceSyncAsync(operation, arguments, cancellationToken)
+            : operation.StartsWith("update_", StringComparison.Ordinal)
+            ? _updates.ExecuteAsync(operation, arguments, InstallUpdateAsync, cancellationToken).AsTask()
             : ExecuteLockedAsync(operation, arguments, cancellationToken), cancellationToken));
 
     private async Task<JsonNode?> ExecuteWorkspaceSyncAsync(string operation, JsonObject args, CancellationToken cancellation)
@@ -193,7 +202,58 @@ internal sealed class AndroidBackend : IClientBackend
     }
 
     internal Task SyncWhileResumedAsync(CancellationToken cancellation) => Task.WhenAll(
-        SyncWorkspaceWhileResumedAsync(cancellation), _clipboardSync.RunAsync(cancellation));
+        SyncWorkspaceWhileResumedAsync(cancellation), _clipboardSync.RunAsync(cancellation), CheckUpdatesWhileResumedAsync(cancellation));
+
+    private async Task CheckUpdatesWhileResumedAsync(CancellationToken cancellation)
+    {
+        try
+        {
+            await Task.Delay(TimeSpan.FromSeconds(12), cancellation);
+            using var timer = new PeriodicTimer(TimeSpan.FromHours(1));
+            do
+            {
+                bool check;
+                lock (_updateSchedule)
+                {
+                    check = _updates.Enabled && DateTimeOffset.UtcNow >= _nextUpdateCheck;
+                    if (check) _nextUpdateCheck = DateTimeOffset.UtcNow.AddHours(4);
+                }
+                if (!check) continue;
+                try { await _updates.CheckAsync(cancellation); }
+                catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+                {
+                    lock (_updateSchedule) _nextUpdateCheck = default;
+                    return;
+                }
+            }
+            while (await timer.WaitForNextTickAsync(cancellation));
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
+    }
+
+    private async Task InstallUpdateAsync(string directory, CancellationToken cancellation)
+    {
+        var apk = Path.Combine(directory, "CommandTray-Suite.apk");
+        await using (var from = File.OpenRead(SuiteUpdates.PackagePath(directory)))
+        await using (var to = File.Create(apk))
+            await from.CopyToAsync(to, cancellation);
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            var package = _context.PackageName!;
+            if (_context.PackageManager?.CanRequestPackageInstalls() != true)
+            {
+                using var settings = new Intent(global::Android.Provider.Settings.ActionManageUnknownAppSources,
+                    global::Android.Net.Uri.Parse("package:" + package));
+                _context.StartActivity(settings.AddFlags(ActivityFlags.NewTask));
+                return;
+            }
+            using var file = new Java.IO.File(apk);
+            var uri = AndroidX.Core.Content.FileProvider.GetUriForFile(_context, package + ".updates", file);
+            using var install = new Intent(Intent.ActionView);
+            install.SetDataAndType(uri, "application/vnd.android.package-archive");
+            _context.StartActivity(install.AddFlags(ActivityFlags.NewTask | ActivityFlags.GrantReadUriPermission));
+        }, DispatcherPriority.Normal, cancellation);
+    }
 
     private async Task SyncWorkspaceWhileResumedAsync(CancellationToken cancellation)
     {

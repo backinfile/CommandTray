@@ -2,11 +2,13 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using CommandTray.Core;
 using CommandTray.Models;
+using CommandTray.Sync;
 
 namespace CommandTray.Services;
 
 internal sealed class WindowsClientBackend(
-    DesktopRuntime desktop, CommandTrayApi commands, ConfigurationStore configurationStore, AppConfiguration configuration)
+    DesktopRuntime desktop, CommandTrayApi commands, ConfigurationStore configurationStore, AppConfiguration configuration,
+    SuiteUpdates? updates = null, Func<string, CancellationToken, Task>? installUpdate = null)
     : IClientBackend
 {
     private readonly DesktopMcpTools _actions = new(desktop);
@@ -16,7 +18,8 @@ internal sealed class WindowsClientBackend(
     private DesktopRelay Relay => desktop.Relay;
 
     public ClientFeatures Features => ClientFeatures.LocalFiles | ClientFeatures.Terminals | ClientFeatures.Commands |
-        ClientFeatures.Layout | ClientFeatures.Capture | ClientFeatures.Pet | ClientFeatures.Ssh | ClientFeatures.ClipboardHistory;
+        ClientFeatures.Layout | ClientFeatures.Capture | ClientFeatures.Pet | ClientFeatures.Ssh | ClientFeatures.ClipboardHistory |
+        (updates is null ? ClientFeatures.None : ClientFeatures.Updates);
 
     public event EventHandler? SettingsChanged;
 
@@ -34,6 +37,12 @@ internal sealed class WindowsClientBackend(
 
         switch (operation)
         {
+            case "update_status":
+            case "update_check":
+            case "update_set":
+            case "update_install":
+                return await (updates ?? throw new InvalidOperationException("Suite updates require a release build."))
+                    .ExecuteAsync(operation, arguments, installUpdate!, cancellationToken);
             case "workspace_read": return Workspace.ReadDocument().Document;
             case "space_create": return Json(new { id = Workspace.AddSpace(Required("name")) });
             case "space_rename": return Json(_actions.RenameSpace(Space(), Required("name")));

@@ -22,6 +22,10 @@ internal sealed class TrayApplicationContext : IDisposable
     private readonly WindowsClientBackend _backend;
     private readonly CancellationTokenSource _syncLifetime = new();
     private readonly Task _backgroundSync;
+    private readonly SuiteUpdates? _updates;
+    private readonly string _updatePlatform = WindowsUpdateInstall.Platform();
+    private string? _restartUpdate;
+    private bool _installOnExit;
     private readonly RegisteredWaitHandle _showRegistration;
     private readonly RegisteredWaitHandle _shutdownRegistration;
     private readonly ShutdownWindow _shutdownWindow;
@@ -40,7 +44,15 @@ internal sealed class TrayApplicationContext : IDisposable
         _api = new CommandTrayApi(configuration, store, _supervisor);
         _lifetime = lifetime;
         _desktop = new DesktopRuntime(Path.GetDirectoryName(store.PathName)!);
-        _backend = new WindowsClientBackend(_desktop, _api, store, configuration);
+        if (typeof(Program).Assembly.Location.Length == 0)
+            _updates = new SuiteUpdates(Path.GetDirectoryName(store.PathName)!, _updatePlatform,
+                SuiteUpdates.AssemblyVersion(typeof(Program).Assembly));
+        _backend = new WindowsClientBackend(_desktop, _api, store, configuration, _updates,
+            (ready, cancellation) => Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                _restartUpdate = ready;
+                BeginExit();
+            }, DispatcherPriority.Normal, cancellation).GetTask());
         _shell = new WindowsDesktopShell(_backend, _appIcon);
         _desktop.AttachShell(_shell, _backend);
         _desktop.SetPetVisible = SetPetVisible;
@@ -61,7 +73,7 @@ internal sealed class TrayApplicationContext : IDisposable
         _tray = new NotifyIcon
         {
             Icon = _appIcon,
-            Text = "CommandTray",
+            Text = "CommandTray Suite",
             Visible = true
         };
         _tray.DoubleClick += (_, _) => ShowSettings();
@@ -105,7 +117,7 @@ internal sealed class TrayApplicationContext : IDisposable
             }, cancellation));
         _backgroundSync = Task.WhenAll(
             _desktop.Relay.RunBackgroundSyncAsync(_desktop.ReapRemovedTerminals, _syncLifetime.Token),
-            clipboard.RunAsync(_syncLifetime.Token));
+            clipboard.RunAsync(_syncLifetime.Token), _updates?.RunAsync(_syncLifetime.Token) ?? Task.CompletedTask);
     }
 
     public void ShowSettings()
@@ -233,7 +245,10 @@ internal sealed class TrayApplicationContext : IDisposable
         };
         menu.Items.Add(autoStart);
         menu.Items.Add(new ToolStripMenuItem(Localizer.T("Exit", "退出"), null, (_, _) =>
-            _shutdownWindow.RequestShutdown()));
+        {
+            _installOnExit = true;
+            _shutdownWindow.RequestShutdown();
+        }));
         var old = _tray.ContextMenuStrip;
         _tray.ContextMenuStrip = menu;
         if (_pet is not null) _pet.ContextMenuStrip = menu;
@@ -272,6 +287,19 @@ internal sealed class TrayApplicationContext : IDisposable
             catch { /* DisposeAsync force-terminates any remaining owned jobs */ }
             try { await _supervisor.DisposeAsync(); }
             catch { /* the application itself must still terminate */ }
+
+            if (_updates is not null && (_restartUpdate is not null || _installOnExit && _updates.Enabled))
+            {
+                try
+                {
+                    var ready = _restartUpdate ?? await _updates.ReadyDirectoryAsync(timeout.Token);
+                    if (ready is not null) SuiteDesktopUpdate.Launch(ready, _updatePlatform, restart: _restartUpdate is not null);
+                }
+                catch (Exception error)
+                {
+                    Debug.WriteLine("Suite update could not start: " + error.Message);
+                }
+            }
         }
         finally
         {

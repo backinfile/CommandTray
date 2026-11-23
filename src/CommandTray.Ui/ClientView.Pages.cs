@@ -287,6 +287,7 @@ public sealed partial class ClientView
 
         _contents.Children.Add(TitleRow(Heading(L("语言", "Language")), Menu(_english ? "English" : "简体中文",
             ("简体中文", () => SetLanguageAsync(false)), ("English", () => SetLanguageAsync(true)))));
+        if (Has(ClientFeatures.Updates)) _contents.Children.Add(await UpdateSettingsAsync(token));
         if (_compact && Has(ClientFeatures.Commands)) _contents.Children.Add(
             Action(L("命令管理", "Commands"), () => { Navigate("commands"); return Task.CompletedTask; }));
         if (_compact && Has(ClientFeatures.Capture)) _contents.Children.Add(

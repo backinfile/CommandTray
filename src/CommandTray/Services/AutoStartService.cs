@@ -5,7 +5,7 @@ namespace CommandTray.Services;
 public static class AutoStartService
 {
     private const string KeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
-    private const string ValueName = "CommandTray";
+    private const string ValueName = "CommandTraySuite";
 
     public static bool IsEnabled()
     {

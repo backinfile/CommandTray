@@ -33,6 +33,8 @@ Current release packages are not yet Authenticode-signed, so Windows may display
 
 CommandTray stays in the notification area after launch. Closing the settings window only hides it; use **Exit** from the tray menu to quit completely.
 
+Starting with 1.0.0, Windows, Linux desktop and Android clients check for and download updates automatically. Windows and Linux desktop apply a downloaded update when you quit, or you can restart and update from Settings. Android hands the package to the system installer. When GitHub is unavailable, the updater tries `ghfast.top` and `gh-proxy.com` and verifies the release signature and package hash. Upgrade the Linux CLI and relay with their release packages.
+
 ## Quick start
 
 1. Start CommandTray and double-click its tray icon.
@@ -62,7 +64,7 @@ Each command row shows its state and a start or stop action. Its menu opens logs
 MCP is enabled by default. Toggle **Enable local MCP server** under **Application settings → AI connection · MCP**, where you can also copy its address. The Streamable HTTP endpoint is:
 
 ```text
-http://127.0.0.1:58629/mcp
+http://127.0.0.1:58631/mcp
 ```
 
 A typical MCP client configuration looks like this; consult your client's documentation for its exact schema:
@@ -71,7 +73,7 @@ A typical MCP client configuration looks like this; consult your client's docume
 {
   "mcpServers": {
     "commandtray": {
-      "url": "http://127.0.0.1:58629/mcp",
+      "url": "http://127.0.0.1:58631/mcp",
       "headers": {"Authorization": "Bearer <local MCP credential>"}
     }
   }
@@ -82,8 +84,8 @@ The server binds only to local address `127.0.0.1`. It can inspect, create, upda
 
 ## Data and logs
 
-- Configuration: `%LOCALAPPDATA%\CommandTray\config.json`
-- Logs: `%LOCALAPPDATA%\CommandTray\logs\<service-id>\current.log`
+- Configuration: `%LOCALAPPDATA%\CommandTraySuite\config.json`
+- Logs: `%LOCALAPPDATA%\CommandTraySuite\logs\<service-id>\current.log`
 - A log rotates at 5 MB and retains the four newest historical files.
 
 Import or export JSON under **Application settings → Configuration files**. Import replaces the current service list and requires all services to be stopped. Export includes saved configuration only and removes secret environment values.

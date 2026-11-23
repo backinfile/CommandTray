@@ -12,7 +12,7 @@ namespace CommandTray.Services;
 
 public sealed class McpServerHost : IAsyncDisposable
 {
-    public const int Port = 58629;
+    public const int Port = 58631;
     public static string Endpoint => $"http://127.0.0.1:{AppPaths.McpPort}/mcp";
 
     private readonly SemaphoreSlim _lifecycle = new(1, 1);

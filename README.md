@@ -42,6 +42,8 @@ Windows 截图和贴图可直接使用。录屏使用 PATH 上的 ffmpeg，OCR �
 
 程序启动后会驻留在系统托盘。关闭设置窗口只会隐藏窗口；如需完全退出，请右键托盘图标并选择“退出”。
 
+从 1.0.0 起，Windows、Linux 桌面和 Android 默认自动检查并下载更新。Windows 和 Linux 桌面退出时应用已下载的更新，也可以在「设置 → 版本更新」选择重启并更新。Android 由系统安装器完成确认。访问 GitHub 失败时会尝试 `ghfast.top` 和 `gh-proxy.com`，并验证发布签名和文件哈希。Linux CLI 和中转服务通过各自的发布包升级。
+
 ## 快速开始
 
 1. 启动 CommandTray，双击托盘图标打开应用。
@@ -73,7 +75,7 @@ Windows 截图和贴图可直接使用。录屏使用 PATH 上的 ffmpeg，OCR �
 MCP 默认开启。可在本地设置中启停服务、复制连接地址和本机 MCP 凭据。Windows 的 Streamable HTTP 默认地址为：
 
 ```text
-http://127.0.0.1:58629/mcp
+http://127.0.0.1:58631/mcp
 ```
 
 常见 MCP 客户端可按类似方式配置；具体字段名请以客户端文档为准：
@@ -82,7 +84,7 @@ http://127.0.0.1:58629/mcp
 {
   "mcpServers": {
     "commandtray": {
-      "url": "http://127.0.0.1:58629/mcp",
+      "url": "http://127.0.0.1:58631/mcp",
       "headers": {"Authorization": "Bearer <本机 MCP 凭据>"}
     }
   }
@@ -93,8 +95,8 @@ MCP 仅监听本机 `127.0.0.1`。通过 `tools/list` 查看命令、空间与�
 
 ## 数据与日志
 
-- 配置：`%LOCALAPPDATA%\CommandTray\config.json`
-- 日志：`%LOCALAPPDATA%\CommandTray\logs\<服务ID>\current.log`
+- 配置：`%LOCALAPPDATA%\CommandTraySuite\config.json`
+- 日志：`%LOCALAPPDATA%\CommandTraySuite\logs\<服务ID>\current.log`
 - 单个日志文件达到 5 MB 后自动轮转，并保留最近 4 个历史文件。
 
 在 **“应用设置 → 配置文件”** 中导入或导出 JSON。导入会替换当前服务列表，需先停止所有服务；导出仅包含已保存的配置，并移除敏感环境变量的值。

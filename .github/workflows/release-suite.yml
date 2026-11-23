@@ -161,11 +161,15 @@ jobs:
     name: Publish combined release
     needs: [windows, linux-relay, android]
     runs-on: ubuntu-latest
+    concurrency:
+      group: commandtray-suite-update-feed
+      cancel-in-progress: false
     permissions:
       contents: write
     env:
       VERSION: ${{ needs.windows.outputs.version }}
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Download packages
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
@@ -193,12 +197,46 @@ jobs:
           )
           for asset in "${assets[@]}"; do test -s "$asset"; done
           sha256sum "${assets[@]}" > SHA256SUMS.txt
+      - name: Sign the Suite update manifest
+        shell: pwsh
+        env:
+          COMMANDTRAY_UPDATE_SIGNING_KEY: ${{ secrets.COMMANDTRAY_UPDATE_SIGNING_KEY }}
+        run: ./scripts/sign-suite-update.ps1 -Version $env:VERSION -PackageDirectory packages
+      - name: Prepare release notes
+        shell: bash
+        run: |
+          if [[ -f "docs/releases/suite-$VERSION.md" ]]; then
+            cp "docs/releases/suite-$VERSION.md" release-body.md
+          else
+            printf 'CommandTray Suite %s\n' "$VERSION" > release-body.md
+          fi
       - name: Create GitHub Release
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           name: CommandTray Suite ${{ github.ref_name }}
           generate_release_notes: true
           previous_tag: ${{ needs.windows.outputs.previous_tag }}
+          body_path: release-body.md
           fail_on_unmatched_files: true
           make_latest: false
           files: packages/*
+      - name: Advance the stable Suite update feed
+        shell: bash
+        run: |
+          set -euo pipefail
+          target=refs/heads/updates/suite
+          previous=$(git ls-remote origin "$target" | cut -f1)
+          parent=()
+          if [[ -n "$previous" ]]; then
+            git fetch --no-tags origin "$target"
+            newer=$(git show "$previous:latest.json" | python -c 'import base64,json,sys; a=tuple(map(int,json.loads(base64.b64decode(json.load(sys.stdin)["payload"]))["version"].split("."))); b=tuple(map(int,sys.argv[1].split("."))); print(b>a)' "$VERSION")
+            if [[ "$newer" != True ]]; then
+              echo 'The feed already points to this version or a later version.'
+              exit 0
+            fi
+            parent=(-p "$previous")
+          fi
+          blob=$(git hash-object -w packages/suite-updates.json)
+          tree=$(printf '100644 blob %s\tlatest.json\n' "$blob" | git mktree)
+          commit=$(git -c user.name=github-actions -c user.email=github-actions@users.noreply.github.com commit-tree "$tree" "${parent[@]}" -m "Publish Suite $VERSION update manifest")
+          git push origin "$commit:$target"

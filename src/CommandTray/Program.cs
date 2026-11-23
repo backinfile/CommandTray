@@ -1,17 +1,23 @@
 using Avalonia;
 using CommandTray.Services;
+using CommandTray.Sync;
 
 namespace CommandTray;
 
 internal static class Program
 {
-    private const string MutexName = @"Local\CommandTray.SingleInstance";
-    private const string ShowEventName = @"Local\CommandTray.ShowSettings";
-    private const string ShutdownEventName = @"Local\CommandTray.Shutdown";
+    private const string MutexName = @"Local\CommandTraySuite.SingleInstance";
+    private const string ShowEventName = @"Local\CommandTraySuite.ShowSettings";
+    private const string ShutdownEventName = @"Local\CommandTraySuite.Shutdown";
 
     [STAThread]
     private static void Main(string[] args)
     {
+        if (SuiteDesktopUpdate.HandleArguments(args, SuiteUpdates.AssemblyVersion(typeof(Program).Assembly), out int updaterExit))
+        {
+            Environment.ExitCode = updaterExit;
+            return;
+        }
         if (args is ["--command-host", var gateName, var encodedCommand])
         {
             Environment.ExitCode = CommandHost.Run(gateName, encodedCommand);

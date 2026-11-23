@@ -4,6 +4,7 @@ using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Input.Platform;
 using Avalonia.Threading;
 using CommandTray.Ui;
+using CommandTray.Sync;
 using System.Runtime.Versioning;
 
 [assembly: SupportedOSPlatform("linux")]
@@ -20,6 +21,8 @@ internal static class Program
             Console.Error.WriteLine("CommandTray Desktop for Linux requires Linux.");
             return 1;
         }
+        if (SuiteDesktopUpdate.HandleArguments(args, SuiteUpdates.AssemblyVersion(typeof(Program).Assembly), out int updated))
+            return updated;
 
         try
         {
@@ -63,6 +66,30 @@ internal sealed class LinuxApplication : ClientApplication
                     await Clipboard().SetTextAsync(text);
                 }),
                 startLocalDaemon: true);
+
+            bool allowClose = false, closing = false;
+            string? restartUpdate = null;
+            Backend.StartDesktopUpdates((ready, cancellation) => Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                restartUpdate = ready;
+                window.Close();
+            }, DispatcherPriority.Normal, cancellation).GetTask());
+            window.Closing += async (_, args) =>
+            {
+                if (allowClose || Backend.Updates is not { } updates ||
+                    LinuxClientBackend.DesktopUpdatePlatform is not { } platform) return;
+                args.Cancel = true;
+                if (closing) return;
+                closing = true;
+                await Task.Yield();
+                try
+                {
+                    var ready = restartUpdate ?? (updates.Enabled ? await updates.ReadyDirectoryAsync() : null);
+                    if (ready is not null) SuiteDesktopUpdate.Launch(ready, platform, restart: restartUpdate is not null);
+                }
+                catch (Exception error) { Console.Error.WriteLine("CommandTray update: " + error.Message); }
+                finally { allowClose = true; window.Close(); }
+            };
 
             window.Content = new ClientView(Backend);
             window.Opened += async (_, _) =>

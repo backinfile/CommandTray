@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using System.Net.Sockets;
+using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -24,11 +26,33 @@ public sealed class LinuxClientBackend(
     private string? _sensitiveClipboardText;
     private CancellationTokenSource? _clipboardLifetime;
     private Task? _clipboardTask;
+    private SuiteUpdates? _updates;
+    private CancellationTokenSource? _updateLifetime;
+    private Task? _updateTask;
+    private Func<string, CancellationToken, Task>? _installUpdate;
 
     public ClientFeatures Features => ClientFeatures.LocalFiles | ClientFeatures.Terminals | ClientFeatures.Commands |
-        ClientFeatures.Layout | ClientFeatures.Ssh | ClientFeatures.ClipboardHistory;
+        ClientFeatures.Layout | ClientFeatures.Ssh | ClientFeatures.ClipboardHistory |
+        (_updates is null ? ClientFeatures.None : ClientFeatures.Updates);
 
     internal bool HasDesktopClipboard => clipboardRead is not null && clipboardWrite is not null;
+    public SuiteUpdates? Updates => _updates;
+    public static string? DesktopUpdatePlatform => RuntimeInformation.ProcessArchitecture switch
+    {
+        Architecture.X64 => "linux-x64-desktop",
+        Architecture.Arm64 => "linux-arm64-desktop",
+        _ => null
+    };
+
+    public void StartDesktopUpdates(Func<string, CancellationToken, Task> install)
+    {
+        if (_updates is not null || DesktopUpdatePlatform is not { } platform ||
+            Assembly.GetEntryAssembly() is not { Location.Length: 0 } entry) return;
+        _updates = new SuiteUpdates(LocalState.Root, platform, SuiteUpdates.AssemblyVersion(entry));
+        _installUpdate = install;
+        _updateLifetime = new CancellationTokenSource();
+        _updateTask = _updates.RunAsync(_updateLifetime.Token);
+    }
 
     public void StartClipboardSync()
     {
@@ -128,6 +152,12 @@ public sealed class LinuxClientBackend(
 
         switch (operation)
         {
+            case "update_status":
+            case "update_check":
+            case "update_set":
+            case "update_install":
+                return await (_updates ?? throw new InvalidOperationException("Suite updates require a release build."))
+                    .ExecuteAsync(operation, args, _installUpdate!, cancellationToken);
             case "relay_status":
             {
                 var settings = LocalSettings.Load();
@@ -504,6 +534,12 @@ public sealed class LinuxClientBackend(
 
     public async ValueTask DisposeAsync()
     {
+        if (_updateLifetime is { } updateLifetime)
+        {
+            updateLifetime.Cancel();
+            if (_updateTask is not null) await _updateTask;
+            updateLifetime.Dispose();
+        }
         if (_clipboardLifetime is { } clipboardLifetime)
         {
             clipboardLifetime.Cancel();

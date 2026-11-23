@@ -4,7 +4,7 @@ public static class AppPaths
 {
     private static readonly string? OverrideDirectory = Environment.GetEnvironmentVariable("COMMANDTRAY_DATA_DIR");
     public static string DataDirectory { get; } = string.IsNullOrWhiteSpace(OverrideDirectory)
-        ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CommandTray")
+        ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CommandTraySuite")
         : Path.GetFullPath(OverrideDirectory);
     public static int McpPort { get; } = int.TryParse(Environment.GetEnvironmentVariable("COMMANDTRAY_MCP_PORT"), out var port)
         && port is > 0 and <= 65535 ? port : McpServerHost.Port;

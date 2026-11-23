@@ -13,7 +13,8 @@ public enum ClientFeatures
     Capture = 16,
     Pet = 32,
     Ssh = 64,
-    ClipboardHistory = 128
+    ClipboardHistory = 128,
+    Updates = 256
 }
 
 public interface IClientBackend
