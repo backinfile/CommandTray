@@ -1,4 +1,4 @@
-name: Release
+name: Release Original CommandTray
 
 on:
   push:
@@ -32,28 +32,35 @@ jobs:
         id: version
         shell: pwsh
         run: |
-          $tag = '${{ github.ref_name }}'
-          if ($tag -notmatch '^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$') {
+          $ErrorActionPreference = 'Stop'
+          $tag = $env:GITHUB_REF_NAME
+          $pattern = '^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$'
+          if ($tag -notmatch $pattern) {
             throw "Release tag must use vX.Y.Z: $tag"
           }
 
           $version = $tag.Substring(1)
-          "VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          $releaseBranch = "release/$version"
+          git fetch origin 'refs/heads/dev:refs/remotes/origin/dev' "refs/heads/${releaseBranch}:refs/remotes/origin/${releaseBranch}"
+          if ($LASTEXITCODE -ne 0) { throw "Could not fetch dev and $releaseBranch." }
 
-          git fetch origin "+refs/heads/dev:refs/remotes/origin/dev"
-          # Braces prevent PowerShell from parsing ":refs" as part of the variable name.
-          git fetch origin "+refs/heads/release/${version}:refs/remotes/origin/release/${version}"
-
-          $releaseCommit = (git rev-parse "refs/remotes/origin/release/$version").Trim()
-          if ($releaseCommit -ne '${{ github.sha }}') {
-            throw "Tag $tag must point to the exact commit at release/$version."
+          $source = (git rev-parse "refs/tags/${tag}^{commit}").Trim()
+          $releaseCommit = (git rev-parse "refs/remotes/origin/$releaseBranch").Trim()
+          if ($source -ne $releaseCommit -or $source -ne (git rev-parse HEAD).Trim()) {
+            throw "Tag $tag and the checkout must match $releaseBranch."
           }
 
-          git merge-base --is-ancestor '${{ github.sha }}' refs/remotes/origin/dev
+          git merge-base --is-ancestor $source refs/remotes/origin/dev
           if ($LASTEXITCODE -ne 0) {
             throw "Release commit must come from dev."
           }
+
+          $previousTag = git tag --merged $source --sort=-version:refname --list 'v*' |
+            Where-Object { $_ -match $pattern -and [version]$_.Substring(1) -lt [version]$version } |
+            Select-Object -First 1
+          "VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "previous_tag=$previousTag" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
       - name: Set up .NET 10
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
@@ -90,10 +97,11 @@ jobs:
           $lines | Set-Content -LiteralPath "artifacts/SHA256SUMS.txt" -Encoding ascii
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@fe965f7af51af5f2602596916f38a38df2e33de0 # v3.0.2
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           name: CommandTray ${{ github.ref_name }}
           generate_release_notes: true
+          previous_tag: ${{ steps.version.outputs.previous_tag }}
           fail_on_unmatched_files: true
           make_latest: true
           files: |

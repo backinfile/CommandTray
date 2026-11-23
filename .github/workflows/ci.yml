@@ -1,10 +1,12 @@
-name: CI
+name: Original CommandTray CI
 
 on:
   push:
     branches:
       - dev
       - "codex/**"
+      - "!codex/suite-dev"
+      - "!codex/suite/**"
   pull_request:
     branches:
       - dev

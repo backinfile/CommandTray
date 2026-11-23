@@ -2,6 +2,8 @@
 
 [中文](README.md) · [Download](https://github.com/backinfile/CommandTray/releases/latest)
 
+The cross-platform [CommandTray Suite](https://github.com/backinfile/CommandTray/tree/codex/suite-dev) has its own maintenance branch and releases.
+
 [![Release](https://github.com/backinfile/CommandTray/actions/workflows/release.yml/badge.svg)](https://github.com/backinfile/CommandTray/actions/workflows/release.yml)
 
 CommandTray is a lightweight Windows 10/11 x64 system-tray utility for starting, stopping, and monitoring long-running command-line services.

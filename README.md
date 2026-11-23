@@ -2,6 +2,8 @@
 
 [English](README.en.md) · [下载](https://github.com/backinfile/CommandTray/releases/latest)
 
+跨平台套件在 [CommandTray Suite 分支](https://github.com/backinfile/CommandTray/tree/codex/suite-dev) 单独维护和发布。
+
 [![Release](https://github.com/backinfile/CommandTray/actions/workflows/release.yml/badge.svg)](https://github.com/backinfile/CommandTray/actions/workflows/release.yml)
 
 CommandTray 是一个适用于 Windows 10/11 x64 的轻量系统托盘工具，用来启动、停止和监控需要长期运行的命令行服务。
