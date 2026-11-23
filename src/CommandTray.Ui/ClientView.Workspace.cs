@@ -64,9 +64,17 @@ public sealed partial class ClientView
                 var next = spaces[picker.SelectedIndex].Text("id");
                 if (next != _spaceId) await Act(() => SelectSpaceAsync(next));
             };
-            Header(picker, sync, more);
-            if (!_compact)
+            if (_compact) Header(picker, sync, more);
+            else
             {
+                var breadcrumb = Muted(L("工作区", "Workspace") + " /");
+                breadcrumb.VerticalAlignment = VerticalAlignment.Center;
+                picker.MinWidth = 150;
+                picker.MaxWidth = 250;
+                more.Content = IconLabel("plus", L("添加组件", "Add component"));
+                more.Classes.Remove("icon-only");
+                more.Classes.Add("primary");
+                Header(Row(breadcrumb, picker), sync, more);
                 var heading = Heading(selected.Text("name"));
                 heading.Classes.Add("workbench-heading");
                 _contents.Children.Add(heading);

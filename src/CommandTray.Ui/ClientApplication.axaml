@@ -130,7 +130,7 @@
       <Setter Property="Foreground" Value="{StaticResource ShellMuted}" />
       <Setter Property="Margin" Value="10,4" />
     </Style>
-    <Style Selector="TextBlock.workbench-heading">
+    <Style Selector="TextBlock.section.workbench-heading">
       <Setter Property="FontSize" Value="28" />
       <Setter Property="Margin" Value="0,1,0,8" />
     </Style>
