@@ -43,6 +43,16 @@ public sealed partial class ClientView
             args.Handled = true;
             ClosePalette();
         }
+        else if (args.Key == Key.B && args.KeyModifiers == KeyModifiers.Control && !_compact && !_paletteOverlay.IsVisible)
+        {
+            args.Handled = true;
+            _ = Act(ToggleSidebarAsync);
+        }
+        else if (args.Key == Key.Escape && ReferenceEquals(_focusedPanel?.Canvas.Parent, _contents) && !_editing)
+        {
+            args.Handled = true;
+            RestoreFocusedPanel();
+        }
     }
 
     private async Task OpenPaletteAsync()
@@ -89,6 +99,8 @@ public sealed partial class ClientView
                 Navigate(page.Id);
                 return Task.CompletedTask;
             })).ToList();
+        entries.Add(new(_sidebarCollapsed ? L("展开侧栏", "Expand sidebar") : L("收起侧栏", "Collapse sidebar"),
+            L("操作", "Action"), _sidebarCollapsed ? "rail-expand" : "rail-collapse", ToggleSidebarAsync));
 
         void UpdateMatches()
         {

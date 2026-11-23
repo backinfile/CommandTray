@@ -18,6 +18,9 @@ public sealed partial class ClientView : UserControl
     private readonly Grid _shell;
     private readonly Grid _toolbar;
     private readonly Border _navBorder;
+    private readonly ContentControl _navHeader;
+    private readonly Border _navFooter;
+    private readonly GridSplitter _navSplitter;
     private readonly StackPanel _navigation;
     private readonly ScrollViewer _viewport;
     private readonly StackPanel _contents;
@@ -45,6 +48,9 @@ public sealed partial class ClientView : UserControl
         _shell = this.FindControl<Grid>("Shell")!;
         _toolbar = this.FindControl<Grid>("Toolbar")!;
         _navBorder = this.FindControl<Border>("NavBorder")!;
+        _navHeader = this.FindControl<ContentControl>("NavHeader")!;
+        _navFooter = this.FindControl<Border>("NavFooter")!;
+        _navSplitter = this.FindControl<GridSplitter>("NavSplitter")!;
         _navigation = this.FindControl<StackPanel>("Navigation")!;
         _viewport = this.FindControl<ScrollViewer>("Viewport")!;
         _contents = this.FindControl<StackPanel>("Contents")!;
@@ -55,6 +61,12 @@ public sealed partial class ClientView : UserControl
         {
             if (ReferenceEquals(args.Source, _paletteOverlay)) ClosePalette();
         };
+        _navSplitter.DragCompleted += async (_, _) => await Act(SaveSidebarWidthAsync);
+        _navSplitter.KeyUp += async (_, args) =>
+        {
+            if (args.Key is Key.Left or Key.Right) await Act(SaveSidebarWidthAsync);
+        };
+        _viewport.SizeChanged += (_, _) => ResizeFocusedPanel();
 
         _terminalTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(450) };
         _terminalTimer.Tick += async (_, _) => await RefreshTerminalsAsync();
@@ -74,6 +86,9 @@ public sealed partial class ClientView : UserControl
                 var settings = await Execute("settings_read", []);
                 var language = settings.Text("language");
                 if (language is "en" or "zh") _english = language == "en";
+                _sidebarWidth = Math.Clamp(settings.Integer("sidebarWidth", DefaultSidebarWidth), MinimumSidebarWidth, MaximumSidebarWidth);
+                _sidebarCollapsed = settings.Flag("sidebarCollapsed");
+                ApplySidebarGeometry();
             }
             catch (Exception error) { Report(error.Message); }
             await LoadAsync();
@@ -112,6 +127,7 @@ public sealed partial class ClientView : UserControl
             _ => "workspace"
         };
         if (spaceId is not null) _spaceId = spaceId;
+        _focusedPanelId = null;
         _componentId = componentId;
         _viewport.Offset = default;
         if (TopLevel.GetTopLevel(this) is not null)
@@ -132,9 +148,13 @@ public sealed partial class ClientView : UserControl
         Grid.SetColumn(_navBorder, _compact ? 1 : 0);
         Grid.SetRow(_navBorder, _compact ? 3 : 0);
         Grid.SetRowSpan(_navBorder, _compact ? 1 : 3);
-        _navBorder.Width = _compact ? double.NaN : 146;
+        if (_compact)
+        {
+            _focusedPanelId = null;
+            ClosePalette(restoreFocus: false);
+        }
+        ApplySidebarGeometry();
         _navBorder.BorderThickness = _compact ? new Thickness(0, 1, 0, 0) : new Thickness(0, 0, 1, 0);
-        _navBorder.Padding = _compact ? new Thickness(5, 3) : new Thickness(9, 12);
         _contents.Margin = _compact ? new Thickness(12, 10) : new Thickness(16);
         return true;
     }
@@ -146,6 +166,7 @@ public sealed partial class ClientView : UserControl
         var source = _loading = new CancellationTokenSource();
         _editing = false;
         _displayedWorkspace = null;
+        _focusedPanel = null;
         _terminals.Clear();
         RenderNavigation();
         _toolbar.Children.Clear();
@@ -200,41 +221,10 @@ public sealed partial class ClientView : UserControl
         return pages;
     }
 
-    private void RenderNavigation()
-    {
-        var pages = NavigationPages();
-        _navigation.Children.Clear();
-        if (_compact)
-        {
-            var strip = new UniformGrid { Columns = pages.Count, HorizontalAlignment = HorizontalAlignment.Stretch };
-            foreach (var page in pages) strip.Children.Add(NavigationButton(page.Id, L(page.Zh, page.En)));
-            _navigation.HorizontalAlignment = HorizontalAlignment.Stretch;
-            _navigation.Orientation = Orientation.Vertical;
-            _navigation.Children.Add(strip);
-        }
-        else
-        {
-            _navigation.HorizontalAlignment = HorizontalAlignment.Stretch;
-            _navigation.Orientation = Orientation.Vertical;
-            var markIcon = TrayGlyph.Icon("spaces", 15);
-            markIcon.Classes.Add("mark");
-            var mark = new Border { Width = 28, Height = 28, Child = markIcon };
-            mark.Classes.Add("mark");
-            var name = Heading("CommandTray");
-            name.Classes.Add("brand");
-            name.VerticalAlignment = VerticalAlignment.Center;
-            var brand = Row(mark, name);
-            brand.Spacing = 7;
-            brand.Margin = new Thickness(1, 0, 0, 14);
-            _navigation.Children.Add(brand);
-            foreach (var page in pages) _navigation.Children.Add(NavigationButton(page.Id, L(page.Zh, page.En)));
-        }
-    }
-
     private Button NavigationButton(string id, string name)
     {
         string glyph = PageGlyph(id);
-        var button = Action(name, () => { Navigate(id); return Task.CompletedTask; }, glyph: glyph);
+        var button = Action(name, () => { Navigate(id); return Task.CompletedTask; }, name, glyph);
         if (_compact)
         {
             var label = IconLabel(glyph, name);
@@ -243,6 +233,7 @@ public sealed partial class ClientView : UserControl
             label.HorizontalAlignment = HorizontalAlignment.Center;
             button.Content = label;
         }
+        else if (_sidebarCollapsed) button.Content = TrayGlyph.Icon(glyph, 19);
         button.Classes.Add("navigation");
         if (_page == id) button.Classes.Add("selected");
         return button;

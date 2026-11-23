@@ -38,6 +38,10 @@ internal static class TrayGlyph
                 "close" => "M6,6 L18,18 M18,6 L6,18",
                 "next" => "M9,6 L15,12 L9,18",
                 "grip" => "M9,20 L20,9 M14,20 L20,14",
+                "rail-collapse" => "M3,4 H21 V20 H3 Z M9,4 V20 M17,9 L14,12 L17,15",
+                "rail-expand" => "M3,4 H21 V20 H3 Z M9,4 V20 M14,9 L17,12 L14,15",
+                "maximize" => "M4,9 V4 H9 M15,4 H20 V9 M20,15 V20 H15 M9,20 H4 V15",
+                "restore" => "M4,9 H9 V4 M15,4 V9 H20 M20,15 H15 V20 M9,20 V15 H4",
                 _ => "M4,7 H10 L13,10 H20 V18 H4 Z M8,14 H16"
             }),
             Width = size,

@@ -71,7 +71,8 @@ internal sealed class WindowsClientBackend(
                 }, cancellationToken);
                 return Json(new { success = true });
             case "settings_read": return ReadSettings();
-            case "settings_save": return await desktop.OnUiAsync(() => SaveSettings(Text("language"), Flag("runAtLogin"), Flag("mcpEnabled")), cancellationToken);
+            case "settings_save": return await desktop.OnUiAsync(() => SaveSettings(Text("language"), Flag("runAtLogin"),
+                Flag("mcpEnabled"), arguments["sidebarWidth"]?.GetValue<int>(), Flag("sidebarCollapsed")), cancellationToken);
             case "mcp_config": return new JsonObject
             {
                 ["url"] = McpServerHost.Endpoint,
@@ -154,11 +155,14 @@ internal sealed class WindowsClientBackend(
                 language = configuration.Language,
                 runAtLogin = configuration.RunAtLogin,
                 mcpEnabled = configuration.McpEnabled,
+                sidebarWidth = configuration.SidebarWidth,
+                sidebarCollapsed = configuration.SidebarCollapsed,
                 mcpEndpoint = McpServerHost.Endpoint
             })!.AsObject();
     }
 
-    public JsonObject SaveSettings(string? language, bool? runAtLogin, bool? mcpEnabled)
+    public JsonObject SaveSettings(string? language, bool? runAtLogin, bool? mcpEnabled,
+        int? sidebarWidth = null, bool? sidebarCollapsed = null)
     {
         if (language is not null and not ("auto" or "en" or "zh"))
             throw new ArgumentException("Language must be auto, en or zh.");
@@ -167,6 +171,7 @@ internal sealed class WindowsClientBackend(
             var priorLanguage = configuration.Language;
             var priorLogin = configuration.RunAtLogin;
             var priorMcp = configuration.McpEnabled;
+            var priorSidebar = (configuration.SidebarWidth, configuration.SidebarCollapsed);
             var priorRegistryValue = runAtLogin.HasValue && AutoStartService.IsEnabled();
             try
             {
@@ -177,6 +182,8 @@ internal sealed class WindowsClientBackend(
                     configuration.RunAtLogin = login;
                 }
                 if (mcpEnabled is { } enabled) configuration.McpEnabled = enabled;
+                if (sidebarWidth.HasValue) configuration.SidebarWidth = sidebarWidth;
+                if (sidebarCollapsed.HasValue) configuration.SidebarCollapsed = sidebarCollapsed.Value;
                 configurationStore.Save(configuration);
             }
             catch
@@ -184,12 +191,14 @@ internal sealed class WindowsClientBackend(
                 configuration.Language = priorLanguage;
                 configuration.RunAtLogin = priorLogin;
                 configuration.McpEnabled = priorMcp;
+                (configuration.SidebarWidth, configuration.SidebarCollapsed) = priorSidebar;
                 if (runAtLogin.HasValue) AutoStartService.SetEnabled(priorRegistryValue);
                 throw;
             }
         }
         if (language is not null) Localizer.Configure(language);
-        SettingsChanged?.Invoke(this, EventArgs.Empty);
+        if (language is not null || runAtLogin.HasValue || mcpEnabled.HasValue)
+            SettingsChanged?.Invoke(this, EventArgs.Empty);
         return ReadSettings();
     }
 

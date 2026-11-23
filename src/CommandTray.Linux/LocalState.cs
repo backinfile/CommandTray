@@ -87,7 +87,8 @@ internal static class LocalState
 }
 
 internal sealed record LocalSettings(string? Server = null, string? DeviceId = null, string? Token = null, int McpPort = 58629,
-    string? McpToken = null, string? DeviceName = null, string Language = "en", bool RunAtLogin = false, bool McpEnabled = false)
+    string? McpToken = null, string? DeviceName = null, string Language = "en", bool RunAtLogin = false, bool McpEnabled = false,
+    int? SidebarWidth = null, bool SidebarCollapsed = false)
 {
     public static LocalSettings Load() => LocalState.Read(LocalState.Settings, new LocalSettings());
 }

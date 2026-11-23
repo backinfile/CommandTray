@@ -52,7 +52,16 @@ public sealed class DesktopSuiteTests
             Assert.Contains("list_shared_files", names);
             Assert.Contains("item_move", names);
             Assert.Contains("workspace_read", names);
+            Assert.Contains("settings_save", names);
             Assert.DoesNotContain("mcp_config", names);
+
+            // Saving a command used to write a partial configuration snapshot.
+            backend.SaveSettings(null, null, null, sidebarWidth: 204, sidebarCollapsed: true);
+            var service = new ServiceDefinition { Name = "Build", Command = "echo build" };
+            ServiceConfigurationEditor.Save(configuration, store, service, service);
+            var preferences = store.Load();
+            Assert.Equal(204, preferences.SidebarWidth);
+            Assert.True(preferences.SidebarCollapsed);
 
             var create = await client.CallToolAsync("create_workspace", new Dictionary<string, object?> { ["name"] = "Ship" },
                 cancellationToken: timeout.Token);

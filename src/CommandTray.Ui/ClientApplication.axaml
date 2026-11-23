@@ -106,7 +106,32 @@
     <Style Selector="TextBlock.brand">
       <Setter Property="Foreground" Value="{StaticResource ShellInk}" />
       <Setter Property="FontWeight" Value="SemiBold" />
-      <Setter Property="FontSize" Value="14" />
+      <Setter Property="FontSize" Value="13" />
+    </Style>
+    <Style Selector="Border.nav-footer">
+      <Setter Property="BorderBrush" Value="{StaticResource ShellLine}" />
+      <Setter Property="BorderThickness" Value="0,1,0,0" />
+      <Setter Property="Padding" Value="0,7,0,0" />
+    </Style>
+    <Style Selector="GridSplitter.sidebar-splitter">
+      <Setter Property="Focusable" Value="True" />
+      <Setter Property="Template">
+        <ControlTemplate>
+          <Border Background="Transparent">
+            <Border x:Name="ResizeMark" Width="2" Height="26" VerticalAlignment="Center"
+                    HorizontalAlignment="Right" Background="{StaticResource ShellMuted}"
+                    Opacity="0.48" CornerRadius="1" />
+          </Border>
+        </ControlTemplate>
+      </Setter>
+    </Style>
+    <Style Selector="GridSplitter.sidebar-splitter:pointerover /template/ Border#ResizeMark">
+      <Setter Property="Background" Value="{StaticResource ShellAccent}" />
+      <Setter Property="Opacity" Value="1" />
+    </Style>
+    <Style Selector="GridSplitter.sidebar-splitter:focus-visible /template/ Border#ResizeMark">
+      <Setter Property="Background" Value="{StaticResource ShellAccent}" />
+      <Setter Property="Opacity" Value="1" />
     </Style>
     <Style Selector="Button.action">
       <Setter Property="MinHeight" Value="34" />
@@ -207,6 +232,15 @@
     <Style Selector="Border.tile.located">
       <Setter Property="BorderBrush" Value="{DynamicResource TrayAccent}" />
     </Style>
+    <Style Selector="Border.tile.focused-panel">
+      <Setter Property="BorderBrush" Value="{DynamicResource TrayAccent}" />
+    </Style>
+    <Style Selector="Border.tile-heading Button.action.icon-only">
+      <Setter Property="Width" Value="30" />
+    </Style>
+    <Style Selector="Grid.compact Border.tile-heading Button.action.icon-only">
+      <Setter Property="Width" Value="44" />
+    </Style>
     <Style Selector="Border.tile-heading">
       <Setter Property="Background" Value="{DynamicResource TrayChrome}" />
       <Setter Property="BorderBrush" Value="{DynamicResource TrayLine}" />
@@ -301,6 +335,10 @@
     </Style>
     <Style Selector="Border.chrome Button.action.selected Path.glyph">
       <Setter Property="Stroke" Value="{StaticResource ShellAccent}" />
+    </Style>
+    <Style Selector="Border.rail Button.action.navigation">
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="HorizontalContentAlignment" Value="Center" />
     </Style>
     <Style Selector="Border.topbar Button.action.palette-toggle">
       <Setter Property="Background" Value="{StaticResource ShellSelection}" />

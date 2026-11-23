@@ -36,7 +36,8 @@ internal static class ServiceConfigurationEditor
             var proposed = new AppConfiguration
             {
                 Language = configuration.Language, RunAtLogin = configuration.RunAtLogin,
-                McpEnabled = configuration.McpEnabled, Services = services
+                McpEnabled = configuration.McpEnabled, Services = services,
+                SidebarWidth = configuration.SidebarWidth, SidebarCollapsed = configuration.SidebarCollapsed
             };
             // Previously live definitions changed before validation or disk
             // writes. Commit after persistence succeeds and keep the reference

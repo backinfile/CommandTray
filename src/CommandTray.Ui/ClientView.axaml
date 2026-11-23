@@ -2,7 +2,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              x:Class="CommandTray.Ui.ClientView"
              Classes="tray-root compact" Focusable="True">
-  <Grid x:Name="Shell" ColumnDefinitions="Auto,*" RowDefinitions="Auto,*,Auto,Auto"
+  <Grid x:Name="Shell" ColumnDefinitions="0,*" RowDefinitions="Auto,*,Auto,Auto"
         Background="{DynamicResource TrayCanvas}">
     <Border Grid.Column="1" Classes="chrome topbar" BorderThickness="0,0,0,1">
       <ThemeVariantScope RequestedThemeVariant="Dark">
@@ -18,8 +18,18 @@
     <TextBlock x:Name="StatusLine" Grid.Column="1" Grid.Row="2"
                Margin="14,4" TextWrapping="Wrap" Classes="muted" IsVisible="False" />
     <Border x:Name="NavBorder" Grid.RowSpan="3" Padding="6" Classes="chrome sidebar">
-      <StackPanel x:Name="Navigation" Orientation="Vertical" Spacing="4" />
+      <Grid RowDefinitions="Auto,*,Auto">
+        <ContentControl x:Name="NavHeader" HorizontalContentAlignment="Stretch" />
+        <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+          <StackPanel x:Name="Navigation" Orientation="Vertical" Spacing="4" />
+        </ScrollViewer>
+        <Border x:Name="NavFooter" Grid.Row="2" Classes="nav-footer" />
+      </Grid>
     </Border>
+    <GridSplitter x:Name="NavSplitter" Grid.RowSpan="3" IsVisible="False"
+                  Width="8" HorizontalAlignment="Right" VerticalAlignment="Stretch"
+                  ResizeDirection="Columns" ResizeBehavior="CurrentAndNext" KeyboardIncrement="12"
+                  ShowsPreview="False" Classes="sidebar-splitter" />
     <Border x:Name="PaletteOverlay" Grid.ColumnSpan="2" Grid.RowSpan="4"
             Background="#AB060D1B" IsVisible="False" />
   </Grid>

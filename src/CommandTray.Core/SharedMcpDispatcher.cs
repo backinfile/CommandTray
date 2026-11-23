@@ -40,7 +40,8 @@ public sealed class SharedMcpDispatcher
         Add(None, "clipboard_local_write", "Copy text to the system clipboard.", "text");
         Add(ClipboardHistory, "clipboard_history", "Read local clipboard history.");
         Add(None, "settings_read", "Read local application settings.");
-        Add(None, "settings_save", "Update local application settings.", "", "language,runAtLogin:boolean,mcpEnabled:boolean");
+        var desktopSettings = (backend.Features & Layout) != 0 ? ",sidebarWidth:integer,sidebarCollapsed:boolean" : "";
+        Add(None, "settings_save", "Update local application settings.", "", "language,runAtLogin:boolean,mcpEnabled:boolean" + desktopSettings);
         Add(Commands, "commands_list", "List locally managed commands.");
         Add(Commands, "command_save", "Create or update a command profile.", "name,command", "id,workingDirectory");
         Add(Commands, "command_start", "Start a saved command.", "id");

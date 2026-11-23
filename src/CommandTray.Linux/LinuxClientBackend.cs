@@ -196,7 +196,8 @@ public sealed class LinuxClientBackend(
         return new JsonObject
         {
             ["language"] = settings.Language, ["runAtLogin"] = settings.RunAtLogin,
-            ["mcpEnabled"] = settings.McpEnabled, ["mcpEndpoint"] = $"http://127.0.0.1:{settings.McpPort}/mcp"
+            ["mcpEnabled"] = settings.McpEnabled, ["mcpEndpoint"] = $"http://127.0.0.1:{settings.McpPort}/mcp",
+            ["sidebarWidth"] = settings.SidebarWidth, ["sidebarCollapsed"] = settings.SidebarCollapsed
         };
     }
 
@@ -235,7 +236,12 @@ public sealed class LinuxClientBackend(
 
             using var mutex = LinuxCommands.SettingsLock();
             var current = LocalSettings.Load();
-            LocalState.Write(LocalState.Settings, current with { Language = language, RunAtLogin = login, McpEnabled = mcpEnabled });
+            LocalState.Write(LocalState.Settings, current with
+            {
+                Language = language, RunAtLogin = login, McpEnabled = mcpEnabled,
+                SidebarWidth = args["sidebarWidth"]?.GetValue<int>() ?? current.SidebarWidth,
+                SidebarCollapsed = args["sidebarCollapsed"]?.GetValue<bool>() ?? current.SidebarCollapsed
+            });
             return SettingsView();
         }
         finally { _settingsGate.Release(); }

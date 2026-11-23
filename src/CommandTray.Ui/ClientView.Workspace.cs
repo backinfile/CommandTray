@@ -55,16 +55,25 @@ public sealed partial class ClientView
         }
         else
         {
-            var tabs = new WrapPanel { Orientation = Orientation.Horizontal };
+            var tabs = Row();
             foreach (var space in spaces)
             {
                 var id = space.Text("id");
                 var tab = Action(space.Text("name"), () => SelectSpaceAsync(id), glyph: "spaces");
                 tab.Classes.Add("space-tab");
-                if (id == spaceId) tab.Classes.Add("selected");
+                if (id == spaceId)
+                {
+                    tab.Classes.Add("selected");
+                    tab.AttachedToVisualTree += (_, _) =>
+                        Avalonia.Threading.Dispatcher.UIThread.Post(() => tab.BringIntoView(), Avalonia.Threading.DispatcherPriority.Loaded);
+                }
                 tabs.Children.Add(tab);
             }
-            Header(tabs, sync, more);
+            Header(new ScrollViewer
+            {
+                Content = tabs, MaxHeight = 46, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Disabled, Margin = new Thickness(0, 0, 8, 0)
+            }, sync, more);
         }
 
         if (relay is JsonObject relayState && (relayState["conflict"] is JsonObject || relayState.Flag("conflict")))
@@ -77,6 +86,7 @@ public sealed partial class ClientView
         }
 
         var entries = selected.Array("items").OfType<JsonObject>().ToArray();
+        if (_focusedPanelId is { } focused && !entries.Any(item => item.Text("id") == focused)) _focusedPanelId = null;
         if (entries.Length == 0) _contents.Children.Add(Muted(L("暂无组件", "No components")));
         if (!_compact && Has(ClientFeatures.Layout) && entries.Length > 0)
         {
@@ -110,6 +120,7 @@ public sealed partial class ClientView
     private async Task SelectSpaceAsync(string id)
     {
         await Execute("space_activate", new() { ["spaceId"] = id });
+        if (_spaceId != id) _focusedPanelId = null;
         _spaceId = id;
         _viewport.Offset = default;
         await LoadAsync();
@@ -229,7 +240,8 @@ public sealed partial class ClientView
         };
         handle.Children[0].Classes.Add(iconTone);
         var content = new Grid { RowDefinitions = new RowDefinitions("Auto,*") };
-        var heading = TitleRow(handle, Menu("⋯", operations.ToArray()));
+        var actions = Row(Menu("⋯", operations.ToArray()));
+        var heading = TitleRow(handle, actions);
         var headingLine = new Border { Child = heading };
         content.Children.Add(headingLine);
         Grid.SetRow(body, 1);
@@ -264,6 +276,7 @@ public sealed partial class ClientView
         };
         Grid.SetRowSpan(grip, 2);
         content.Children.Add(grip);
+        AddFocusButton(id, canvas, tile, grip, actions);
         handle.Cursor = new Cursor(StandardCursorType.SizeAll);
         ToolTip.SetTip(handle, L("拖动移动，按住 Shift 吸附网格", "Drag to move, hold Shift to snap"));
         ToolTip.SetTip(grip, L("拖动调整大小，按住 Shift 吸附网格", "Drag to resize, hold Shift to snap"));
@@ -290,7 +303,7 @@ public sealed partial class ClientView
         Rect previous = default;
         handle.PointerPressed += (_, e) =>
         {
-            if (!e.GetCurrentPoint(canvas).Properties.IsLeftButtonPressed) return;
+            if (ReferenceEquals(_focusedPanel?.Tile, tile) || !e.GetCurrentPoint(canvas).Properties.IsLeftButtonPressed) return;
             origin = e.GetPosition(canvas);
             previous = new Rect(Canvas.GetLeft(tile), Canvas.GetTop(tile), tile.Width, tile.Height);
             e.Pointer.Capture(handle);
@@ -365,8 +378,8 @@ public sealed partial class ClientView
 
     private static void MeasureCanvas(Canvas canvas)
     {
-        canvas.Width = canvas.Children.Select(view => Canvas.GetLeft(view) + view.Width).DefaultIfEmpty(1).Max();
-        canvas.Height = canvas.Children.Select(view => Canvas.GetTop(view) + view.Height).DefaultIfEmpty(1).Max();
+        canvas.Width = canvas.Children.Where(view => view.IsVisible).Select(view => Canvas.GetLeft(view) + view.Width).DefaultIfEmpty(1).Max();
+        canvas.Height = canvas.Children.Where(view => view.IsVisible).Select(view => Canvas.GetTop(view) + view.Height).DefaultIfEmpty(1).Max();
     }
 
     private Task EditItem(string spaceId, JsonObject item, string caption,
