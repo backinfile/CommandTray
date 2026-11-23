@@ -118,7 +118,7 @@ jobs:
   android:
     name: Package signed APK
     needs: windows
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     env:
       VERSION: ${{ needs.windows.outputs.version }}
@@ -133,8 +133,9 @@ jobs:
           java-version: "21"
       - name: Prepare Android SDK
         run: |
+          test -f "$ANDROID_HOME/platforms/android-36/android.jar"
+          test -x "$ANDROID_HOME/build-tools/35.0.0/apksigner"
           dotnet workload install android
-          sdkmanager "platforms;android-36" "build-tools;35.0.0"
       - name: Build signed APK
         env:
           ANDROID_KEYSTORE_B64: ${{ secrets.COMMANDTRAY_ANDROID_KEYSTORE_B64 }}
