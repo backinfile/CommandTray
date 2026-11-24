@@ -1,6 +1,6 @@
 namespace CommandTray.Sync;
 
-public sealed record ClipboardSyncConnection(string DeviceId, RelayClient Relay);
+public sealed record ClipboardSyncConnection(string DeviceId, RelayClient Relay, string Direction = "both");
 
 public sealed class ClipboardAutoSync(
     Func<ClipboardSyncConnection?> connection,
@@ -9,6 +9,7 @@ public sealed class ClipboardAutoSync(
 {
     private readonly SemaphoreSlim _poll = new(1);
     private string? _deviceId;
+    private string? _direction;
     private string? _local;
     private long? _remoteRevision;
 
@@ -36,9 +37,10 @@ public sealed class ClipboardAutoSync(
         try
         {
             var current = connection();
-            if (current?.DeviceId != _deviceId)
+            if (current?.DeviceId != _deviceId || current?.Direction != _direction)
             {
                 _deviceId = current?.DeviceId;
+                _direction = current?.Direction;
                 _local = null;
                 _remoteRevision = null;
             }
@@ -49,11 +51,18 @@ public sealed class ClipboardAutoSync(
             var latest = await current.Relay.GetClipboardAsync(cancellation).ConfigureAwait(false);
             var revision = latest["revision"]!.GetValue<long>();
             var remote = latest["text"]!.GetValue<string>();
-            if (connection()?.DeviceId != current.DeviceId) return;
+            bool IsCurrent() => connection() is { } active &&
+                active.DeviceId == current.DeviceId && active.Direction == current.Direction;
+            if (!IsCurrent()) return;
             if (local != _local)
             {
                 if (await readLocal(cancellation).ConfigureAwait(false) != local ||
-                    connection()?.DeviceId != current.DeviceId) return;
+                    !IsCurrent()) return;
+                if (current.Direction == "receive")
+                {
+                    _local = local;
+                    return;
+                }
                 if (local.Length is > 0 and <= 1_000_000 && local != remote)
                 {
                     var sent = await current.Relay.PutClipboardAsync(local, cancellation).ConfigureAwait(false);
@@ -61,7 +70,7 @@ public sealed class ClipboardAutoSync(
                 }
                 _local = local;
             }
-            else if (revision != _remoteRevision && remote.Length > 0 && remote != local &&
+            else if (current.Direction != "send" && revision != _remoteRevision && remote.Length > 0 && remote != local &&
                 (string?)latest["deviceId"] != current.DeviceId)
             {
                 if (!await replaceLocal(local, remote, cancellation).ConfigureAwait(false)) return;

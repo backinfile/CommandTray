@@ -28,11 +28,41 @@ public sealed class SuiteUpdateTests
 
             Assert.Equal("ready", (string?)updater.Snapshot()["state"]);
             Assert.Equal("1.2.0", (string?)updater.Snapshot()["availableVersion"]);
+            Assert.Equal("second.example", (string?)updater.Snapshot()["source"]);
             var ready = await updater.ReadyDirectoryAsync();
             Assert.NotNull(ready);
             Assert.Equal(package, await File.ReadAllBytesAsync(SuiteUpdates.PackagePath(ready)));
             await File.WriteAllBytesAsync(SuiteUpdates.PackagePath(ready), corrupt);
             Assert.Null(await updater.ReadyDirectoryAsync());
+        }
+        finally { root.Delete(recursive: true); }
+    }
+
+    [Fact]
+    public async Task CancelStopsTheActualDownloadAndLeavesNoStagedUpdate()
+    {
+        var root = Directory.CreateTempSubdirectory("commandtray-suite-update-");
+        try
+        {
+            using var signer = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+            byte[] package = "signed update package"u8.ToArray();
+            using var handler = new PendingDownloadHandler(Manifest(signer, package, "1.2.0"));
+            using var http = new HttpClient(handler);
+            var updater = new SuiteUpdates(root.FullName, "windows-portable", new Version(1, 0, 0),
+                signer.ExportSubjectPublicKeyInfoPem(), http, [""]);
+
+            using var lifetime = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            var check = updater.CheckAsync(lifetime.Token);
+            await handler.Started.Task.WaitAsync(lifetime.Token);
+            Assert.Equal("GitHub", (string?)updater.Snapshot()["source"]);
+            Assert.Equal(package.LongLength, (long?)updater.Snapshot()["totalBytes"]);
+
+            await updater.ExecuteAsync("update_cancel", new(), (_, _) => Task.CompletedTask, lifetime.Token);
+            await check;
+
+            Assert.Equal("cancelled", (string?)updater.Snapshot()["state"]);
+            Assert.Null(await updater.ReadyDirectoryAsync());
+            Assert.Empty(root.EnumerateFiles("*", SearchOption.AllDirectories));
         }
         finally { root.Delete(recursive: true); }
     }
@@ -106,6 +136,20 @@ public sealed class SuiteUpdateTests
             ++Requests;
             Assert.EndsWith("/latest.json", request.RequestUri!.AbsolutePath);
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(manifest) });
+        }
+    }
+
+    private sealed class PendingDownloadHandler(byte[] manifest) : HttpMessageHandler
+    {
+        public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            if (request.RequestUri!.AbsolutePath.EndsWith("/latest.json", StringComparison.Ordinal))
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(manifest) };
+            Started.SetResult();
+            await Task.Delay(Timeout.Infinite, cancellationToken);
+            throw new InvalidOperationException("The test download should have been cancelled.");
         }
     }
 }

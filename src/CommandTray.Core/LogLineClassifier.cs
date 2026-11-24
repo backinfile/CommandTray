@@ -1,15 +1,15 @@
 using System.Text.RegularExpressions;
 
-namespace CommandTray.Services;
+namespace CommandTray.Core;
 
-internal enum LogLineSeverity
+public enum LogLineSeverity
 {
     Normal,
     Warning,
     Error
 }
 
-internal static partial class LogLineClassifier
+public static partial class LogLineClassifier
 {
     public static LogLineSeverity Classify(string line)
     {

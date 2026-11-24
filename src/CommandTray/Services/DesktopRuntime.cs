@@ -25,6 +25,7 @@ internal sealed class DesktopRuntime : IDisposable
         Relay = new DesktopRelay(directory, Workspace);
         Media = new DesktopMedia(Path.Combine(directory, "captures"));
         McpCredential = DesktopRelay.ReadOrCreateLocalCredential(directory);
+        ClipboardPreferences = new ClipboardPreferences(directory);
         _clipboardPath = Path.Combine(directory, "clipboard.json");
     }
 
@@ -32,6 +33,7 @@ internal sealed class DesktopRuntime : IDisposable
     public DesktopRelay Relay { get; }
     public DesktopMedia Media { get; }
     public string McpCredential { get; }
+    internal ClipboardPreferences ClipboardPreferences { get; }
     public event EventHandler<DesktopNotice>? Notification;
     public void AttachWindow(Control window) => _ui = window;
     public WindowsClientBackend? Backend { get; private set; }

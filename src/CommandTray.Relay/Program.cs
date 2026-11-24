@@ -146,7 +146,16 @@ endpoints.MapPut("/clipboard", async (ClipboardInput input, HttpContext context,
     return Results.Ok(await store.PutClipboardAsync(input.Text, CurrentDevice(context), cancellation));
 });
 
-endpoints.MapGet("/files", (RelayStore store) => Results.Ok(new { files = store.State.Files }));
+endpoints.MapGet("/files", (RelayStore store) =>
+{
+    var state = store.State;
+    var names = state.Devices.ToDictionary(device => device.Id, device => device.Name, StringComparer.Ordinal);
+    return Results.Ok(new { files = state.Files.Select(file => new
+    {
+        file.Id, file.Name, file.Folder, file.Size, file.Sha256, file.ModifiedAt, file.DeviceId,
+        deviceName = names.GetValueOrDefault(file.DeviceId)
+    }) });
+});
 endpoints.MapPost("/files", async (string name, string? folder, HttpContext context, RelayStore store, CancellationToken cancellation) =>
 {
     folder ??= "";

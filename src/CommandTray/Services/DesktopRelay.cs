@@ -53,6 +53,11 @@ internal sealed class DesktopRelay
         get { lock (_settingsGate) return _connection?.Server.AbsoluteUri; }
     }
 
+    public WorkspaceSyncConflict? ReadConflict()
+    {
+        lock (_settingsGate) return _connection is null ? null : Journal(_connection).ReadConflict();
+    }
+
     public async Task PairAsync(string url, string name, string pairingCode, CancellationToken cancellationToken = default)
     {
         var server = ParseServer(url);
@@ -60,6 +65,7 @@ internal sealed class DesktopRelay
         try
         {
             var result = await new RelayClient(server, http: Http).PairAsync(name, pairingCode, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
             Save(new Connection(server, result.DeviceId, name, result.Token, 0));
         }
         finally { _operations.Release(); }
@@ -184,20 +190,23 @@ internal sealed class DesktopRelay
     public Task<JsonArray> ListDevicesAsync(CancellationToken cancellationToken = default) =>
         Client(GetConnection()).ListDevicesAsync(cancellationToken);
 
-    public async Task<JsonObject> UploadAsync(string path, string? folder, CancellationToken cancellationToken = default, string? name = null)
+    public async Task<JsonObject> UploadAsync(string path, string? folder, CancellationToken cancellationToken = default,
+        string? name = null, IProgress<long>? progress = null, string? deviceId = null)
     {
         await using var stream = File.OpenRead(Path.GetFullPath(path));
-        return await Client(GetConnection()).UploadAsync(name ?? Path.GetFileName(path), stream, folder, cancellationToken);
+        return await Client(GetConnection(deviceId)).UploadAsync(name ?? Path.GetFileName(path), stream, folder, cancellationToken, progress);
     }
 
-    public async Task DownloadAsync(string id, string destination, bool overwrite, CancellationToken cancellationToken = default)
+    public async Task DownloadAsync(string id, string destination, bool overwrite, CancellationToken cancellationToken = default,
+        IProgress<long>? progress = null, string? deviceId = null)
     {
         destination = Path.GetFullPath(destination);
         var temporary = destination + "." + Guid.NewGuid().ToString("N") + ".download";
         try
         {
             await using (var stream = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81920, true))
-                await Client(GetConnection()).DownloadAsync(id, stream, cancellationToken);
+                await Client(GetConnection(deviceId)).DownloadAsync(id, stream, cancellationToken, progress);
+            cancellationToken.ThrowIfCancellationRequested();
             File.Move(temporary, destination, overwrite);
         }
         finally
@@ -209,9 +218,15 @@ internal sealed class DesktopRelay
     public async Task DeleteFileAsync(string id, CancellationToken cancellationToken = default) =>
         await Client(GetConnection()).DeleteFileAsync(id, cancellationToken);
 
-    private Connection GetConnection()
+    private Connection GetConnection(string? expectedDevice = null)
     {
-        lock (_settingsGate) return _connection ?? throw new InvalidOperationException("Pair this device in settings first.");
+        lock (_settingsGate)
+        {
+            var connection = _connection ?? throw new InvalidOperationException("Pair this device in settings first.");
+            if (expectedDevice is not null && connection.DeviceId != expectedDevice)
+                throw new InvalidOperationException(Localizer.T("The relay connection changed. Select the file again.", "中转连接已更换，请重新选择文件。"));
+            return connection;
+        }
     }
 
     private static RelayClient Client(Connection connection) => new(connection.Server, connection.Token, Http);

@@ -93,26 +93,73 @@ public sealed class RelayClient
     public Task<JsonArray> ListFilesAsync(CancellationToken cancellationToken = default) =>
         GetListAsync("v1/files", "files", cancellationToken);
 
-    public async Task<JsonObject> UploadAsync(string name, Stream content, string? folder = null, CancellationToken cancellationToken = default)
+    public async Task<JsonObject> UploadAsync(string name, Stream content, string? folder = null,
+        CancellationToken cancellationToken = default, IProgress<long>? progress = null)
     {
         var path = "v1/files?name=" + Uri.EscapeDataString(name);
         if (!string.IsNullOrWhiteSpace(folder))
             path += "&folder=" + Uri.EscapeDataString(folder);
 
         using var request = Create(HttpMethod.Post, path);
-        request.Content = new StreamContent(content);
+        request.Content = progress is null ? new StreamContent(content) : new UploadContent(content, progress);
         request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
         using var response = await _http.SendAsync(request, cancellationToken);
         await CheckAsync(response, cancellationToken);
         return await ReadObjectAsync(response, cancellationToken);
     }
 
-    public async Task DownloadAsync(string id, Stream destination, CancellationToken cancellationToken = default)
+    public async Task DownloadAsync(string id, Stream destination, CancellationToken cancellationToken = default,
+        IProgress<long>? progress = null)
     {
         using var request = Create(HttpMethod.Get, "v1/files/" + Uri.EscapeDataString(id));
         using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
         await CheckAsync(response, cancellationToken);
-        await response.Content.CopyToAsync(destination, cancellationToken);
+        if (progress is null)
+        {
+            await response.Content.CopyToAsync(destination, cancellationToken);
+        }
+        else
+        {
+            await using var input = await response.Content.ReadAsStreamAsync(cancellationToken);
+            await CopyAsync(input, destination, progress, cancellationToken);
+        }
+    }
+
+    private sealed class UploadContent(Stream input, IProgress<long> progress) : HttpContent
+    {
+        protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context) =>
+            CopyAsync(input, stream, progress, CancellationToken.None);
+
+        protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context, CancellationToken cancellationToken) =>
+            CopyAsync(input, stream, progress, cancellationToken);
+
+        protected override bool TryComputeLength(out long length)
+        {
+            length = input.CanSeek ? input.Length - input.Position : 0;
+            return input.CanSeek;
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) input.Dispose();
+            base.Dispose(disposing);
+        }
+    }
+
+    private static async Task CopyAsync(Stream input, Stream output, IProgress<long> progress, CancellationToken cancellation)
+    {
+        byte[] buffer = new byte[64 * 1024];
+        long transferred = 0;
+        long lastReport = Environment.TickCount64;
+        for (int count; (count = await input.ReadAsync(buffer, cancellation)) != 0;)
+        {
+            await output.WriteAsync(buffer.AsMemory(0, count), cancellation);
+            transferred += count;
+            if (Environment.TickCount64 - lastReport < 75) continue;
+            progress.Report(transferred);
+            lastReport = Environment.TickCount64;
+        }
+        progress.Report(transferred);
     }
 
     public async Task DeleteFileAsync(string id, CancellationToken cancellationToken = default)

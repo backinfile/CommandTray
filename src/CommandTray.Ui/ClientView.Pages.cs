@@ -12,99 +12,6 @@ namespace CommandTray.Ui;
 
 public sealed partial class ClientView
 {
-    private async Task RenderFilesAsync(CancellationToken token)
-    {
-        Header(L("共享文件", "Shared files"));
-        var relay = await ReadPageContent("relay_status", token);
-        if (!relay.Flag("paired"))
-        {
-            PairPrompt(relay);
-            return;
-        }
-        Task ChooseFile() => Form(L("上传文件", "Upload files"), L("选择文件", "Choose files"), UploadAsync,
-            new Field("folder", L("共享目录（可选）", "Shared folder (optional)")));
-
-        var upload = Action(_compact ? "+" : L("上传", "Upload"), ChooseFile, L("上传文件", "Upload files"), "plus");
-        if (!_compact) upload.Classes.Add("primary");
-        Header(L("共享文件", "Shared files"), IconButton("sync", L("刷新", "Refresh"), LoadAsync), upload);
-        var files = await ReadPageContent("files_list", token) as JsonArray ?? [];
-        if (files.Count == 0)
-            _contents.Children.Add(EmptyState("files", L("暂无共享文件", "No shared files"),
-                PrimaryAction(L("上传文件", "Upload files"), ChooseFile, "plus")));
-        foreach (var group in files.OfType<JsonObject>().GroupBy(file => file.Text("folder")).OrderBy(group => group.Key))
-        {
-            if (group.Key.Length > 0) _contents.Children.Add(IconLabel("files", group.Key, prominent: true));
-            var list = new StackPanel();
-            foreach (var file in group)
-            {
-                var id = file.Text("id");
-                var name = file.Text("name");
-                var summary = new StackPanel { Spacing = 2 };
-                var fileName = Heading(name);
-                fileName.VerticalAlignment = VerticalAlignment.Center;
-                fileName.Margin = new Thickness(7, 0, 0, 0);
-                Grid.SetColumn(fileName, 1);
-                summary.Children.Add(new Grid
-                {
-                    ColumnDefinitions = new ColumnDefinitions("Auto,*"),
-                    Children = { TrayGlyph.Icon("file", 15), fileName }
-                });
-                summary.Children.Add(Muted(FileSize(file["size"])));
-                var row = Section(TitleRow(summary, Row(
-                    IconButton("download", L("下载", "Download"), () => DownloadAsync(id, name)),
-                    Menu("⋯", (L("删除", "Delete"), () => Confirm(L("删除共享文件？", "Delete shared file?"),
-                        () => Change("file_delete", new() { ["id"] = id })))))));
-                row.Padding = new Thickness(_compact ? 0 : 11, 5, 6, 6);
-                list.Children.Add(row);
-            }
-            _contents.Children.Add(_compact ? list : Table(list));
-        }
-    }
-
-    private async Task UploadAsync(JsonObject values)
-    {
-        var storage = RequireTopLevel().StorageProvider;
-        var inputs = await storage.OpenFilePickerAsync(new FilePickerOpenOptions { AllowMultiple = true });
-        if (inputs.Count == 0) return;
-        Report(L("正在上传…", "Uploading…"));
-        foreach (var input in inputs)
-        {
-            var path = TemporaryFile(input.Name);
-            try
-            {
-                await using (var original = await input.OpenReadAsync())
-                await using (var staging = File.Create(path))
-                    await original.CopyToAsync(staging);
-                await Execute("file_upload", new()
-                {
-                    ["name"] = input.Name, ["folder"] = values.Text("folder"), ["path"] = path
-                });
-            }
-            finally { RemoveTemporary(path); }
-        }
-        await LoadAsync();
-        Report(L("已上传", "Uploaded"));
-    }
-
-    private async Task DownloadAsync(string id, string name)
-    {
-        var destination = await RequireTopLevel().StorageProvider.SaveFilePickerAsync(
-            new FilePickerSaveOptions { SuggestedFileName = name, ShowOverwritePrompt = true });
-        if (destination is null) return;
-        Report(L("正在下载…", "Downloading…"));
-        var path = TemporaryFile(name);
-        try
-        {
-            await Execute("file_download", new() { ["id"] = id, ["path"] = path });
-            await using var source = File.OpenRead(path);
-            await using var output = await destination.OpenWriteAsync();
-            if (output.CanSeek) output.SetLength(0);
-            await source.CopyToAsync(output);
-        }
-        finally { RemoveTemporary(path); }
-        Report(L("已保存到本机", "Saved to this device"));
-    }
-
     private static string FileSize(JsonNode? node)
     {
         if (!long.TryParse(node?.ToString(), out var size)) return "";
@@ -139,173 +46,8 @@ public sealed partial class ClientView
     private TopLevel RequireTopLevel() => TopLevel.GetTopLevel(this)
         ?? throw new InvalidOperationException(L("窗口尚未打开。", "The window is not open."));
 
-    private async Task RenderClipboardAsync(CancellationToken token)
-    {
-        Header(L("剪贴板", "Clipboard"));
-        var relay = await ReadPageContent("relay_status", token);
-        if (!relay.Flag("paired"))
-        {
-            PairPrompt(relay);
-        }
-        else
-        {
-            Header(L("剪贴板", "Clipboard"),
-                IconButton("sync", L("刷新", "Refresh"), LoadAsync),
-                IconButton("send", L("发送本机剪贴板", "Send local clipboard"), async () =>
-                {
-                    var local = TextOf(await Execute("clipboard_local_read", []));
-                    if (local.Length == 0) throw new InvalidOperationException(L("剪贴板没有文本。", "The clipboard has no text."));
-                    Report(L("正在发送…", "Sending…"));
-                    await Change("clipboard_send", new() { ["text"] = local });
-                }));
-            var entries = await ReadPageContent("clipboard_relay_history", token) as JsonArray ?? [];
-            _contents.Children.Add(Heading(L("同步历史", "Sync history")));
-            if (entries.Count == 0) _contents.Children.Add(Muted(L("暂无同步文本", "No synchronized text")));
-            foreach (var entry in entries.OfType<JsonObject>())
-            {
-                var text = entry.Text("text");
-                var source = entry.Text("deviceName", L("未知设备", "Unknown device"));
-                if (DateTimeOffset.TryParse(entry.Text("updatedAt"), CultureInfo.InvariantCulture, out var updated) &&
-                    updated > DateTimeOffset.UnixEpoch)
-                    source += " · " + updated.ToLocalTime().ToString("g");
-
-                var preview = text.Length > 240 ? text[..(char.IsHighSurrogate(text[239]) ? 239 : 240)] + "…" : text;
-                var open = Action(L("查看剪贴板内容", "View clipboard text"), () => OpenClipboardEntryAsync(text, source));
-                Avalonia.Automation.AutomationProperties.SetName(open, preview);
-                open.Content = new TextBlock
-                {
-                    Text = preview, TextWrapping = TextWrapping.Wrap, MaxLines = 2,
-                    TextTrimming = TextTrimming.CharacterEllipsis
-                };
-                open.HorizontalAlignment = HorizontalAlignment.Stretch;
-                open.HorizontalContentAlignment = HorizontalAlignment.Left;
-                open.Padding = new Thickness(0);
-                var summary = new StackPanel { Children = { open, Muted(source) } };
-                _contents.Children.Add(Section(TitleRow(summary, ClipboardCopyButton(text))));
-            }
-        }
-        if (Has(ClientFeatures.ClipboardHistory))
-        {
-            _contents.Children.Add(Heading(L("本机历史", "Local history")));
-            var history = await Execute("clipboard_history", [], token) as JsonArray ?? [];
-            foreach (var entry in history)
-            {
-                string text = TextOf(entry);
-                var block = Muted(text);
-                block.MaxLines = 2;
-                _contents.Children.Add(Section(TitleRow(block, Action(L("复制", "Copy"),
-                    async () => await Execute("clipboard_local_write", new() { ["text"] = text })))));
-            }
-        }
-    }
-
-    private Button ClipboardCopyButton(string text) =>
-        IconButton("copy", L("复制到本机", "Copy to this device"), async () =>
-        {
-            await Execute("clipboard_local_write", new() { ["text"] = text });
-            Report(L("已复制到本机剪贴板", "Copied to this device"));
-        });
-
-    private Task OpenClipboardEntryAsync(string text, string source)
-    {
-        _editing = true;
-        _contents.Children.Clear();
-        _viewport.Offset = default;
-        Report("");
-        Header(L("剪贴板", "Clipboard"), ClipboardCopyButton(text), Action(L("返回", "Back"), LoadAsync));
-        _contents.Children.Add(Muted(source));
-        _contents.Children.Add(Body(text));
-        return Task.CompletedTask;
-    }
-
     private void PairPrompt(JsonNode? relay) => _contents.Children.Add(EmptyState("files", L("尚未配对", "Unpaired"),
         PrimaryAction(L("连接中转服务器", "Connect to a relay"), () => PairForm(relay))));
-
-    private async Task RenderSettingsAsync(CancellationToken token)
-    {
-        Header(L("设置", "Settings"));
-        var settings = await Execute("settings_read", [], token);
-        var relay = await Execute("relay_status", [], token);
-        _contents.Children.Add(IconLabel("files", L("中转服务器", "Relay server"), prominent: true));
-        var details = new StackPanel { Spacing = 4 };
-        string relayName = relay.Text("deviceName");
-        bool paired = relay.Flag("paired");
-        if (WindowsWorkbench && _sidebarPaired != paired)
-        {
-            _sidebarPaired = paired;
-            UpdateSidebarSpaces();
-        }
-        details.Children.Add(Heading(paired ? L("已配对", "Paired") : L("未配对", "Unpaired")));
-        if (paired && relayName.Length > 0) details.Children.Add(Muted(relayName));
-        if (paired && relay.Text("server") is { Length: > 0 } server) details.Children.Add(Body(server));
-        var connectionRow = Section(TitleRow(details, paired
-            ? Menu("⋯",
-                (L("编辑连接", "Edit connection"), () => PairForm(relay)),
-                (L("已配对设备", "Paired devices"), ShowDevicesAsync),
-                (L("解除配对", "Unpair"), () => Confirm(L("解除本机配对？", "Unpair this device?"),
-                    () => Change("relay_unpair", []))))
-            : PrimaryAction(L("配对", "Pair"), () => PairForm(relay))));
-        if (!_compact)
-        {
-            connectionRow.Classes.Remove("divider");
-            connectionRow.Classes.Add("table");
-            connectionRow.Padding = new Thickness(12, 7);
-        }
-        _contents.Children.Add(connectionRow);
-
-        var autoSync = new ToggleSwitch { IsChecked = settings.Flag("clipboardAutoSync"), OnContent = "", OffContent = "" };
-        var clipboardLabel = L("自动同步剪贴板", "Sync clipboard automatically");
-        Avalonia.Automation.AutomationProperties.SetName(autoSync, clipboardLabel);
-        autoSync.IsCheckedChanged += async (_, _) => await Act(() =>
-            Change("settings_save", new() { ["clipboardAutoSync"] = autoSync.IsChecked == true }));
-        _contents.Children.Add(Section(TitleRow(Heading(clipboardLabel), autoSync)));
-
-        var mcp = new ToggleSwitch { IsChecked = settings.Flag("mcpEnabled"), OnContent = "", OffContent = "" };
-        Avalonia.Automation.AutomationProperties.SetName(mcp, L("本地 MCP", "Local MCP"));
-        mcp.IsCheckedChanged += async (_, _) => await Act(() => Change("settings_save", new() { ["mcpEnabled"] = mcp.IsChecked == true }));
-        _contents.Children.Add(TitleRow(IconLabel("terminal", L("本地 MCP", "Local MCP"), prominent: true), mcp));
-        if (settings.Flag("mcpEnabled"))
-        {
-            string endpoint = settings.Text("mcpEndpoint", "http://127.0.0.1:58629/mcp");
-            _contents.Children.Add(Section(TitleRow(Body(endpoint), IconButton("copy", L("复制配置", "Copy config"), async () =>
-            {
-                var configuration = await Execute("mcp_config", []);
-                await Execute("clipboard_local_write", new() { ["text"] = configuration?.ToJsonString(), ["sensitive"] = true });
-                Report(L("已复制本地 MCP 配置", "Copied local MCP configuration"));
-            }))));
-        }
-        if (Has(ClientFeatures.Pet))
-        {
-            var autostart = new CheckBox { Content = L("登录后启动", "Start at login"), IsChecked = settings.Flag("runAtLogin") };
-            autostart.Click += async (_, _) => await Act(() =>
-                Change("settings_save", new() { ["runAtLogin"] = autostart.IsChecked == true }));
-            _contents.Children.Add(autostart);
-            _contents.Children.Add(Row(
-                Action(L("显示桌宠", "Show desktop pet"), async () => await Execute("pet_set", new() { ["visible"] = true })),
-                Action(L("隐藏桌宠", "Hide desktop pet"), async () => await Execute("pet_set", new() { ["visible"] = false }))));
-        }
-
-        _contents.Children.Add(TitleRow(Heading(L("语言", "Language")), Menu(_english ? "English" : "简体中文",
-            ("简体中文", () => SetLanguageAsync(false)), ("English", () => SetLanguageAsync(true)))));
-        if (Has(ClientFeatures.Updates)) _contents.Children.Add(await UpdateSettingsAsync(token));
-        if (_compact && Has(ClientFeatures.Commands)) _contents.Children.Add(
-            Action(L("命令管理", "Commands"), () => { Navigate("commands"); return Task.CompletedTask; }));
-        if (_compact && Has(ClientFeatures.Capture)) _contents.Children.Add(
-            Action(L("屏幕捕获", "Capture"), () => { Navigate("capture"); return Task.CompletedTask; }));
-        if (_compact && Has(ClientFeatures.Ssh)) _contents.Children.Add(
-            Action(L("SSH 主机", "SSH hosts"), () => { Navigate("ssh"); return Task.CompletedTask; }));
-    }
-
-    private async Task ShowDevicesAsync()
-    {
-        var token = _loading?.Token ?? CancellationToken.None;
-        _editing = true;
-        _contents.Children.Clear();
-        _viewport.Offset = default;
-        Header(L("已配对设备", "Paired devices"), Action(L("返回", "Back"), LoadAsync));
-        var devices = await ReadPageContent("relay_devices", token) as JsonArray ?? [];
-        foreach (var device in devices) _contents.Children.Add(Heading(device.Text("name", device.Text("id"))));
-    }
 
     private async Task SetLanguageAsync(bool english)
     {
@@ -320,7 +62,7 @@ public sealed partial class ClientView
         new Field("deviceName", L("设备名称", "Device name"), relay.Text("deviceName", Environment.MachineName)),
         new Field("pairingCode", L("配对码", "Pairing code"), Secret: true));
 
-    private async Task PairAsync(JsonObject values)
+    private async Task PairAsync(JsonObject values, CancellationToken cancellation)
     {
         foreach (var (key, message) in new[]
         {
@@ -332,11 +74,13 @@ public sealed partial class ClientView
             if (string.IsNullOrWhiteSpace(values.Text(key))) throw new InvalidOperationException(message);
         }
 
-        try { await Change("relay_pair", values); }
+        try { await Execute("relay_pair", values, cancellation); }
         catch (HttpRequestException error) when (error.StatusCode == System.Net.HttpStatusCode.Unauthorized)
         {
             throw new InvalidOperationException(L("配对码不正确。", "The pairing code is incorrect."), error);
         }
+        cancellation.ThrowIfCancellationRequested();
+        await LoadAsync();
     }
 
     private Task Confirm(string message, Func<Task> action)
@@ -347,111 +91,6 @@ public sealed partial class ClientView
         Header(message, Action(L("取消", "Cancel"), LoadAsync));
         _contents.Children.Add(PrimaryAction(L("确认", "Confirm"), action));
         return Task.CompletedTask;
-    }
-
-    private async Task RenderCommandsAsync(CancellationToken token)
-    {
-        var create = Action(L("新建命令", "Add command"), () => CommandForm(null), glyph: "plus");
-        create.Classes.Add("primary");
-        Header(L("命令管理", "Commands"), IconButton("sync", L("刷新", "Refresh"), LoadAsync), create);
-        var commands = await Execute("commands_list", [], token) as JsonArray ?? [];
-        if (_componentId is { } requested && commands.OfType<JsonObject>().FirstOrDefault(command =>
-                command.Text("id", command.Text("name")) == requested) is { } requestedCommand)
-        {
-            _componentId = null;
-            await CommandLogAsync(requestedCommand.Text("name"), new() { ["id"] = requested });
-            return;
-        }
-        if (commands.Count == 0) _contents.Children.Add(Muted(L("暂无命令", "No commands")));
-        var search = new TextBox { PlaceholderText = L("搜索命令", "Search commands") };
-        search.Classes.Add("entry");
-        search.MaxWidth = 420;
-        search.HorizontalAlignment = HorizontalAlignment.Left;
-        search.MinWidth = 228;
-        var results = new StackPanel();
-        if (commands.Count > 0)
-        {
-            _contents.Children.Add(search);
-            _contents.Children.Add(_compact ? results : Table(results));
-            if (!_compact)
-                results.Children.Add(CommandColumns(ColumnLabel(L("名称", "Name")),
-                    ColumnLabel(L("命令", "Command")), ColumnLabel(L("状态", "State")), new Border()));
-        }
-        var summaries = new List<(string Name, string Command, Control Row)>();
-        foreach (var command in commands.OfType<JsonObject>())
-        {
-            var id = command.Text("id", command.Text("name"));
-            var args = new JsonObject { ["id"] = id };
-            var summary = new StackPanel { Spacing = 4 };
-            summary.Children.Add(IconLabel("terminal", command.Text("name"), prominent: true));
-            if (_compact) summary.Children.Add(Muted(command.Text("command")));
-            string state = command.Text("state");
-            var stateText = state.ToLowerInvariant() switch
-            {
-                "running" => L("运行中", "Running"),
-                "stopped" => L("已停止", "Stopped"),
-                "starting" => L("启动中", "Starting"),
-                "stopping" => L("停止中", "Stopping"),
-                "faulted" or "failed" => L("异常", "Failed"),
-                _ => state
-            };
-            var badge = new Border { Child = Muted(stateText), HorizontalAlignment = HorizontalAlignment.Left,
-                VerticalAlignment = VerticalAlignment.Center };
-            badge.Classes.Add("chip");
-            bool running = state.Equals("Running", StringComparison.OrdinalIgnoreCase);
-            badge.Classes.Set("live", running);
-            if (_compact && state.Length > 0) summary.Children.Add(badge);
-            var choices = new List<(string Label, Func<Task> Action)>
-            {
-                (L("启动", "Start"), () => Change("command_start", args)),
-                (L("停止", "Stop"), () => Change("command_stop", args)),
-                (L("重启", "Restart"), () => Change("command_restart", args)),
-                (L("日志", "Logs"), () => CommandLogAsync(command.Text("name"), args)),
-                (L("编辑", "Edit"), () => CommandForm(command)),
-                (L("删除", "Delete"), () => Confirm(L("删除命令？", "Delete command?"), () => Change("command_delete", args)))
-            };
-            if (Uri.TryCreate(command.Text("openUrl"), UriKind.Absolute, out var url) && url.Scheme is "http" or "https")
-                choices.Insert(3, (L("打开网页", "Open service URL"), async () =>
-                    await RequireTopLevel().Launcher.LaunchUriAsync(url)));
-            var startStop = IconButton(running ? "stop" : "play",
-                running ? L("停止", "Stop") : L("启动", "Start"),
-                () => Change(running ? "command_stop" : "command_start", args));
-            var actions = Row(startStop, Menu("⋯", choices.ToArray()));
-            var row = _compact ? Section(TitleRow(summary, actions))
-                : CommandColumns(summary, Muted(command.Text("command")), badge, actions);
-            summaries.Add((command.Text("name"), command.Text("command"), row));
-            results.Children.Add(row);
-        }
-        search.TextChanged += (_, _) =>
-        {
-            var pattern = search.Text ?? "";
-            foreach (var item in summaries)
-                item.Row.IsVisible = item.Name.Contains(pattern, StringComparison.CurrentCultureIgnoreCase) ||
-                                     item.Command.Contains(pattern, StringComparison.CurrentCultureIgnoreCase);
-        };
-    }
-
-    private static TextBlock ColumnLabel(string value)
-    {
-        var label = new TextBlock { Text = value };
-        label.Classes.Add("column-label");
-        return label;
-    }
-
-    private static Border CommandColumns(Control name, Control command, Control state, Control actions)
-    {
-        var columns = new Grid { ColumnDefinitions = new ColumnDefinitions("1.1*,1.7*,112,76") };
-        var cells = new[] { name, command, state, actions };
-        for (var i = 0; i < cells.Length; i++)
-        {
-            Grid.SetColumn(cells[i], i);
-            cells[i].VerticalAlignment = VerticalAlignment.Center;
-            columns.Children.Add(cells[i]);
-        }
-        var row = Section(columns);
-        row.Padding = new Thickness(12, 5, 8, 5);
-        row.MinHeight = 45;
-        return row;
     }
 
     private async Task CommandForm(JsonObject? command)
@@ -517,116 +156,6 @@ public sealed partial class ClientView
         });
     }
 
-    private async Task CommandLogAsync(string name, JsonObject args)
-    {
-        string transcript = TextOf(await Execute("command_log", args));
-        _editing = true;
-        _contents.Children.Clear();
-        Header(name, Action(L("返回", "Back"), LoadAsync),
-            Action(L("复制", "Copy"), async () => await Execute("clipboard_local_write", new() { ["text"] = transcript })));
-        var logControls = new StackPanel { Spacing = 6 };
-        var filter = new TextBox { PlaceholderText = L("搜索日志", "Filter logs") };
-        var follow = new CheckBox { Content = L("跟随", "Follow"), IsChecked = true };
-        var wrap = new CheckBox { Content = L("换行", "Wrap"), IsChecked = true };
-        var text = Body(transcript);
-        text.FontFamily = new Avalonia.Media.FontFamily("monospace");
-        logControls.Children.Add(filter);
-        logControls.Children.Add(Row(follow, wrap));
-        logControls.Children.Add(text);
-        _contents.Children.Add(logControls);
-        void Filter()
-        {
-            var pattern = filter.Text ?? "";
-            var displayed = pattern.Length == 0 ? transcript : string.Join(Environment.NewLine,
-                transcript.Split('\n').Where(line => line.Contains(pattern, StringComparison.CurrentCultureIgnoreCase)));
-            if (text.Text == displayed) return;
-            text.Text = displayed;
-            if (follow.IsChecked == true && pattern.Length == 0)
-                Dispatcher.UIThread.Post(() => _viewport.Offset = new Vector(_viewport.Offset.X, _viewport.Extent.Height));
-        }
-        filter.TextChanged += (_, _) => Filter();
-        wrap.Click += (_, _) =>
-        {
-            text.TextWrapping = wrap.IsChecked == true ? Avalonia.Media.TextWrapping.Wrap : Avalonia.Media.TextWrapping.NoWrap;
-            _viewport.HorizontalScrollBarVisibility = wrap.IsChecked == true
-                ? Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled : Avalonia.Controls.Primitives.ScrollBarVisibility.Auto;
-        };
-        var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
-        bool running = false;
-        timer.Tick += async (_, _) =>
-        {
-            if (running || follow.IsChecked != true) return;
-            running = true;
-            try
-            {
-                transcript = TextOf(await Execute("command_log", args));
-                if (logControls.Parent is not null) Filter();
-            }
-            catch (Exception error) { Report(error.Message); }
-            finally { running = false; }
-        };
-        logControls.DetachedFromVisualTree += (_, _) => timer.Stop();
-        timer.Start();
-    }
-
-    private async Task RenderCaptureAsync(CancellationToken token)
-    {
-        var take = Action(L("截图", "Screenshot"), () => Change("capture_take", []), glyph: "capture");
-        take.Classes.Add("primary");
-        Header(L("屏幕捕获", "Capture"), take,
-            Menu("⋯",
-                (L("选择截图区域", "Select capture region"), () => Change("capture_select", [])),
-                (L("区域截图", "Region capture"), () => Form(L("区域截图", "Region capture"), values =>
-                {
-                    var area = new JsonObject();
-                    foreach (string key in new[] { "x", "y", "width", "height" })
-                        area[key] = int.Parse(values.RequireText(key), CultureInfo.InvariantCulture);
-                    return Change("capture_take", area);
-                }, new Field("x", "X"), new Field("y", "Y"), new Field("width", L("宽", "Width")),
-                    new Field("height", L("高", "Height")))),
-                (L("开始录屏", "Start recording"), () => Change("capture_record_start", [])),
-                (L("结束录屏", "Stop recording"), () => Change("capture_record_stop", []))));
-        var captures = await Execute("capture_list", [], token) as JsonArray ?? [];
-        foreach (var entry in captures)
-        {
-            string path = TextOf(entry, "path");
-            _contents.Children.Add(Section(TitleRow(IconLabel("file", Path.GetFileName(path), prominent: true), Menu("⋯",
-                (L("打开", "Open"), async () => await Execute("capture_open", new() { ["path"] = path })),
-                (L("标注", "Annotate"), () => Change("capture_annotate", new() { ["path"] = path })),
-                (L("贴图", "Pin"), async () => await Execute("capture_pin", new() { ["path"] = path })),
-                (L("识别文字", "OCR"), async () =>
-                {
-                    var result = await Execute("capture_ocr", new() { ["path"] = path, ["language"] = _english ? "eng" : "chi_sim+eng" });
-                    _contents.Children.Clear();
-                    Header(L("识别文字", "OCR"), Action(L("返回", "Back"), LoadAsync));
-                    _contents.Children.Add(Body(TextOf(result)));
-                })))));
-        }
-    }
-
-    private async Task RenderSshAsync(CancellationToken token)
-    {
-        Header(L("SSH 主机", "SSH hosts"), Action("+", () => HostForm(null), L("添加主机", "Add host")),
-            Menu("⋯",
-                (L("导入密钥", "Import key"), () => Form(L("导入加密 SSH 密钥", "Import encrypted SSH key"), values =>
-                    Change("ssh_import", values), new Field("path", L("私钥路径", "Private key path")),
-                        new Field("name", L("名称", "Name")), new Field("passphrase", L("同步口令", "Sync passphrase"), Secret: true))),
-                (L("密钥", "Keys"), ShowKeysAsync)));
-        var workspace = await Execute("workspace_read", [], token);
-        foreach (var host in workspace.Array("sshHosts").OfType<JsonObject>())
-        {
-            string id = host.Text("id");
-            var entry = new StackPanel { Spacing = 4 };
-            entry.Children.Add(IconLabel("ssh", host.Text("name"), prominent: true));
-            entry.Children.Add(Muted(HostAddress(host)));
-            _contents.Children.Add(Section(TitleRow(entry, Menu("⋯",
-                (L("在空间中连接", "Connect in space"), () => ConnectHostAsync(host)),
-                (L("编辑", "Edit"), () => HostForm(host)),
-                (L("删除", "Delete"), () => Confirm(L("删除 SSH 主机？", "Delete SSH host?"),
-                    () => Change("ssh_delete", new() { ["id"] = id })))))));
-        }
-    }
-
     private static string HostAddress(JsonObject host) => $"{host.Text("username")}@{host.Text("address")}:{host.Integer("port", 22)}";
 
     private Task HostForm(JsonObject? host) => Form(L("SSH 主机", "SSH host"), values =>
@@ -659,8 +188,14 @@ public sealed partial class ClientView
         var document = await Execute("workspace_read", []);
         var spaceId = document.Text("activeSpaceId");
         if (spaceId.Length == 0) throw new InvalidOperationException(L("请先新建空间。", "Create a space first."));
-        await Execute("item_save", new() { ["spaceId"] = spaceId, ["item"] = NewItem("terminal", host.Text("name"), new()
+        var created = await Execute("item_save", new() { ["spaceId"] = spaceId, ["item"] = NewItem("terminal", host.Text("name"), new()
             { ["shell"] = "ssh", ["hostId"] = host.Text("id") }) });
-        Navigate("workspace", spaceId);
+        _page = "workspace";
+        _spaceId = spaceId;
+        _workspaceSection = "terminal";
+        _focusedPanelId = null;
+        _componentId = created.Text("id");
+        _viewport.Offset = default;
+        await LoadAsync();
     }
 }

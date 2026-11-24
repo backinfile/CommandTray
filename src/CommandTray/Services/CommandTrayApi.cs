@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using CommandTray.Models;
 
 namespace CommandTray.Services;
@@ -37,6 +38,50 @@ public sealed class CommandTrayApi
     {
         lock (_configuration)
             return ToView(FindService(serviceId));
+    }
+
+    internal object PreviewConfiguration(string path)
+    {
+        var bytes = File.ReadAllBytes(path);
+        var configuration = ConfigurationStore.ReadImportedConfiguration(bytes);
+        return new { services = configuration.Services.Select(service => service.Name).ToArray(),
+            sha256 = Convert.ToHexString(SHA256.HashData(bytes)) };
+    }
+
+    internal void ExportConfiguration(string path)
+    {
+        lock (_configuration) _store.ExportWithoutSecrets(_configuration, path);
+    }
+
+    internal async Task<int> ImportConfigurationAsync(string path, string expectedHash, CancellationToken cancellation)
+    {
+        var bytes = await File.ReadAllBytesAsync(path, cancellation);
+        if (!Convert.ToHexString(SHA256.HashData(bytes)).Equals(expectedHash, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException(Localizer.T("The file changed after preview. Preview it again.", "文件已修改，请重新预览。"));
+        var imported = ConfigurationStore.ReadImportedConfiguration(bytes);
+        await _operations.WaitAsync(cancellation);
+        try
+        {
+            lock (_configuration)
+            {
+                if (_configuration.Services.Any(service =>
+                    _supervisor.GetSnapshot(service).State is not (ServiceState.Stopped or ServiceState.Faulted)))
+                    throw new InvalidOperationException(Localizer.T("Stop all services before importing.", "请先停止所有服务，再导入配置。"));
+                var previous = _configuration.Services;
+                if (File.Exists(_store.PathName))
+                {
+                    var backups = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(_store.PathName))!, "backups");
+                    Directory.CreateDirectory(backups);
+                    File.Copy(_store.PathName, Path.Combine(backups, $"services-before-import-{Guid.NewGuid():N}.json"));
+                }
+                _configuration.Services = imported.Services;
+                try { _store.Save(_configuration); }
+                catch { _configuration.Services = previous; throw; }
+            }
+            ConfigurationChanged?.Invoke(this, EventArgs.Empty);
+            return imported.Services.Count;
+        }
+        finally { _operations.Release(); }
     }
 
     public async Task<ServiceView> CreateServiceAsync(ServiceInput input, CancellationToken cancellationToken = default)

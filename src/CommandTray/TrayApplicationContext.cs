@@ -104,13 +104,14 @@ internal sealed class TrayApplicationContext : IDisposable
             () =>
             {
                 lock (_configuration)
-                    return _configuration.ClipboardAutoSync ? _desktop.Relay.ClipboardConnection() : null;
+                    return _configuration.ClipboardAutoSync && _desktop.Relay.ClipboardConnection() is { } connection
+                        ? connection with { Direction = _desktop.ClipboardPreferences.Direction } : null;
             },
             cancellation => _desktop.OnUiAsync(_desktop.ReadClipboardForSync, cancellation),
             (expected, text, cancellation) => _desktop.OnUiAsync(() =>
             {
                 lock (_configuration)
-                    if (!_configuration.ClipboardAutoSync) return false;
+                    if (!_configuration.ClipboardAutoSync || _desktop.ClipboardPreferences.Direction == "send") return false;
                 if (_desktop.ReadClipboardForSync() != expected) return false;
                 _desktop.WriteClipboard(text);
                 return true;

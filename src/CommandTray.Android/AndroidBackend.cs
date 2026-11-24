@@ -16,6 +16,7 @@ internal sealed class AndroidBackend : IClientBackend
     private readonly AndroidSettings _settings;
     private readonly AndroidWorkspace _workspace;
     private readonly ClipboardAutoSync _clipboardSync;
+    private readonly ClipboardPreferences _clipboardPreferences;
     private readonly SuiteUpdates _updates;
     private readonly object _updateSchedule = new();
     private DateTimeOffset _nextUpdateCheck;
@@ -33,6 +34,7 @@ internal sealed class AndroidBackend : IClientBackend
         var files = context.FilesDir?.AbsolutePath ?? throw new IOException("Android files directory is unavailable.");
         _privateCache = context.CacheDir?.AbsolutePath ?? throw new IOException("Android cache directory is unavailable.");
         _workspace = new AndroidWorkspace(files, _settings);
+        _clipboardPreferences = new ClipboardPreferences(files);
         var packageName = context.PackageName ?? throw new InvalidOperationException("Android package name is unavailable.");
         var packageVersion = context.PackageManager?.GetPackageInfo(packageName, 0)?.VersionName;
         _updates = new SuiteUpdates(files, "android", Version.TryParse(packageVersion, out var version) && version.Build >= 0
@@ -41,7 +43,8 @@ internal sealed class AndroidBackend : IClientBackend
             cancellation => Dispatcher.UIThread.InvokeAsync(ReadClipboardForSync, DispatcherPriority.Normal, cancellation).GetTask(),
             (expected, text, cancellation) => Dispatcher.UIThread.InvokeAsync(() =>
             {
-                if (!_settings.ClipboardAutoSync || ReadClipboardForSync() != expected || FocusedClipboard() is not { } clipboard)
+                if (!_settings.ClipboardAutoSync || _clipboardPreferences.Direction == "send" ||
+                    ReadClipboardForSync() != expected || FocusedClipboard() is not { } clipboard)
                     return false;
                 using var clip = ClipData.NewPlainText("CommandTray", text);
                 clipboard.PrimaryClip = clip ?? throw new InvalidOperationException("Android clipboard is unavailable.");
@@ -53,11 +56,15 @@ internal sealed class AndroidBackend : IClientBackend
     internal string CacheDirectory => _privateCache;
 
     public ValueTask<JsonNode?> ExecuteAsync(string operation, JsonObject arguments, CancellationToken cancellationToken = default) =>
+        ExecuteAsync(operation, arguments, null, cancellationToken);
+
+    public ValueTask<JsonNode?> ExecuteAsync(string operation, JsonObject arguments,
+        IProgress<long>? transferProgress, CancellationToken cancellationToken) =>
         new(Task.Run(() => operation is "relay_pair" or "relay_unpair" or "sync_push" or "sync_pull" or "sync_resolve"
             ? ExecuteWorkspaceSyncAsync(operation, arguments, cancellationToken)
             : operation.StartsWith("update_", StringComparison.Ordinal)
             ? _updates.ExecuteAsync(operation, arguments, InstallUpdateAsync, cancellationToken).AsTask()
-            : ExecuteLockedAsync(operation, arguments, cancellationToken), cancellationToken));
+            : ExecuteLockedAsync(operation, arguments, cancellationToken, transferProgress), cancellationToken));
 
     private async Task<JsonNode?> ExecuteWorkspaceSyncAsync(string operation, JsonObject args, CancellationToken cancellation)
     {
@@ -77,8 +84,12 @@ internal sealed class AndroidBackend : IClientBackend
         finally { _workspaceSync.Release(); }
     }
 
-    private async Task<JsonNode?> ExecuteLockedAsync(string operation, JsonObject args, CancellationToken cancellation)
+    private async Task<JsonNode?> ExecuteLockedAsync(string operation, JsonObject args, CancellationToken cancellation,
+        IProgress<long>? transferProgress = null)
     {
+        if (operation.StartsWith("file_", StringComparison.Ordinal) || operation == "files_list")
+            return await ExecuteFileAsync(operation, args, cancellation, transferProgress);
+
         await _gate.WaitAsync(cancellation);
         try
         {
@@ -104,6 +115,7 @@ internal sealed class AndroidBackend : IClientBackend
                         _workspace.RemoveItem(Text(args, "spaceId"), Text(args, "itemId"));
                         return null;
                     case "relay_status": return Status();
+                    case "sync_conflict": return _workspace.Conflict();
                 }
             }
 
@@ -120,6 +132,7 @@ internal sealed class AndroidBackend : IClientBackend
                         throw new InvalidDataException("The relay returned incomplete pairing credentials.");
                     var client = new RelayClient(new Uri(server), response.Token, _http);
                     var activeSpace = await _workspace.StageOfflineSpacesAsync(server, client, cancellation);
+                    cancellation.ThrowIfCancellationRequested();
                     _settings.SavePairing(server, device, response.DeviceId, response.Token, activeSpace);
                     return Status();
                 }
@@ -127,25 +140,9 @@ internal sealed class AndroidBackend : IClientBackend
                     _settings.ForgetPairing();
                     return Status();
                 case "relay_devices": return await Client().ListDevicesAsync(cancellation);
-                case "files_list": return await Client().ListFilesAsync(cancellation);
-                case "file_upload":
-                {
-                    var input = TrustedFile(Text(args, "path"));
-                    await using var stream = File.OpenRead(input);
-                    return await Client().UploadAsync(Text(args, "name"), stream, Text(args, "folder"), cancellation);
-                }
-                case "file_download":
-                {
-                    var destination = TrustedFile(Text(args, "path"));
-                    await using var stream = new FileStream(destination, FileMode.Create, FileAccess.Write, FileShare.None, 32768, useAsync: true);
-                    await Client().DownloadAsync(Text(args, "id"), stream, cancellation);
-                    return new JsonObject { ["size"] = stream.Position };
-                }
-                case "file_delete":
-                    await Client().DeleteFileAsync(Text(args, "id"), cancellation);
-                    return null;
                 case "clipboard_read": return await Client().GetClipboardAsync(cancellation);
                 case "clipboard_relay_history": return await Client().GetClipboardHistoryAsync(cancellation);
+                case "clipboard_preferences": return _clipboardPreferences.Execute(args);
                 case "clipboard_send": return await Client().PutClipboardAsync(Text(args, "text"), cancellation);
                 case "clipboard_receive":
                 {
@@ -178,6 +175,42 @@ internal sealed class AndroidBackend : IClientBackend
             }
         }
         finally { _gate.Release(); }
+    }
+
+    private async Task<JsonNode?> ExecuteFileAsync(string operation, JsonObject args, CancellationToken cancellation,
+        IProgress<long>? progress)
+    {
+        RelayClient client;
+        await _gate.WaitAsync(cancellation);
+        try
+        {
+            if (args["deviceId"]?.GetValue<string>() is { } expected && _settings.DeviceId != expected)
+                throw new InvalidOperationException("The relay connection changed. Select the file again.");
+            client = Client();
+        }
+        finally { _gate.Release(); }
+        switch (operation)
+        {
+            case "files_list": return await client.ListFilesAsync(cancellation);
+            case "file_upload":
+            {
+                var input = TrustedFile(Text(args, "path"));
+                await using var stream = File.OpenRead(input);
+                return await client.UploadAsync(Text(args, "name"), stream, Text(args, "folder"), cancellation, progress);
+            }
+            case "file_download":
+            {
+                var destination = TrustedFile(Text(args, "path"));
+                await using var stream = new FileStream(destination, FileMode.Create, FileAccess.Write, FileShare.None, 32768, useAsync: true);
+                await client.DownloadAsync(Text(args, "id"), stream, cancellation, progress);
+                return new JsonObject { ["size"] = stream.Position };
+            }
+            case "file_delete":
+                await client.DeleteFileAsync(Text(args, "id"), cancellation);
+                return null;
+            default:
+                throw new NotSupportedException("Unknown shared file operation.");
+        }
     }
 
     internal void UpdateClipboardFocus(Activity activity, bool hasFocus)
@@ -278,7 +311,7 @@ internal sealed class AndroidBackend : IClientBackend
         if (!_settings.ClipboardAutoSync || !_settings.Paired) return null;
         var device = _settings.DeviceId;
         var relay = Client();
-        return _settings.DeviceId == device ? new(device, relay) : null;
+        return _settings.DeviceId == device ? new(device, relay, _clipboardPreferences.Direction) : null;
     }
 
     private ClipboardManager? FocusedClipboard() =>

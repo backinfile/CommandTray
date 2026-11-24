@@ -14,7 +14,8 @@ public enum ClientFeatures
     Pet = 32,
     Ssh = 64,
     ClipboardHistory = 128,
-    Updates = 256
+    Updates = 256,
+    ConfigurationFiles = 512
 }
 
 public interface IClientBackend
@@ -23,4 +24,8 @@ public interface IClientBackend
 
     ValueTask<JsonNode?> ExecuteAsync(
         string operation, JsonObject arguments, CancellationToken cancellationToken = default);
+
+    ValueTask<JsonNode?> ExecuteAsync(string operation, JsonObject arguments,
+        IProgress<long>? transferProgress, CancellationToken cancellationToken) =>
+        ExecuteAsync(operation, arguments, cancellationToken);
 }

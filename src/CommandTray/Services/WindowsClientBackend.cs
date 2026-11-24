@@ -19,11 +19,16 @@ internal sealed class WindowsClientBackend(
 
     public ClientFeatures Features => ClientFeatures.LocalFiles | ClientFeatures.Terminals | ClientFeatures.Commands |
         ClientFeatures.Layout | ClientFeatures.Capture | ClientFeatures.Pet | ClientFeatures.Ssh | ClientFeatures.ClipboardHistory |
+        ClientFeatures.ConfigurationFiles |
         (updates is null ? ClientFeatures.None : ClientFeatures.Updates);
 
     public event EventHandler? SettingsChanged;
 
-    public async ValueTask<JsonNode?> ExecuteAsync(string operation, JsonObject arguments, CancellationToken cancellationToken = default)
+    public ValueTask<JsonNode?> ExecuteAsync(string operation, JsonObject arguments, CancellationToken cancellationToken = default) =>
+        ExecuteAsync(operation, arguments, null, cancellationToken);
+
+    public async ValueTask<JsonNode?> ExecuteAsync(string operation, JsonObject arguments,
+        IProgress<long>? transferProgress, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         string? Text(string name) => WorkspaceStore.Text(arguments[name]);
@@ -39,6 +44,7 @@ internal sealed class WindowsClientBackend(
         {
             case "update_status":
             case "update_check":
+            case "update_cancel":
             case "update_set":
             case "update_install":
                 return await (updates ?? throw new InvalidOperationException("Suite updates require a release build."))
@@ -63,15 +69,22 @@ internal sealed class WindowsClientBackend(
             case "sync_push": return Json(await _actions.Push(cancellationToken));
             case "sync_pull": return Json(await _actions.Pull(cancellationToken));
             case "sync_resolve": return Json(await _actions.Resolve(Required("choice"), cancellationToken));
+            case "sync_conflict": return Json(Relay.ReadConflict());
             case "files_list": return await Relay.ListFilesAsync(cancellationToken);
-            case "file_upload": return await Relay.UploadAsync(PathArgument(), Text("folder"), cancellationToken, Text("name"));
-            case "file_download": return Json(await _actions.Download(Id(), PathArgument(), cancellationToken, Flag("overwrite") ?? false));
+            case "file_upload":
+                return await Relay.UploadAsync(PathArgument(), Text("folder"), cancellationToken, Text("name"),
+                    transferProgress, Text("deviceId"));
+            case "file_download":
+                await Relay.DownloadAsync(Id(), PathArgument(), Flag("overwrite") ?? false, cancellationToken,
+                    transferProgress, Text("deviceId"));
+                return Json(new OperationResult(true, "ok"));
             case "file_delete": return Json(await _actions.DeleteShared(Id(), cancellationToken));
             case "clipboard_read": return await Relay.GetClipboardAsync(cancellationToken);
             case "clipboard_relay_history": return await Relay.GetClipboardHistoryAsync(cancellationToken);
             case "clipboard_send": return await Relay.PutClipboardAsync(Required("text"), cancellationToken);
             case "clipboard_receive": return await _actions.ReceiveToLocalClipboard(cancellationToken);
             case "clipboard_history": return Json(desktop.ClipboardHistory());
+            case "clipboard_preferences": return desktop.ClipboardPreferences.Execute(arguments);
             case "clipboard_local_read": return Json(new { text = await _actions.ReadClipboard(cancellationToken) });
             case "clipboard_local_write":
                 await desktop.OnUiAsync(() =>
@@ -89,13 +102,20 @@ internal sealed class WindowsClientBackend(
                 ["url"] = McpServerHost.Endpoint,
                 ["headers"] = new JsonObject { ["Authorization"] = $"Bearer {desktop.McpCredential}" }
             };
+            case "configuration_preview": return Json(commands.PreviewConfiguration(PathArgument()));
+            case "configuration_import":
+                return Json(await commands.ImportConfigurationAsync(PathArgument(), Required("sha256"), cancellationToken));
+            case "configuration_export":
+                commands.ExportConfiguration(PathArgument());
+                return null;
             case "commands_list": return Json(commands.ListServices());
             case "command_save": return Json(await SaveCommandAsync(arguments, cancellationToken));
             case "command_start": return Json(await commands.StartServiceAsync(Id(), cancellationToken));
             case "command_stop": return Json(await commands.StopServiceAsync(Id(), cancellationToken));
             case "command_restart": return Json(await commands.RestartServiceAsync(Id(), cancellationToken));
             case "command_delete": return Json(await commands.DeleteServiceAsync(Id(), cancellationToken));
-            case "command_log": return Json(new { text = commands.GetServiceLog(Id(), Number("lines", 300)).Content });
+            case "command_log":
+                return await Task.Run(() => Json(new { text = commands.GetServiceLog(Id(), Number("lines", 300)).Content }), cancellationToken);
             case "local_list":
                 var path = Path.GetFullPath(Text("path") is { Length: > 0 } directory ? directory : Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
                 return Json(new { path, entries = LocalFiles.List(path).Select(entry =>
@@ -112,6 +132,7 @@ internal sealed class WindowsClientBackend(
             case "terminal_resize": return Json(_actions.ResizeTerminal(Item(), Number("columns", 80), Number("rows", 24)));
             case "terminal_close": return Json(_actions.StopTerminal(TerminalSpace(Item()), Item()));
             case "capture_list": return Json(desktop.Media.Captures());
+            case "capture_record_state": return Json(desktop.Media.RecordingState);
             case "capture_take": return Json(await _actions.Screenshot(cancellationToken, Integer(arguments["x"]), Integer(arguments["y"]),
                 Integer(arguments["width"]), Integer(arguments["height"])));
             case "capture_select": return Json(await _actions.SelectScreenshot(cancellationToken));

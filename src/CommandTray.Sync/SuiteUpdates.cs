@@ -24,9 +24,12 @@ public sealed class SuiteUpdates
     private readonly string _platform;
     private readonly Version _current;
     private readonly string _disabled;
+    private readonly object _downloadGate = new();
+    private CancellationTokenSource? _downloadCancellation;
     private Status _status = new("idle");
 
-    private sealed record Status(string State, Version? Available = null, string? Detail = null);
+    private sealed record Status(string State, Version? Available = null, string? Detail = null,
+        string? Source = null, long Downloaded = 0, long? Total = null);
 
     public SuiteUpdates(string dataDirectory, string platform, Version current)
         : this(dataDirectory, platform, current, PublicKey(), Http, DefaultSources) { }
@@ -52,7 +55,8 @@ public sealed class SuiteUpdates
         return new JsonObject
         {
             ["currentVersion"] = _current.ToString(3), ["availableVersion"] = status.Available?.ToString(3),
-            ["state"] = status.State, ["detail"] = status.Detail, ["enabled"] = Enabled
+            ["state"] = status.State, ["detail"] = status.Detail, ["enabled"] = Enabled,
+            ["source"] = status.Source, ["downloadedBytes"] = status.Downloaded, ["totalBytes"] = status.Total
         };
     }
 
@@ -84,10 +88,11 @@ public sealed class SuiteUpdates
     public async Task CheckAsync(CancellationToken cancellation = default)
     {
         await _check.WaitAsync(cancellation);
+        SuiteUpdateAsset? ready = null;
         try
         {
             Publish("checking");
-            var ready = ReadReadyAsset(_root, _platform, _current, _publicKey);
+            ready = ReadReadyAsset(_root, _platform, _current, _publicKey);
             if (ready is not null && !await VerifyFileAsync(PackagePath(_root), ready, cancellation)) ready = null;
             SuiteUpdateAsset? best = null;
             byte[]? manifest = null;
@@ -110,26 +115,44 @@ public sealed class SuiteUpdates
             if (best is null) { Publish("unreachable"); return; }
             if (best.Version <= _current) { Publish("current"); return; }
 
-            Publish("downloading", best.Version);
             Directory.CreateDirectory(_root);
             var temporary = Path.Combine(_root, "partial-" + Guid.NewGuid().ToString("N"));
+            using var transfer = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
+            lock (_downloadGate) _downloadCancellation = transfer;
             try
             {
                 foreach (var source in _sources)
                 {
+                    var displaySource = source.Length == 0 ? "GitHub" : new Uri(source).Host;
                     try
                     {
-                        await DownloadAsync(source, best, temporary, cancellation);
+                        Publish("downloading", best.Version, source: displaySource, total: best.Size);
+                        await DownloadAsync(source, best, temporary, transfer.Token, bytes =>
+                            Publish("downloading", best.Version, source: displaySource, downloaded: bytes, total: best.Size));
+                        transfer.Token.ThrowIfCancellationRequested();
                         File.Move(temporary, PackagePath(_root), overwrite: true);
                         WriteManifest(_root, manifest!);
-                        Publish("ready", best.Version);
+                        Publish("ready", best.Version, source: displaySource);
                         return;
                     }
-                    catch (Exception error) when (IsSourceFailure(error, cancellation)) { File.Delete(temporary); }
+                    catch (Exception error) when (IsSourceFailure(error, transfer.Token)) { File.Delete(temporary); }
                 }
                 Publish(ready is null ? "downloadFailed" : "ready", (ready ?? best).Version);
             }
-            finally { File.Delete(temporary); }
+            catch (OperationCanceledException) when (transfer.IsCancellationRequested && !cancellation.IsCancellationRequested)
+            {
+                Publish(ready is null ? "cancelled" : "ready", (ready ?? best).Version);
+            }
+            finally
+            {
+                lock (_downloadGate) _downloadCancellation = null;
+                File.Delete(temporary);
+            }
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+        {
+            Publish(ready is null ? "idle" : "ready", ready?.Version);
+            throw;
         }
         catch (IOException error) { Publish("failed", detail: error.Message); }
         catch (UnauthorizedAccessException error) { Publish("failed", detail: error.Message); }
@@ -154,6 +177,9 @@ public sealed class SuiteUpdates
         {
             case "update_status": break;
             case "update_check": await CheckAsync(cancellation); break;
+            case "update_cancel":
+                lock (_downloadGate) _downloadCancellation?.Cancel();
+                break;
             case "update_set": SetEnabled(args["enabled"]!.GetValue<bool>()); break;
             case "update_install":
                 var ready = await ReadyDirectoryAsync(cancellation)
@@ -239,7 +265,8 @@ public sealed class SuiteUpdates
         return data.ToArray();
     }
 
-    private async Task DownloadAsync(string source, SuiteUpdateAsset asset, string destination, CancellationToken cancellation)
+    private async Task DownloadAsync(string source, SuiteUpdateAsset asset, string destination, CancellationToken cancellation,
+        Action<long> progress)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
         timeout.CancelAfter(TimeSpan.FromSeconds(12));
@@ -252,20 +279,27 @@ public sealed class SuiteUpdates
             throw new InvalidDataException("Update size does not match.");
         await using (var input = await response.Content.ReadAsStreamAsync(timeout.Token))
         await using (var output = new FileStream(destination, FileMode.CreateNew, FileAccess.Write, FileShare.None, 65536, useAsync: true))
-            await CopyBoundedAsync(input, output, asset.Size, timeout.Token);
+            await CopyBoundedAsync(input, output, asset.Size, timeout.Token, progress);
         if (!await VerifyFileAsync(destination, asset, timeout.Token))
             throw new CryptographicException("Update checksum was rejected.");
     }
 
-    private static async Task CopyBoundedAsync(Stream input, Stream output, long limit, CancellationToken cancellation)
+    private static async Task CopyBoundedAsync(Stream input, Stream output, long limit, CancellationToken cancellation,
+        Action<long>? progress = null)
     {
         var buffer = new byte[64 * 1024];
         long total = 0;
+        long lastReport = Environment.TickCount64;
         for (int read; (read = await input.ReadAsync(buffer, cancellation)) != 0;)
         {
             total += read;
             if (total > limit) throw new InvalidDataException("Update exceeds the signed size limit.");
             await output.WriteAsync(buffer.AsMemory(0, read), cancellation);
+            if (progress is not null && (total == limit || Environment.TickCount64 - lastReport >= 100))
+            {
+                progress(total);
+                lastReport = Environment.TickCount64;
+            }
         }
     }
 
@@ -295,6 +329,7 @@ public sealed class SuiteUpdates
         return input.ReadToEnd();
     }
 
-    private void Publish(string state, Version? available = null, string? detail = null) =>
-        Volatile.Write(ref _status, new(state, available, detail));
+    private void Publish(string state, Version? available = null, string? detail = null,
+        string? source = null, long downloaded = 0, long? total = null) =>
+        Volatile.Write(ref _status, new(state, available, detail, source, downloaded, total));
 }

@@ -7,6 +7,7 @@ internal static class RelayWeb
         MapAsset("/", "index.html", "text/html; charset=utf-8");
         MapAsset("/commandtray.css", "commandtray.css", "text/css; charset=utf-8");
         MapAsset("/commandtray.js", "commandtray.js", "text/javascript; charset=utf-8");
+        MapAsset("/board.js", "board.js", "text/javascript; charset=utf-8");
 
         void MapAsset(string route, string name, string contentType) =>
             app.MapGet(route, (HttpContext context) =>

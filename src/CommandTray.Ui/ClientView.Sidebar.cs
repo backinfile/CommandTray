@@ -10,10 +10,10 @@ namespace CommandTray.Ui;
 
 public sealed partial class ClientView
 {
-    private const int RailWidth = 56;
-    private static readonly int DefaultSidebarWidth = OperatingSystem.IsWindows() ? 232 : 176;
-    private const int MinimumSidebarWidth = 132;
-    private static readonly int MaximumSidebarWidth = OperatingSystem.IsWindows() ? 320 : 252;
+    private const int RailWidth = 64;
+    private const int DefaultSidebarWidth = 244;
+    private const int MinimumSidebarWidth = 168;
+    private const int MaximumSidebarWidth = 336;
     private bool _sidebarCollapsed;
     private int _sidebarWidth = DefaultSidebarWidth;
     private Button? _sidebarToggle;
@@ -21,7 +21,7 @@ public sealed partial class ClientView
     private TextBlock? _sidebarRelayStatus;
     private (string Id, string Name)[] _sidebarSpaces = [];
     private bool? _sidebarPaired;
-    private bool WindowsWorkbench => OperatingSystem.IsWindows() && Has(ClientFeatures.Layout);
+    private bool DesktopWorkbench => Has(ClientFeatures.Layout);
 
     private void ApplySidebarGeometry()
     {
@@ -81,9 +81,9 @@ public sealed partial class ClientView
         {
             var markIcon = TrayGlyph.Icon("spaces", 15);
             markIcon.Classes.Add("mark");
-            var mark = new Border { Width = WindowsWorkbench ? 32 : 22, Height = WindowsWorkbench ? 32 : 22, Child = markIcon };
+            var mark = new Border { Width = DesktopWorkbench ? 32 : 22, Height = DesktopWorkbench ? 32 : 22, Child = markIcon };
             mark.Classes.Add("mark");
-            var name = Heading("CommandTray");
+            var name = Heading(DesktopWorkbench ? "CommandTray Suite" : "CommandTray");
             name.Classes.Add("brand");
             name.VerticalAlignment = VerticalAlignment.Center;
             name.Margin = new Thickness(9, 0, 0, 0);
@@ -98,7 +98,7 @@ public sealed partial class ClientView
         foreach (var page in pages.Where(page => page.Id != "settings"))
             _navigation.Children.Add(NavigationButton(page.Id, L(page.Zh, page.En)));
         var settings = NavigationButton("settings", L("设置", "Settings"));
-        if (WindowsWorkbench && !_sidebarCollapsed)
+        if (DesktopWorkbench && !_sidebarCollapsed)
         {
             _sidebarSpaceList = new StackPanel { Spacing = 4 };
             var group = new Border

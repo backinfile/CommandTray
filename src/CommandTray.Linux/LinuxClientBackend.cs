@@ -19,6 +19,7 @@ public sealed class LinuxClientBackend(
     bool startLocalDaemon = false) : IClientBackend, IAsyncDisposable
 {
     private readonly LinuxCommands _commands = new();
+    private readonly ClipboardPreferences _clipboardPreferences = new(LocalState.Root);
     private readonly SemaphoreSlim _daemonGate = new(1, 1);
     private readonly SemaphoreSlim _settingsGate = new(1, 1);
     private readonly AsyncLocal<HttpResponse?> _mcpResponse = new();
@@ -62,10 +63,11 @@ public sealed class LinuxClientBackend(
         {
             var settings = LocalSettings.Load();
             return settings is { ClipboardAutoSync: true, DeviceId: { Length: > 0 } id, Server: not null, Token: not null }
-                ? new(id, LinuxCommands.Relay(settings)) : null;
+                ? new(id, LinuxCommands.Relay(settings), _clipboardPreferences.Direction) : null;
         }, Read, async (expected, text, cancellation) =>
         {
-            if (await Read(cancellation) != expected || !LocalSettings.Load().ClipboardAutoSync) return false;
+            if (await Read(cancellation) != expected || !LocalSettings.Load().ClipboardAutoSync || _clipboardPreferences.Direction == "send")
+                return false;
             await clipboardWrite(text, cancellation).AsTask().WaitAsync(cancellation);
             RememberClipboard(text);
             return true;
@@ -81,7 +83,11 @@ public sealed class LinuxClientBackend(
         }
     }
 
-    public async ValueTask<JsonNode?> ExecuteAsync(string operation, JsonObject args, CancellationToken cancellationToken = default)
+    public ValueTask<JsonNode?> ExecuteAsync(string operation, JsonObject args, CancellationToken cancellationToken = default) =>
+        ExecuteAsync(operation, args, null, cancellationToken);
+
+    public async ValueTask<JsonNode?> ExecuteAsync(string operation, JsonObject args,
+        IProgress<long>? transferProgress, CancellationToken cancellationToken)
     {
         string Required(string name) => Text(args, name) is { Length: > 0 } text
             ? text : throw new ArgumentException($"Missing {name}.");
@@ -103,7 +109,6 @@ public sealed class LinuxClientBackend(
             "sync_pull" => ["sync", "pull"],
             "sync_resolve" => ["sync", "resolve", Required("choice")],
             "files_list" => ["share", "list"],
-            "file_download" => ["share", "get", Required("id"), Required("path")],
             "file_delete" => ["share", "remove", Required("id")],
             "clipboard_read" or "clipboard_receive" => ["clip", "status"],
             "clipboard_relay_history" => ["clip", "history"],
@@ -154,6 +159,7 @@ public sealed class LinuxClientBackend(
         {
             case "update_status":
             case "update_check":
+            case "update_cancel":
             case "update_set":
             case "update_install":
                 return await (_updates ?? throw new InvalidOperationException("Suite updates require a release build."))
@@ -165,6 +171,7 @@ public sealed class LinuxClientBackend(
                 return new JsonObject
                 {
                     ["server"] = settings.Server, ["deviceName"] = settings.DeviceName ?? Environment.MachineName,
+                    ["deviceId"] = settings.DeviceId,
                     ["paired"] = settings.Token is not null, ["revision"] = local.BaseRevision,
                     ["conflict"] = LinuxCommands.ReadConflict(settings) is not null
                 };
@@ -173,8 +180,14 @@ public sealed class LinuxClientBackend(
                 return AsNode(await _commands.PairAsync(Required("server"), Required("deviceName"), Required("pairingCode"), cancellationToken));
             case "relay_unpair":
                 return AsNode(_commands.Unpair());
+            case "sync_conflict":
+                return AsNode(LinuxCommands.ReadConflict(LocalSettings.Load()));
             case "file_upload":
-                return AsNode(await _commands.UploadSharedFileAsync(Required("path"), Text(args, "name"), Text(args, "folder"), cancellationToken));
+                return AsNode(await _commands.UploadSharedFileAsync(Required("path"), Text(args, "name"), Text(args, "folder"),
+                    cancellationToken, transferProgress, Text(args, "deviceId")));
+            case "file_download":
+                return AsNode(await LinuxCommands.DownloadSharedFileAsync(Required("id"), Required("path"),
+                    cancellationToken, transferProgress, Text(args, "deviceId")));
             case "settings_read":
                 return SettingsView();
             case "settings_save":
@@ -215,6 +228,8 @@ public sealed class LinuxClientBackend(
             }
             case "clipboard_history":
                 return AsNode(LocalState.Read(ClipboardHistoryFile, new List<string>()));
+            case "clipboard_preferences":
+                return _clipboardPreferences.Execute(args);
             case "command_save":
             {
                 var existing = Text(args, "id");

@@ -60,8 +60,13 @@ public sealed class ConfigurationStore
     }
 
     public AppConfiguration Import(string source)
+        => ReadImportedConfiguration(File.ReadAllBytes(source));
+
+    internal static AppConfiguration ReadImportedConfiguration(byte[] bytes)
     {
-        var config = JsonSerializer.Deserialize<AppConfiguration>(File.ReadAllText(source), JsonOptions)
+        // The older WinForms export and hand-authored files may include a UTF-8 BOM.
+        using var reader = new StreamReader(new MemoryStream(bytes), detectEncodingFromByteOrderMarks: true);
+        var config = JsonSerializer.Deserialize<AppConfiguration>(reader.ReadToEnd(), JsonOptions)
             ?? throw new InvalidDataException("Imported configuration is empty.");
         foreach (var item in config.Services.SelectMany(x => x.Environment).Where(x => x.IsSecret))
         {

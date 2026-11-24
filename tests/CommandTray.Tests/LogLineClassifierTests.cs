@@ -1,4 +1,4 @@
-using CommandTray.Services;
+using CommandTray.Core;
 
 namespace CommandTray.Tests;
 

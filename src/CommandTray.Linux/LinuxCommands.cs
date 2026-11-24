@@ -185,9 +185,10 @@ internal sealed partial class LinuxCommands
     public async Task<object> PairAsync(string address, string name, string pairingCode, CancellationToken cancellationToken)
     {
         var server = ParseServer(address);
+        var pairing = await new RelayClient(server).PairAsync(name, pairingCode, cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
         using var config = SettingsLock();
         var current = LocalSettings.Load();
-        var pairing = await new RelayClient(server).PairAsync(name, pairingCode, cancellationToken);
         if (current.Server != server.AbsoluteUri)
         {
             using var workspace = WorkspaceLock();
@@ -232,25 +233,7 @@ internal sealed partial class LinuxCommands
                 return await UploadSharedFileAsync(Required(args, 0, "local file"), null, args.ElementAtOrDefault(1), cancellationToken);
             }
             case "get":
-            {
-                var id = Required(args, 0, "shared file ID");
-                var path = Path.GetFullPath(Required(args, 1, "output path"));
-                var temporary = Path.Combine(Path.GetDirectoryName(path)!, ".commandtray-" + Guid.NewGuid().ToString("N") + ".part");
-                try
-                {
-                    await using (var output = new FileStream(temporary, new FileStreamOptions
-                    {
-                        Access = FileAccess.Write, Mode = FileMode.CreateNew,
-                        Options = FileOptions.Asynchronous, UnixCreateMode = LocalState.PrivateFile
-                    }))
-                    {
-                        await relay.DownloadAsync(id, output, cancellationToken);
-                    }
-                    File.Move(temporary, path, overwrite: false);
-                }
-                finally { File.Delete(temporary); }
-                return new { path };
-            }
+                return await DownloadSharedFileAsync(Required(args, 0, "shared file ID"), Required(args, 1, "output path"), cancellationToken);
             case "remove":
             {
                 var id = Required(args, 0, "shared file ID");
@@ -261,11 +244,41 @@ internal sealed partial class LinuxCommands
         }
     }
 
-    public async Task<JsonObject> UploadSharedFileAsync(string source, string? name, string? folder, CancellationToken cancellationToken)
+    public async Task<JsonObject> UploadSharedFileAsync(string source, string? name, string? folder,
+        CancellationToken cancellationToken, IProgress<long>? progress = null, string? deviceId = null)
     {
         var path = Path.GetFullPath(source);
         await using var stream = File.OpenRead(path);
-        return await Relay().UploadAsync(string.IsNullOrWhiteSpace(name) ? Path.GetFileName(path) : name, stream, folder, cancellationToken);
+        return await TransferRelay(deviceId).UploadAsync(string.IsNullOrWhiteSpace(name) ? Path.GetFileName(path) : name,
+            stream, folder, cancellationToken, progress);
+    }
+
+    internal static async Task<object> DownloadSharedFileAsync(string id, string destination, CancellationToken cancellation,
+        IProgress<long>? progress = null, string? deviceId = null)
+    {
+        var path = Path.GetFullPath(destination);
+        var temporary = Path.Combine(Path.GetDirectoryName(path)!, ".commandtray-" + Guid.NewGuid().ToString("N") + ".part");
+        try
+        {
+            await using (var output = new FileStream(temporary, new FileStreamOptions
+            {
+                Access = FileAccess.Write, Mode = FileMode.CreateNew,
+                Options = FileOptions.Asynchronous, UnixCreateMode = LocalState.PrivateFile
+            }))
+                await TransferRelay(deviceId).DownloadAsync(id, output, cancellation, progress);
+            cancellation.ThrowIfCancellationRequested();
+            File.Move(temporary, path, overwrite: false);
+        }
+        finally { File.Delete(temporary); }
+        return new { path };
+    }
+
+    private static RelayClient TransferRelay(string? expectedDevice)
+    {
+        var settings = LocalSettings.Load();
+        if (expectedDevice is not null && settings.DeviceId != expectedDevice)
+            throw new InvalidOperationException("The relay connection changed. Select the file again.");
+        return Relay(settings);
     }
 
     private static object Workspace(string action, string[] args)

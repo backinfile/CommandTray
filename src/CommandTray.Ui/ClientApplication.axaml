@@ -22,16 +22,16 @@
           <SolidColorBrush x:Key="NoteMark">#906018</SolidColorBrush>
         </ResourceDictionary>
         <ResourceDictionary x:Key="Dark">
-          <SolidColorBrush x:Key="TrayCanvas">#10151C</SolidColorBrush>
-          <SolidColorBrush x:Key="TrayPaper">#19222D</SolidColorBrush>
-          <SolidColorBrush x:Key="TrayChrome">#1E2935</SolidColorBrush>
+          <SolidColorBrush x:Key="TrayCanvas">#10161E</SolidColorBrush>
+          <SolidColorBrush x:Key="TrayPaper">#171F29</SolidColorBrush>
+          <SolidColorBrush x:Key="TrayChrome">#1C2733</SolidColorBrush>
           <SolidColorBrush x:Key="TrayInk">#ECF1F5</SolidColorBrush>
           <SolidColorBrush x:Key="TraySecondary">#A3B0BF</SolidColorBrush>
           <SolidColorBrush x:Key="TrayLine">#2C3948</SolidColorBrush>
           <SolidColorBrush x:Key="TrayAccent">#C1ED8B</SolidColorBrush>
           <SolidColorBrush x:Key="TrayAccentOn">#172117</SolidColorBrush>
           <SolidColorBrush x:Key="TrayError">#FFB4AB</SolidColorBrush>
-          <SolidColorBrush x:Key="TraySelection">#2B3B2C</SolidColorBrush>
+          <SolidColorBrush x:Key="TraySelection">#26372D</SolidColorBrush>
           <SolidColorBrush x:Key="TrayHover">#25313F</SolidColorBrush>
           <SolidColorBrush x:Key="TrayMutedFill">#202C38</SolidColorBrush>
           <SolidColorBrush x:Key="FolderMark">#69D5F6</SolidColorBrush>
@@ -47,7 +47,7 @@
       <x:Double x:Key="TrayFontLarge">16</x:Double>
       <x:Double x:Key="TrayFontTitle">17</x:Double>
       <x:Double x:Key="TrayReadingLineHeight">22</x:Double>
-      <SolidColorBrush x:Key="ShellPaper">#151C25</SolidColorBrush>
+      <SolidColorBrush x:Key="ShellPaper">#161E27</SolidColorBrush>
       <SolidColorBrush x:Key="ShellInk">#ECF1F5</SolidColorBrush>
       <SolidColorBrush x:Key="ShellMuted">#A3B0BF</SolidColorBrush>
       <SolidColorBrush x:Key="ShellLine">#2C3948</SolidColorBrush>
@@ -71,7 +71,7 @@
         </DrawingBrush.Drawing>
       </DrawingBrush>
       <SolidColorBrush x:Key="TerminalInk">#D5E8FF</SolidColorBrush>
-      <SolidColorBrush x:Key="TerminalPaper">#080F1E</SolidColorBrush>
+      <SolidColorBrush x:Key="TerminalPaper">#101820</SolidColorBrush>
       <SolidColorBrush x:Key="TerminalLine">#273956</SolidColorBrush>
     </ResourceDictionary>
   </Application.Resources>
@@ -129,10 +129,6 @@
     <Style Selector="TextBlock.nav-status">
       <Setter Property="Foreground" Value="{StaticResource ShellMuted}" />
       <Setter Property="Margin" Value="10,4" />
-    </Style>
-    <Style Selector="TextBlock.section.workbench-heading">
-      <Setter Property="FontSize" Value="28" />
-      <Setter Property="Margin" Value="0,1,0,8" />
     </Style>
     <Style Selector="GridSplitter.sidebar-splitter">
       <Setter Property="Focusable" Value="True" />
@@ -434,6 +430,64 @@
       <Setter Property="Background" Value="{DynamicResource TraySelection}" />
       <Setter Property="BorderBrush" Value="{DynamicResource TrayLine}" />
       <Setter Property="BorderThickness" Value="0,1,0,0" />
+    </Style>
+    <Style Selector="TextBlock.section.workbench-heading">
+      <Setter Property="FontSize" Value="34" />
+      <Setter Property="Margin" Value="0,1,0,3" />
+    </Style>
+    <Style Selector="Grid.compact TextBlock.section.workbench-heading">
+      <Setter Property="FontSize" Value="26" />
+    </Style>
+    <Style Selector="Border.workbench-panel-heading">
+      <Setter Property="Padding" Value="13,10" />
+      <Setter Property="BorderBrush" Value="{DynamicResource TrayLine}" />
+      <Setter Property="BorderThickness" Value="0,0,0,1" />
+    </Style>
+    <Style Selector="Border.board-chrome">
+      <Setter Property="Background" Value="{DynamicResource TrayChrome}" />
+      <Setter Property="Padding" Value="3,2" />
+    </Style>
+    <Style Selector="Button.action.board-tool">
+      <Setter Property="Width" Value="32" />
+      <Setter Property="MinHeight" Value="31" />
+    </Style>
+    <Style Selector="Button.action.workbench-tab">
+      <Setter Property="BorderBrush" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0,0,0,2" />
+      <Setter Property="CornerRadius" Value="0" />
+    </Style>
+    <Style Selector="Button.action.workbench-tab.selected">
+      <Setter Property="Foreground" Value="{DynamicResource TrayAccent}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource TrayAccent}" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+    <Style Selector="Border.board-chrome Button.action.selected">
+      <Setter Property="Background" Value="{DynamicResource TraySelection}" />
+      <Setter Property="Foreground" Value="{DynamicResource TrayAccent}" />
+    </Style>
+    <Style Selector="Button.action.workbench-list-row">
+      <Setter Property="HorizontalAlignment" Value="Stretch" />
+      <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+      <Setter Property="Padding" Value="13,10" />
+      <Setter Property="BorderBrush" Value="{DynamicResource TrayLine}" />
+      <Setter Property="BorderThickness" Value="0,0,0,1" />
+      <Setter Property="CornerRadius" Value="0" />
+    </Style>
+    <Style Selector="Button.action.workbench-list-row.selected">
+      <Setter Property="Background" Value="{DynamicResource TraySelection}" />
+      <Setter Property="Foreground" Value="{DynamicResource TrayInk}" />
+    </Style>
+    <Style Selector="Border.detail-text">
+      <Setter Property="Background" Value="{DynamicResource TrayCanvas}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource TrayLine}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="7" />
+    </Style>
+    <Style Selector="Grid#Toolbar">
+      <Setter Property="MinHeight" Value="56" />
+    </Style>
+    <Style Selector="Grid.compact Grid#Toolbar">
+      <Setter Property="MinHeight" Value="46" />
     </Style>
   </Application.Styles>
 </Application>

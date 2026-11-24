@@ -11,6 +11,8 @@ namespace CommandTray.Ui;
 
 public sealed partial class ClientView
 {
+    private string _workspaceSection = "overview";
+
     private async Task RenderWorkspaceAsync(CancellationToken token)
     {
         Header(L("工作空间", "Workspace"));
@@ -24,7 +26,7 @@ public sealed partial class ClientView
         _spaceId = selected?.Text("id");
 
         bool paired = relay.Flag("paired");
-        if (WindowsWorkbench)
+        if (DesktopWorkbench)
         {
             _sidebarSpaces = spaces.Select(space => (space.Text("id"), space.Text("name"))).ToArray();
             _sidebarPaired = paired;
@@ -47,7 +49,6 @@ public sealed partial class ClientView
         var more = WorkspaceMenu(selected, paired);
 
         var spaceId = selected.Text("id");
-        if (_compact || WindowsWorkbench)
         {
             var picker = new ComboBox
             {
@@ -74,48 +75,33 @@ public sealed partial class ClientView
                 more.Content = IconLabel("plus", L("添加组件", "Add component"));
                 more.Classes.Remove("icon-only");
                 more.Classes.Add("primary");
-                Header(Row(breadcrumb, picker), sync, more);
-                var heading = Heading(selected.Text("name"));
-                heading.Classes.Add("workbench-heading");
-                _contents.Children.Add(heading);
+                Header(Row(breadcrumb, picker));
             }
         }
-        else
-        {
-            var tabs = Row();
-            foreach (var space in spaces)
-            {
-                var id = space.Text("id");
-                var tab = Action(space.Text("name"), () => SelectSpaceAsync(id), glyph: "spaces");
-                tab.Classes.Add("space-tab");
-                if (id == spaceId)
-                {
-                    tab.Classes.Add("selected");
-                    tab.AttachedToVisualTree += (_, _) =>
-                        Avalonia.Threading.Dispatcher.UIThread.Post(() => tab.BringIntoView(), Avalonia.Threading.DispatcherPriority.Loaded);
-                }
-                tabs.Children.Add(tab);
-            }
-            Header(new ScrollViewer
-            {
-                Content = tabs, MaxHeight = 46, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
-                VerticalScrollBarVisibility = ScrollBarVisibility.Disabled, Margin = new Thickness(0, 0, 8, 0)
-            }, sync, more);
-        }
+
+        var allEntries = selected.Array("items").OfType<JsonObject>().ToArray();
+        var tasks = allEntries.Where(item => ComponentSection(item.Text("kind")) == "tasks")
+            .SelectMany(item => item.Object("data").Array("tasks").OfType<JsonObject>()).ToArray();
+        var spaceHeading = new StackPanel { Spacing = 4 };
+        var spaceTitle = Heading(selected.Text("name"));
+        spaceTitle.Classes.Add("workbench-heading");
+        spaceHeading.Children.Add(spaceTitle);
+        if (tasks.Length > 0)
+            spaceHeading.Children.Add(Muted(L($"{tasks.Count(task => task.Flag("completed"))} / {tasks.Length} 项待办已完成",
+                $"{tasks.Count(task => task.Flag("completed"))} / {tasks.Length} tasks complete")));
+        _contents.Children.Add(_compact ? spaceHeading : TitleRow(spaceHeading, Row(sync, more)));
+        _contents.Children.Add(WorkspaceSections());
 
         if (_displayedWorkspaceConflict)
         {
-            var resolution = Menu(L("同步冲突", "Sync conflict"),
-                (L("保留本机修改", "Keep local changes"), () => Change("sync_resolve", new() { ["choice"] = "local" })),
-                (L("采用中转版本", "Use relay version"), () => Confirm(L("采用中转版本？", "Use the relay version?"),
-                    () => Change("sync_resolve", new() { ["choice"] = "remote" }))));
-            _contents.Children.Add(resolution);
+            _contents.Children.Add(SettingRow(L("同步冲突", "Sync conflict"), WorkspaceConflictActions()));
         }
 
-        var entries = selected.Array("items").OfType<JsonObject>().ToArray();
+        var entries = _workspaceSection == "overview" ? allEntries :
+            allEntries.Where(item => ComponentSection(item.Text("kind")) == _workspaceSection).ToArray();
         if (_focusedPanelId is { } focused && !entries.Any(item => item.Text("id") == focused)) _focusedPanelId = null;
         int visibleComponents = 0;
-        if (!_compact && Has(ClientFeatures.Layout) && entries.Length > 0)
+        if (_workspaceSection == "overview" && !_compact && Has(ClientFeatures.Layout) && entries.Length > 0)
         {
             var canvas = new Canvas { HorizontalAlignment = HorizontalAlignment.Left };
             _viewport.HorizontalScrollBarVisibility = ScrollBarVisibility.Auto;
@@ -123,7 +109,9 @@ public sealed partial class ClientView
             foreach (var item in entries)
             {
                 var tile = Component(spaceId, item, canvas);
-                if (tile is not null) canvas.Children.Add(tile);
+                if (tile is null) continue;
+                canvas.Children.Add(tile);
+                visibleComponents++;
             }
             MeasureCanvas(canvas);
         }
@@ -137,16 +125,23 @@ public sealed partial class ClientView
                 visibleComponents++;
             }
         }
-        if (entries.Length == 0 || _compact && visibleComponents == 0)
+        if (visibleComponents == 0)
         {
             var message = entries.Length == 0 ? L("暂无组件", "No components")
                 : L("此设备暂无可用组件", "No components available on this device");
+            var (kind, label) = _workspaceSection switch
+            {
+                "board" => ("board", L("画板", "Board")),
+                "terminal" => ("terminal", L("终端", "Terminal")),
+                "tasks" => ("todo", L("待办", "Checklist")),
+                "directory" => ("files", L("目录", "Folder")),
+                _ => ("note", L("便签", "Note"))
+            };
             _contents.Children.Add(EmptyState("spaces", message,
-                Action(L("添加便签", "Add note"), () => ItemForm(spaceId, "note", L("便签", "Note")), glyph: "note"),
-                Action(L("添加待办", "Add checklist"), () => ItemForm(spaceId, "todo", L("待办", "Checklist")), glyph: "tasks")));
+                Action(L($"添加{label}", $"Add {label}"), () => ItemForm(spaceId, kind, label), glyph: "plus")));
         }
 
-        if (_compact || !Has(ClientFeatures.Ssh))
+        if (_workspaceSection == "overview" && (_compact || !Has(ClientFeatures.Ssh)))
         {
             var hosts = document.Array("sshHosts").OfType<JsonObject>().ToArray();
             if (hosts.Length > 0) _contents.Children.Add(Heading(L("SSH 主机", "SSH hosts")));
@@ -154,11 +149,48 @@ public sealed partial class ClientView
         }
     }
 
+    private Control WorkspaceSections()
+    {
+        var tabs = Row();
+        foreach (var (id, title, glyph) in new[]
+        {
+            ("overview", L("总览", "Overview"), "spaces"), ("board", L("画板", "Board"), "board"),
+            ("terminal", L("终端", "Terminal"), "terminal"), ("tasks", L("待办", "Tasks"), "tasks"),
+            ("note", L("便签", "Notes"), "note"), ("directory", L("目录", "Folders"), "folder-open")
+        })
+        {
+            if ((id == "terminal" && !Has(ClientFeatures.Terminals)) || (id == "directory" && !Has(ClientFeatures.LocalFiles))) continue;
+            var tab = Action(title, async () =>
+            {
+                if (_workspaceSection == id) return;
+                _workspaceSection = id;
+                _focusedPanelId = null;
+                _viewport.Offset = default;
+                await LoadAsync();
+            }, glyph: glyph);
+            tab.Classes.Add("workbench-tab");
+            tab.Classes.Set("selected", _workspaceSection == id);
+            if (_workspaceSection == id) tab.AttachedToVisualTree += (_, _) =>
+                Avalonia.Threading.Dispatcher.UIThread.Post(() => tab.BringIntoView());
+            tabs.Children.Add(tab);
+        }
+        return new ScrollViewer { Content = tabs, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Disabled };
+    }
+
+    private static string ComponentSection(string kind) => kind switch
+    {
+        "board" or "whiteboard" => "board", "terminal" or "ssh" or "commands" => "terminal",
+        "todo" or "tasks" => "tasks", "note" or "notes" => "note",
+        "folder" or "files" or "preview" => "directory", _ => "overview"
+    };
+
     private async Task SelectSpaceAsync(string id)
     {
         await Execute("space_activate", new() { ["spaceId"] = id });
         if (_spaceId != id) _focusedPanelId = null;
         _spaceId = id;
+        _workspaceSection = "overview";
         _viewport.Offset = default;
         await LoadAsync();
     }
@@ -199,8 +231,7 @@ public sealed partial class ClientView
             actions.Add((L("添加目录", "Add folder"), () => ItemForm(id, "files", L("目录", "Folder"))));
         if (Has(ClientFeatures.Terminals))
             actions.Add((L("添加终端", "Add terminal"), () => ItemForm(id, "terminal", L("终端", "Terminal"))));
-        if (Has(ClientFeatures.Layout))
-            actions.Add((L("添加画板", "Add board"), () => ItemForm(id, "board", L("画板", "Board"))));
+        actions.Insert(2, (L("添加画板", "Add board"), () => ItemForm(id, "board", L("画板", "Board"))));
         actions.Add((L("重命名空间", "Rename space"), () => Form(L("重命名空间", "Rename space"), values =>
             Change("space_rename", new() { ["spaceId"] = id, ["name"] = values.Text("name") }),
             new Field("name", L("名称", "Name"), selected.Text("name")))));
@@ -252,7 +283,7 @@ public sealed partial class ClientView
         {
             "note" or "notes" => NoteComponent(spaceId, item),
             "todo" or "tasks" => ChecklistComponent(spaceId, item),
-            "board" or "whiteboard" => BoardComponent(spaceId, item, editable: Has(ClientFeatures.Layout)),
+            "board" or "whiteboard" => BoardComponent(spaceId, item),
             "folder" or "files" when Has(ClientFeatures.LocalFiles) => FilesComponent(spaceId, item),
             "terminal" or "ssh" when Has(ClientFeatures.Terminals) => TerminalComponent(item),
             "preview" when Has(ClientFeatures.LocalFiles) => LegacyPreview(spaceId, item),
@@ -294,7 +325,7 @@ public sealed partial class ClientView
         handle.Children[0].Classes.Add(iconTone);
         var content = new Grid { RowDefinitions = new RowDefinitions("Auto,*") };
         var actions = Row();
-        if (!OperatingSystem.IsAndroid() || kind is "note" or "notes" or "todo" or "tasks")
+        if (!OperatingSystem.IsAndroid() || kind is "note" or "notes" or "todo" or "tasks" or "board" or "whiteboard")
             actions.Children.Add(Menu("⋯", operations.ToArray()));
         var heading = TitleRow(handle, actions);
         var headingLine = new Border { Child = heading };
@@ -362,6 +393,7 @@ public sealed partial class ClientView
             origin = e.GetPosition(canvas);
             previous = new Rect(Canvas.GetLeft(tile), Canvas.GetTop(tile), tile.Width, tile.Height);
             e.Pointer.Capture(handle);
+            _workspaceGrid.IsVisible = true;
             tile.Classes.Add("dragging");
             tile.ZIndex = 1;
             e.Handled = true;
@@ -419,6 +451,7 @@ public sealed partial class ClientView
         };
         handle.PointerCaptureLost += (_, _) =>
         {
+            _workspaceGrid.IsVisible = false;
             tile.Classes.Remove("dragging");
             tile.ZIndex = 0;
             if (origin is null) return;
@@ -466,7 +499,17 @@ public sealed partial class ClientView
     private Control ChecklistComponent(string spaceId, JsonObject item)
     {
         var tasks = new StackPanel { Spacing = 3 };
-        foreach (var task in item.Object("data").Array("tasks").OfType<JsonObject>())
+        var entries = item.Object("data").Array("tasks").OfType<JsonObject>().ToArray();
+        if (entries.Length > 0)
+        {
+            int completed = entries.Count(task => task.Flag("completed"));
+            var progress = new ProgressBar { Minimum = 0, Maximum = entries.Length, Value = completed, Height = 5 };
+            Avalonia.Automation.AutomationProperties.SetName(progress, L("待办完成率", "Task completion"));
+            tasks.Children.Add(TitleRow(Muted(L($"{completed} / {entries.Length} 已完成", $"{completed} / {entries.Length} completed")),
+                Muted($"{100d * completed / entries.Length:N0}%")));
+            tasks.Children.Add(progress);
+        }
+        foreach (var task in entries)
         {
             var id = task.Text("id");
             var check = new CheckBox { Content = Body(task.Text("text")), IsChecked = task.Flag("completed"), MinHeight = _compact ? 48 : 40 };

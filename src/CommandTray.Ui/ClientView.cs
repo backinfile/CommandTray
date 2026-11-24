@@ -111,6 +111,7 @@ public sealed partial class ClientView : UserControl
             _backHost = null;
             ClosePalette(restoreFocus: false);
             _loading?.Cancel();
+            foreach (var transfer in _transfers) transfer.Cancellation?.Cancel();
             _terminalTimer.Stop();
             _workspaceTimer.Stop();
         };
@@ -149,6 +150,7 @@ public sealed partial class ClientView : UserControl
             _ => "workspace"
         };
         if (spaceId is not null) _spaceId = spaceId;
+        _workspaceSection = "overview";
         _focusedPanelId = null;
         _componentId = componentId;
         _viewport.Offset = default;
@@ -177,7 +179,7 @@ public sealed partial class ClientView : UserControl
         }
         ApplySidebarGeometry();
         _navBorder.BorderThickness = _compact ? new Thickness(0, 1, 0, 0) : new Thickness(0, 0, 1, 0);
-        _contents.Margin = _compact ? new Thickness(12, 10) : WindowsWorkbench ? new Thickness(24, 18) : new Thickness(16);
+        _contents.Margin = _compact ? new Thickness(12, 10) : DesktopWorkbench ? new Thickness(28, 24) : new Thickness(16);
         return true;
     }
 
@@ -190,10 +192,12 @@ public sealed partial class ClientView : UserControl
         _displayedWorkspace = null;
         _focusedPanel = null;
         _terminals.Clear();
+        _drawings.Clear();
+        _transferRows = null;
         RenderNavigation();
         _toolbar.Children.Clear();
         _contents.Children.Clear();
-        _workspaceGrid.IsVisible = !_compact && _page == "workspace" && Has(ClientFeatures.Layout);
+        _workspaceGrid.IsVisible = false;
         _viewport.HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled;
         Report("");
         try
@@ -216,6 +220,7 @@ public sealed partial class ClientView : UserControl
     private async Task RefreshWorkspaceAsync()
     {
         if (_page != "workspace" || _displayedWorkspace is null || _editing || _refreshingWorkspace || _paletteOverlay.IsVisible ||
+            _drawings.Any(board => board.Editing) ||
             DateTimeOffset.UtcNow - _lastInteraction < TimeSpan.FromSeconds(2) ||
             TopLevel.GetTopLevel(this)?.FocusManager?.GetFocusedElement() is TextBox) return;
         var displayed = _displayedWorkspace;
@@ -227,7 +232,8 @@ public sealed partial class ClientView : UserControl
             bool changed = !JsonNode.DeepEquals(current, displayed);
             if (!changed && OperatingSystem.IsAndroid())
                 changed = HasWorkspaceConflict(await Execute("relay_status", [])) != displayedConflict;
-            if (changed && _page == "workspace" && !_editing && ReferenceEquals(displayed, _displayedWorkspace))
+            if (changed && _page == "workspace" && !_editing && !_drawings.Any(board => board.Editing) &&
+                ReferenceEquals(displayed, _displayedWorkspace))
                 await LoadAsync();
         }
         catch (Exception error) { Report(error.Message); }
@@ -238,7 +244,9 @@ public sealed partial class ClientView : UserControl
     {
         var pages = new List<(string Id, string Zh, string En)>
         {
-            ("workspace", "空间", "Spaces"), ("files", "文件", "Files"), ("clipboard", "剪贴板", "Clipboard")
+            ("workspace", _compact ? "空间" : "工作区", "Workspace"),
+            ("files", _compact ? "文件" : "共享文件", _compact ? "Files" : "Shared files"),
+            ("clipboard", "剪贴板", "Clipboard")
         };
         if (!_compact && Has(ClientFeatures.Commands)) pages.Insert(1, ("commands", "命令", "Commands"));
         if (!_compact && Has(ClientFeatures.Capture)) pages.Add(("capture", "捕获", "Capture"));
@@ -294,8 +302,9 @@ public sealed partial class ClientView : UserControl
 
     private async Task Change(string operation, JsonObject arguments)
     {
+        var page = _loading;
         await Execute(operation, arguments);
-        await LoadAsync();
+        if (ReferenceEquals(page, _loading)) await LoadAsync();
     }
 
     private void Report(string message)
@@ -491,6 +500,10 @@ public sealed partial class ClientView : UserControl
         => Form(title, submitLabel, L("正在处理…", "Working…"), save, fields);
 
     private Task Form(string title, string submitLabel, string pendingLabel, Func<JsonObject, Task> save, params Field[] fields)
+        => Form(title, submitLabel, pendingLabel, (values, _) => save(values), fields);
+
+    private Task Form(string title, string submitLabel, string pendingLabel,
+        Func<JsonObject, CancellationToken, Task> save, params Field[] fields)
     {
         _editing = true;
         _workspaceGrid.IsVisible = false;
@@ -527,12 +540,14 @@ public sealed partial class ClientView : UserControl
         progress.IsVisible = false;
         var button = PrimaryAction(submitLabel, async () =>
         {
+            var token = _loading?.Token ?? CancellationToken.None;
             var values = new JsonObject();
             foreach (var input in inputs) values[input.Key] = input.Value();
             error.IsVisible = false;
             progress.IsVisible = true;
-            try { await save(values); }
-            catch (Exception failure) when (failure is not OperationCanceledException)
+            try { await save(values, token); }
+            catch (OperationCanceledException) when (token.IsCancellationRequested) { }
+            catch (Exception failure) when (!token.IsCancellationRequested)
             {
                 error.Text = failure.Message;
                 error.IsVisible = true;

@@ -1,6 +1,7 @@
 using System.Text;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using CommandTray.Core;
 using CommandTray.Services;
 
 namespace CommandTray;
