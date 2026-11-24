@@ -1,13 +1,14 @@
 using System.Diagnostics;
 using System.Net;
+using System.Net.Http.Json;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using CommandTray.Sync;
 
-if (args.Length is < 1 or > 2 || !File.Exists(args[0]) || args.Length == 2 && args[1] != "--clipboard")
-    throw new ArgumentException("Pass the full path to a built CommandTray.Relay.dll, optionally followed by --clipboard.");
+if (args.Length is < 1 or > 2 || !File.Exists(args[0]) || args.Length == 2 && args[1] is not ("--clipboard" or "--version"))
+    throw new ArgumentException("Pass the full path to a built CommandTray.Relay.dll, optionally followed by --clipboard or --version.");
 
 string relay = Path.GetFullPath(args[0]);
 string runData = Path.Combine(Path.GetFullPath("artifacts/relay-smoke"), Guid.NewGuid().ToString("N"));
@@ -20,9 +21,18 @@ int port = ((IPEndPoint)listener.LocalEndpoint).Port;
 listener.Stop();
 var uri = new Uri($"http://127.0.0.1:{port}");
 using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(8) };
+const string additionalVersion = "9.87.65";
+bool verifyVersion = args.Length == 2 && args[1] == "--version";
 
 try
 {
+    if (verifyVersion)
+    {
+        await VerifyVersionAsync();
+        return;
+    }
+
+    http.DefaultRequestHeaders.Add(RelayClientVersion.Header, RelayClientVersion.Current);
     if (args.Length == 2)
     {
         await VerifyClipboardAsync();
@@ -203,6 +213,50 @@ finally
         Directory.Delete(runData, recursive: true);
 }
 
+async Task VerifyVersionAsync()
+{
+    using var server = await StartRelayAsync();
+    try
+    {
+        using var health = await http.GetFromJsonAsync<JsonDocument>(new Uri(uri, "/healthz"));
+        Assert(health is not null && health.RootElement.GetProperty("relayVersion").GetString() == RelayClientVersion.Current &&
+            health.RootElement.GetProperty("supportedClientVersions").EnumerateArray().Select(value => value.GetString())
+                .SequenceEqual([RelayClientVersion.Current, additionalVersion]), "The health probe reported incorrect versions.");
+        var index = await http.GetStringAsync(uri);
+        Assert(index.Contains($"name=\"commandtray-version\" content=\"{RelayClientVersion.Current}\"", StringComparison.Ordinal),
+            "The Web client did not receive its version.");
+
+        foreach (string[] headers in new[] { Array.Empty<string>(), ["0.0.0"], [RelayClientVersion.Current, additionalVersion] })
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, new Uri(uri, "/v1/devices/pair"))
+                { Content = JsonContent.Create(new { deviceName = "Rejected client", pairingCode }) };
+            if (headers.Length > 0) request.Headers.Add(RelayClientVersion.Header, headers);
+            using var rejected = await http.SendAsync(request);
+            Assert(rejected.StatusCode == HttpStatusCode.UpgradeRequired, "An unsupported client could pair.");
+        }
+
+        var paired = await new RelayClient(uri, http: http).PairAsync("Supported client", pairingCode);
+        using var supported = new HttpRequestMessage(HttpMethod.Get, new Uri(uri, "/v1/devices"));
+        supported.Headers.Add(RelayClientVersion.Header, additionalVersion);
+        supported.Headers.Authorization = new("Bearer", paired.Token);
+        using var allowed = await http.SendAsync(supported);
+        Assert(allowed.IsSuccessStatusCode, "The second supported version was rejected.");
+        using var devices = await allowed.Content.ReadFromJsonAsync<JsonDocument>();
+        Assert(devices?.RootElement.GetProperty("devices").GetArrayLength() == 1, "A rejected pairing wrote a device record.");
+
+        foreach (var path in new[] { "/v1/workspace", "/v1/files", "/v1/clipboard/history" })
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, new Uri(uri, path));
+            request.Headers.Add(RelayClientVersion.Header, "0.0.0");
+            request.Headers.Authorization = new("Bearer", paired.Token);
+            using var rejected = await http.SendAsync(request);
+            Assert(rejected.StatusCode == HttpStatusCode.UpgradeRequired, "A valid token bypassed the client version check.");
+        }
+    }
+    finally { await StopAsync(server); }
+    Console.WriteLine("Relay version gate, Web version, supported pairing, and authenticated rejection passed.");
+}
+
 async Task VerifyClipboardAsync()
 {
     PairingResult receiver;
@@ -290,6 +344,9 @@ Process Launch(params string[] arguments)
     start.Environment["COMMANDTRAY_RELAY_DATA"] = runData;
     start.Environment["COMMANDTRAY_PAIRING_CODE"] = pairingCode;
     start.Environment["ASPNETCORE_URLS"] = uri.AbsoluteUri.TrimEnd('/');
+    start.Environment["COMMANDTRAY_RELAY_SUPPORTED_CLIENT_VERSIONS"] = verifyVersion
+        ? $"{RelayClientVersion.Current},{additionalVersion}" : "";
+    start.Environment["COMMANDTRAY_RELAY_WEB"] = verifyVersion ? "true" : "false";
     return Process.Start(start) ?? throw new InvalidOperationException("The relay process did not start.");
 }
 

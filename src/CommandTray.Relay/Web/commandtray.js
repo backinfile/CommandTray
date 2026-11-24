@@ -1,5 +1,8 @@
 "use strict";
 
+const clientVersion = document.querySelector('meta[name="commandtray-version"]').content;
+const versionHeader = "X-CommandTray-Client-Version";
+
 const pages = {
   workspace: ["工作区", "M3 4h18v16H3z M3 9h18 M10 9v11"],
   files: ["共享文件", "M3 6h7l2 2h9v12H3z"],
@@ -36,10 +39,60 @@ const sessionKey = "commandtray.web.device";
 let device = null;
 try { device = JSON.parse(sessionStorage.getItem(sessionKey)); } catch {}
 let page = "workspace", group = "all", workspace = null, selected = null;
-let files = [], history = [], devices = [];
+let files = [], history = [], devices = [], pinnedClips = new Map();
 let fileQuery = "", fileFolder = "", clipQuery = "", clipSource = "", clipSelection = null;
 let collapsed = false, loading = false, navigation = 0, pageRequest, feedbackTimer, transfer, conflict;
 let pendingWrite = Promise.resolve();
+let clientDatabase;
+let conflictPersisted = false;
+
+function clientStorage(mode, operation) {
+  clientDatabase ??= new Promise((resolve, reject) => {
+    const request = indexedDB.open("commandtray.web", 1);
+    request.onupgradeneeded = () => request.result.createObjectStore("saved");
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+  return clientDatabase.then(database => new Promise((resolve, reject) => {
+    const transaction = database.transaction("saved", mode);
+    const request = operation(transaction.objectStore("saved"));
+    transaction.oncomplete = () => resolve(request?.result);
+    transaction.onabort = () => reject(transaction.error);
+  }));
+}
+
+const conflictKey = identity => ["conflict", identity.id];
+async function saveConflict(value, identity) {
+  conflict = value;
+  try {
+    await clientStorage("readwrite", store => store.put(value, conflictKey(identity)));
+    if (device === identity) conflictPersisted = true;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function clearConflict(identity) {
+  if (conflictPersisted) await clientStorage("readwrite", store => store.delete(conflictKey(identity)));
+  if (device === identity) {
+    conflict = null;
+    conflictPersisted = false;
+  }
+}
+
+async function restoreWorkspace() {
+  const identity = device;
+  try {
+    const saved = await clientStorage("readonly", store => store.get(conflictKey(identity)));
+    if (device === identity && saved) {
+      conflict = saved;
+      conflictPersisted = true;
+    }
+  }
+  catch { /* Pairing and workspace access remain available without browser storage. */ }
+  if (device === identity) await open("workspace");
+}
 
 function setDevice(value) {
   device = value;
@@ -54,13 +107,16 @@ function dropDevice() {
   pageRequest?.abort();
   transfer?.xhr?.abort();
   transfer = null;
+  if (device && conflict) clearConflict(device).catch(() => {});
   setDevice(null);
   workspace = null;
   selected = null;
   files = [];
   history = [];
+  pinnedClips.clear();
   devices = [];
   conflict = null;
+  conflictPersisted = false;
   el("dialog").close();
   render();
 }
@@ -74,6 +130,7 @@ class WorkspaceConflict extends Error {
 async function request(path, { method = "GET", body, anonymous = false, signal } = {}) {
   const identity = device;
   const headers = new Headers();
+  headers.set(versionHeader, clientVersion);
   if (!anonymous && identity) headers.set("Authorization", "Bearer " + identity.token);
   if (body !== undefined) headers.set("Content-Type", "application/json");
   const timeout = AbortSignal.timeout(30_000);
@@ -192,7 +249,15 @@ async function open(target) {
       files = result.files;
       if (!files.some(file => (file.folder || "/") === fileFolder)) fileFolder = "";
     }
-    if (target === "clipboard") history = result.entries;
+    if (target === "clipboard") {
+      history = result.entries;
+      try {
+        const saved = await readPinnedClips(device, result.entries);
+        if (operation === navigation) pinnedClips = saved;
+      } catch {
+        if (operation === navigation) report("无法读取此浏览器的置顶记录。", true);
+      }
+    }
     if (target === "settings") devices = result.devices;
   } catch (failure) {
     if (!controller.signal.aborted && operation === navigation) report(failure.message, true);
@@ -294,9 +359,9 @@ function writeWorkspace(change, redraw = true) {
       if (redraw && page === "workspace" && !loading) render();
     } catch (error) {
       if (!(error instanceof WorkspaceConflict) || device !== identity) throw error;
-      conflict = { local:updated, remote:error.snapshot };
-      if (page === "workspace" && !loading) render();
-      throw new Error("未提交的修改已保留，请比较冲突版本。");
+      const saved = await saveConflict({ local:updated, remote:error.snapshot }, identity);
+      if (device === identity && page === "workspace" && !loading) render();
+      throw new Error(saved ? "未提交的修改已保留，请比较冲突版本。" : "无法保存草稿，请在刷新前比较版本并导出。");
     }
   });
   pendingWrite = operation.catch(()=>{});
@@ -327,20 +392,62 @@ function clipPreferences() {
   try { return JSON.parse(localStorage.getItem("commandtray.web.clips." + device.id)) ?? { pinned:[], hidden:[] }; }
   catch { return { pinned:[], hidden:[] }; }
 }
-function setClipPreference(list, id, enabled) {
+const clipStorageKey = (identity, id) => ["clip", identity.id, id];
+function writeClipPreferences(identity, preferences) {
+  localStorage.setItem("commandtray.web.clips." + identity.id, JSON.stringify(preferences));
+}
+async function readPinnedClips(identity, entries) {
+  const { pinned, hidden } = clipPreferences();
+  const range = IDBKeyRange.bound(clipStorageKey(identity, ""), clipStorageKey(identity, "\uffff"));
+  const archived = await clientStorage("readonly", store => store.getAll(range));
+  const saved = new Map(archived.map(entry => [clipKey(entry), entry]));
+  const missing = entries.filter(entry => {
+    const id = clipKey(entry);
+    return pinned.includes(id) && !hidden.includes(id) && !saved.has(id);
+  });
+  if (missing.length) {
+    await clientStorage("readwrite", store => {
+      for (const entry of missing) store.put(entry, clipStorageKey(identity, clipKey(entry)));
+    });
+    for (const entry of missing) saved.set(clipKey(entry), entry);
+  }
+  return saved;
+}
+function clipboardEntries() {
+  const all = new Map(pinnedClips);
+  for (const entry of history) all.set(clipKey(entry), entry);
+  return [...all.values()];
+}
+async function setClipPin(id, pin, hide = false) {
+  const identity = device;
   const prefs = clipPreferences();
-  prefs[list] = (enabled ? [id, ...prefs[list].filter(key=>key!==id)] : prefs[list].filter(key=>key!==id)).slice(0,256);
-  localStorage.setItem("commandtray.web.clips." + device.id, JSON.stringify(prefs));
-  refreshClips();
+  if (pin) {
+    if (pinnedClips.size >= 256) throw new Error("请先取消一条记录的置顶。");
+    const entry = history.find(entry => clipKey(entry) === id);
+    if (!entry) return;
+    await clientStorage("readwrite", store => store.put(entry, clipStorageKey(identity, id)));
+    if (identity === device) pinnedClips.set(id, entry);
+  } else {
+    if (pinnedClips.has(id))
+      await clientStorage("readwrite", store => store.delete(clipStorageKey(identity, id)));
+    if (hide || prefs.pinned.includes(id)) {
+      prefs.pinned = prefs.pinned.filter(key => key !== id);
+      if (hide) prefs.hidden = [id, ...prefs.hidden.filter(key => key !== id)].slice(0, 256);
+      writeClipPreferences(identity, prefs);
+    }
+    if (identity === device) pinnedClips.delete(id);
+  }
+  if (identity === device) refreshClips();
 }
 function filterHistory() {
   const prefs = clipPreferences();
+  const pinned = entry => pinnedClips.has(clipKey(entry)) || prefs.pinned.includes(clipKey(entry));
   const query = clipQuery.toLowerCase().trim();
-  return history.filter(entry=>!prefs.hidden.includes(clipKey(entry)) &&
-    (!clipSource || (clipSource === "$pinned" ? prefs.pinned.includes(clipKey(entry)) : entry.deviceName===clipSource)) &&
+  return clipboardEntries().filter(entry=>!prefs.hidden.includes(clipKey(entry)) &&
+    (!clipSource || (clipSource === "$pinned" ? pinned(entry) : entry.deviceName===clipSource)) &&
     [entry.text,entry.deviceName].some(value=>String(value??"").toLowerCase().includes(query)))
-    .map(entry=>({entry, pinned:prefs.pinned.includes(clipKey(entry))}))
-    .sort((a,b)=>Number(b.pinned)-Number(a.pinned));
+    .map(entry=>({entry, pinned:pinned(entry)}))
+    .sort((a,b)=>Number(b.pinned)-Number(a.pinned) || b.entry.revision-a.entry.revision);
 }
 function clipPanels() {
   const entries = filterHistory();
@@ -361,7 +468,7 @@ function clipPanels() {
 }
 function refreshClips() { if (el("clip-panels")) el("clip-panels").innerHTML = clipPanels(); }
 function renderClipboard() {
-  const sources = [...new Set(history.map(entry=>entry.deviceName).filter(Boolean))];
+  const sources = [...new Set(clipboardEntries().map(entry=>entry.deviceName).filter(Boolean))];
   if (clipSource && clipSource!=="$pinned" && !sources.includes(clipSource)) clipSource = "";
   const options = [["","所有记录"],["$pinned","已置顶"],...sources.map(name=>[name,name])];
   return heading("剪贴板", button("刷新", "refresh") + button("发送文本", "send-clipboard", true), `${history.length} 条同步记录`) +
@@ -461,6 +568,7 @@ function startTransfer(spec) {
   const xhr = new XMLHttpRequest();
   const job = transfer = {...spec, state:"running", xhr, loaded:0};
   xhr.open(job.upload ? "POST" : "GET", "/v1/" + job.path);
+  xhr.setRequestHeader(versionHeader, clientVersion);
   xhr.setRequestHeader("Authorization", "Bearer " + identity.token);
   if (job.upload) xhr.setRequestHeader("Content-Type","application/octet-stream");
   else xhr.responseType = "blob";
@@ -593,17 +701,19 @@ async function perform(operation, argument) {
       downloadBlob(new Blob([JSON.stringify(conflict,null,2)],{type:"application/json"}),"workspace-conflict.json");
       return;
     case "conflict-remote":
-      acceptWorkspace(conflict.remote); conflict=null; el("dialog").close(); render(); return;
+      acceptWorkspace(conflict.remote); await clearConflict(device); el("dialog").close(); render(); return;
     case "conflict-local":
       return modal("保留本机", "使用本机版本替换中转工作区？", "", "确认", async () => {
+        const identity = device;
         try {
           const value = await (await request("workspace", {method:"PUT", body:{baseRevision:conflict.remote.revision,document:conflict.local}})).json();
-          conflict=null; acceptWorkspace(value); render();
+          await clearConflict(identity);
+          if (device === identity) { acceptWorkspace(value); render(); }
         } catch (error) {
-          if (error instanceof WorkspaceConflict) {
-            conflict.remote=error.snapshot;
+          if (error instanceof WorkspaceConflict && device === identity) {
+            const saved = await saveConflict({ ...conflict, remote:error.snapshot }, identity);
             compareConflict();
-            report("中转版本再次更新。",true);
+            report(saved ? "中转版本再次更新。" : "无法保存最新冲突，请在刷新前导出。",true);
           } else throw error;
         }
       });
@@ -635,10 +745,10 @@ async function perform(operation, argument) {
       clipSelection=argument; refreshClips();
       if (matchMedia("(max-width: 700px)").matches) document.querySelector(".clip-inspector")?.scrollIntoView({ block:"start" });
       return;
-    case "clip-pin": setClipPreference("pinned",argument,!clipPreferences().pinned.includes(argument)); return;
-    case "clip-hide": setClipPreference("hidden",argument,true); return;
+    case "clip-pin": return setClipPin(argument, !pinnedClips.has(argument) && !clipPreferences().pinned.includes(argument));
+    case "clip-hide": return setClipPin(argument, false, true);
     case "copy": {
-      const text=history.find(entry=>clipKey(entry)===argument)?.text;
+      const text=(history.find(entry=>clipKey(entry)===argument) ?? pinnedClips.get(argument))?.text;
       if (text==null) return;
       try { await navigator.clipboard.writeText(text); report("已复制"); }
       catch {
@@ -703,5 +813,5 @@ document.addEventListener("keydown",event=>{
     else search();
   }
 });
-if (device?.token && device?.id) open("workspace");
+if (device?.token && device?.id) restoreWorkspace();
 else { setDevice(null); render(); }

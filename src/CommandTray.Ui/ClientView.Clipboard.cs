@@ -24,7 +24,7 @@ public sealed partial class ClientView
         Header(L("剪贴板", "Clipboard"));
         var relay = await ReadPageContent("relay_status", token);
         var settings = await Execute("settings_read", [], token);
-        var preferences = await Execute("clipboard_preferences", [], token);
+        var preferences = await Execute("clipboard_preferences", new() { ["includeEntries"] = true }, token);
         bool paired = relay.Flag("paired");
 
         var actions = Row(
@@ -75,6 +75,20 @@ public sealed partial class ClientView
             var local = await Execute("clipboard_history", [], token) as JsonArray ?? [];
             entries.AddRange(local.Select(TextOfLocal).Where(entry => entry.Text.Length > 0));
         }
+        var liveIds = entries.Select(entry => entry.Id).ToHashSet(StringComparer.Ordinal);
+        var pinnedIds = Keys(preferences, "pinned");
+        var savedPins = preferences.Object("pinnedEntries");
+        var missingPins = new JsonObject();
+        foreach (var entry in entries)
+            if (pinnedIds.Contains(entry.Id) && !savedPins.ContainsKey(entry.Id))
+                missingPins[entry.Id] = Snapshot(entry);
+        if (missingPins.Count > 0)
+            preferences = await Execute("clipboard_preferences", new()
+            {
+                ["includeEntries"] = true,
+                ["pinnedEntries"] = missingPins
+            }, token);
+
         if (!paired)
             _contents.Children.Add(Section(TitleRow(Muted(L("中转未配对", "Relay not paired")),
                 Action(L("配对", "Pair"), () => PairForm(relay)))));
@@ -87,7 +101,7 @@ public sealed partial class ClientView
             ("pinned", L("已置顶", "Pinned"))
         };
         if (Has(ClientFeatures.ClipboardHistory)) filters.Insert(1, ("local", L("本机", "Local")));
-        filters.AddRange(entries.Where(entry => !entry.Local).Select(entry => entry.Source)
+        filters.AddRange(CurrentEntries().Where(entry => !entry.Local).Select(entry => entry.Source)
             .Distinct(StringComparer.Ordinal).Select(source => ("device:" + source, source)));
         var filter = new ComboBox { ItemsSource = filters.Select(item => item.Label), MaxWidth = 210,
             SelectedIndex = Math.Max(0, filters.FindIndex(item => item.Key == _clipboardFilter)) };
@@ -118,12 +132,20 @@ public sealed partial class ClientView
             return new ClipEntry(ClipId("local\n" + text), L("本机", "This device"), text, "", true);
         }
 
+        IEnumerable<ClipEntry> CurrentEntries()
+        {
+            foreach (var entry in entries) yield return entry;
+            foreach (var (id, record) in preferences.Object("pinnedEntries"))
+                if (!liveIds.Contains(id) && record is JsonObject)
+                    yield return new ClipEntry(id, record.Text("source"), record.Text("text"), record.Text("time"), record.Flag("local"));
+        }
+
         void DrawHistory()
         {
             var pins = Keys(preferences, "pinned");
             var hidden = Keys(preferences, "hidden");
             var search = _clipboardQuery.Trim();
-            var visible = entries.Where(entry => !hidden.Contains(entry.Id))
+            var visible = CurrentEntries().Where(entry => !hidden.Contains(entry.Id))
                 .Where(entry => _clipboardFilter switch
                 {
                     "local" => entry.Local, "remote" => !entry.Local, "pinned" => pins.Contains(entry.Id),
@@ -200,6 +222,9 @@ public sealed partial class ClientView
         async Task SetPreference(ClipEntry entry, JsonObject change)
         {
             change["id"] = entry.Id;
+            change["includeEntries"] = true;
+            if (change.Flag("pin"))
+                change["pinnedEntries"] = new JsonObject { [entry.Id] = Snapshot(entry) };
             preferences = await Execute("clipboard_preferences", change, token);
             if (_compact) await LoadAsync();
             else DrawHistory();
@@ -207,6 +232,10 @@ public sealed partial class ClientView
 
         static HashSet<string> Keys(JsonNode? value, string key) => value.Array(key)
             .OfType<JsonValue>().Select(node => node.GetValue<string>()).ToHashSet(StringComparer.Ordinal);
+        static JsonObject Snapshot(ClipEntry entry) => new()
+        {
+            ["source"] = entry.Source, ["text"] = entry.Text, ["time"] = entry.Time, ["local"] = entry.Local
+        };
         static string ClipId(string identity) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(identity)));
     }
 

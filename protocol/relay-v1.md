@@ -2,9 +2,11 @@
 
 所有 JSON 使用 UTF-8，字段为 camelCase。`POST /v1/devices/pair` 用 `{deviceName,pairingCode}` 换取 `{deviceId,token}`。其他 `/v1` 调用使用 `Authorization: Bearer <token>`。已配对设备共享一个数据集合。
 
+所有 `/v1` 请求都必须携带一个 `X-CommandTray-Client-Version: X.Y.Z` 请求头，值为客户端的套件版本。中转对缺少版本号或版本不在支持名单内的请求返回 HTTP 426，响应包含 `code: "unsupported_client_version"`、`error` 和 `supportedClientVersions`。版本校验通过后仍需完成配对或提供有效的设备令牌。
+
 | 请求 | 内容与结果 |
 |---|---|
-| `GET /healthz` | 返回就绪状态和协议版本。 |
+| `GET /healthz` | 返回 `{ready,protocol,relayVersion,supportedClientVersions}`。 |
 | `GET /v1/devices` | 返回 `{devices:[{id,name,pairedAt}]}`。 |
 | `DELETE /v1/devices/{id}` | 当前设备退出配对，其他设备由部署管理员撤销。 |
 | `GET /v1/workspace` | 返回 `{revision,document}`。 |

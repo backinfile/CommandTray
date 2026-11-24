@@ -55,8 +55,14 @@ internal sealed class DesktopMcpTools(DesktopRuntime desktop)
     }
 
     [McpServerTool(Name = "activate_workspace", UseStructuredContent = true)]
-    [Description("Select the space shown in the Files & terminal window.")]
-    public OperationResult ActivateSpace(string spaceId) { desktop.Workspace.ActivateSpace(spaceId); return Ok(); }
+    [Description("Select and show the space in the Windows workspace.")]
+    public Task<OperationResult> ActivateSpace(string spaceId, CancellationToken cancellationToken) =>
+        desktop.OnUiAsync(() =>
+        {
+            desktop.Workspace.ActivateSpace(spaceId);
+            desktop.Navigate(DesktopPage.Workspace, spaceId);
+            return Ok();
+        }, cancellationToken);
 
     [McpServerTool(Name = "arrange_workspace", UseStructuredContent = true)]
     [Description("Tile a workspace within the requested pixel width.")]

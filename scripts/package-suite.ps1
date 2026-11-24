@@ -91,7 +91,7 @@ try {
         }
         if ($RelayImage) {
             $tag = "commandtray-relay:$Version"
-            docker build -f deploy/relay/Dockerfile -t $tag .
+            docker build -f deploy/relay/Dockerfile --build-arg "SUITE_VERSION=$Version" -t $tag .
             $image = Join-Path $dest "CommandTray-Relay-$Version-image.tar"
             docker image save -o $image $tag
             $assets.Add($image)
@@ -113,7 +113,7 @@ try {
         if ($minor -gt 999 -or $patch -gt 999 -or $versionCode -gt 2100000000) { throw 'Android version exceeds the version-code range.' }
         $androidBuild = Join-Path $stage 'android'
         & $AndroidDotnet publish src/CommandTray.Android/CommandTray.Android.csproj -c $AndroidVariant `
-            "-p:ApplicationDisplayVersion=$Version" "-p:ApplicationVersion=$versionCode" -o $androidBuild
+            "-p:Version=$Version" "-p:ApplicationDisplayVersion=$Version" "-p:ApplicationVersion=$versionCode" -o $androidBuild
         $variant = $AndroidVariant.ToLowerInvariant()
         $source = Get-ChildItem -LiteralPath $androidBuild -File -Filter '*-Signed.apk' | Select-Object -First 1
         if (!$source) { throw "Missing signed APK in $androidBuild." }

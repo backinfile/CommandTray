@@ -53,7 +53,9 @@ internal sealed class WindowsClientBackend(
             case "space_create": return Json(new { id = Workspace.AddSpace(Required("name")) });
             case "space_rename": return Json(_actions.RenameSpace(Space(), Required("name")));
             case "space_delete": return Json(_actions.DeleteSpace(Space()));
-            case "space_activate": return Json(_actions.ActivateSpace(Space()));
+            case "space_activate":
+                Workspace.ActivateSpace(Space());
+                return Json(new OperationResult(true, "ok"));
             case "item_save":
                 var item = arguments["item"] as JsonObject ?? throw new ArgumentException("Specify item.");
                 var itemId = Workspace.SaveItem(Space(), item);

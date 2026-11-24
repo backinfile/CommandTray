@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading.RateLimiting;
 using CommandTray.Relay;
+using CommandTray.Sync;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.DependencyInjection;
@@ -40,6 +41,19 @@ var pairing = Environment.GetEnvironmentVariable("COMMANDTRAY_PAIRING_CODE");
 if (pairing is not { Length: >= 16 and <= 512 })
     throw new InvalidOperationException("Set COMMANDTRAY_PAIRING_CODE to a unique value of at least 16 characters.");
 var pairingHash = SHA256.HashData(Encoding.UTF8.GetBytes(pairing));
+var relayVersion = RelayClientVersion.Current;
+var configuredVersions = Environment.GetEnvironmentVariable("COMMANDTRAY_RELAY_SUPPORTED_CLIENT_VERSIONS");
+var supportedClientVersions = string.IsNullOrWhiteSpace(configuredVersions)
+    ? [relayVersion]
+    : configuredVersions.Split(',', StringSplitOptions.TrimEntries).Distinct(StringComparer.Ordinal).ToArray();
+if (supportedClientVersions.Any(version => !Version.TryParse(version, out var parsed) ||
+    parsed.Build < 0 || parsed.Revision >= 0 || parsed.ToString(3) != version))
+    throw new InvalidOperationException("Set COMMANDTRAY_RELAY_SUPPORTED_CLIENT_VERSIONS to comma-separated X.Y.Z versions.");
+var supportedVersions = supportedClientVersions.ToHashSet(StringComparer.Ordinal);
+var enableWeb = bool.TryParse(Environment.GetEnvironmentVariable("COMMANDTRAY_RELAY_WEB"), out var web) && web;
+if (enableWeb && !supportedVersions.Contains(relayVersion))
+    throw new InvalidOperationException("Allow the relay's own version when its built-in Web client is enabled.");
+var versionError = $"Update CommandTray to a version supported by this relay: {string.Join(", ", supportedClientVersions)}.";
 
 var builder = WebApplication.CreateBuilder(args);
 if (string.IsNullOrWhiteSpace(builder.Configuration["urls"]))
@@ -61,15 +75,25 @@ await using var app = builder.Build();
 _ = app.Services.GetRequiredService<RelayStore>();
 app.Use(async (context, next) =>
 {
+    if (context.Request.Path.StartsWithSegments("/v1"))
+    {
+        var versions = context.Request.Headers[RelayClientVersion.Header];
+        if (versions.Count != 1 || versions[0] is not { } clientVersion || !supportedVersions.Contains(clientVersion))
+        {
+            context.Response.Headers.CacheControl = "no-store";
+            await Results.Json(new { code = "unsupported_client_version", error = versionError, supportedClientVersions },
+                statusCode: StatusCodes.Status426UpgradeRequired).ExecuteAsync(context);
+            return;
+        }
+    }
     var requestLimit = context.Features.Get<IHttpMaxRequestBodySizeFeature>();
     if (!context.Request.Path.Equals("/v1/files") && requestLimit is { IsReadOnly: false })
         requestLimit.MaxRequestBodySize = RelayData.WorkspaceLimit;
     await next(context);
 });
 app.UseRateLimiter();
-if (bool.TryParse(Environment.GetEnvironmentVariable("COMMANDTRAY_RELAY_WEB"), out var enableWeb) && enableWeb)
-    RelayWeb.Map(app);
-app.MapGet("/healthz", () => Results.Ok(new { ready = true, protocol = 1 }));
+if (enableWeb) RelayWeb.Map(app, relayVersion);
+app.MapGet("/healthz", () => Results.Ok(new { ready = true, protocol = 1, relayVersion, supportedClientVersions }));
 app.MapPost("/v1/devices/pair", async (PairInput input, RelayStore store, CancellationToken cancellation) =>
 {
     string name = input.DeviceName?.Trim() ?? "";

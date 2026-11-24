@@ -25,7 +25,7 @@ internal sealed class DesktopRuntime : IDisposable
         Relay = new DesktopRelay(directory, Workspace);
         Media = new DesktopMedia(Path.Combine(directory, "captures"));
         McpCredential = DesktopRelay.ReadOrCreateLocalCredential(directory);
-        ClipboardPreferences = new ClipboardPreferences(directory);
+        ClipboardPreferences = new ClipboardPreferences(directory, DesktopRelay.Protect, DesktopRelay.Unprotect);
         _clipboardPath = Path.Combine(directory, "clipboard.json");
     }
 

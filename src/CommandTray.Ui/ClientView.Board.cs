@@ -96,8 +96,13 @@ public sealed partial class ClientView
         var footer = new Border { Child = TitleRow(count, Row(minus, zoom, plus, grid)) };
         footer.Classes.Add("board-chrome");
         var panel = new Grid { RowDefinitions = new RowDefinitions("Auto,Auto,*,Auto") };
-        var bar = new Border { Child = new ScrollViewer { Content = tools, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
-            VerticalScrollBarVisibility = ScrollBarVisibility.Disabled } };
+        var bar = new Border { Child = new ScrollViewer
+        {
+            Content = tools,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            AllowAutoHide = false
+        }};
         bar.Classes.Add("board-chrome");
         Grid.SetRow(textInput, 1);
         Grid.SetRow(board, 2);

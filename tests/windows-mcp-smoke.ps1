@@ -122,15 +122,17 @@ try {
         $relay = Start-Process -FilePath dotnet -ArgumentList ('"' + $relayPath + '"') -WindowStyle Hidden -Environment $relayEnv -PassThru
         $ready = $false
         for ($attempt = 0; $attempt -lt 25; $attempt++) {
-            try { $ready = (Invoke-RestMethod -Uri "$relayUrl/healthz" -TimeoutSec 2).ready; break }
+            try { $health = Invoke-RestMethod -Uri "$relayUrl/healthz" -TimeoutSec 2; $ready = $health.ready; break }
             catch { if ($relay.HasExited) { throw }; Start-Sleep -Milliseconds 160 }
         }
         if (!$ready) { throw 'The relay did not start for the Windows sync check.' }
         $null = Invoke-Tool 'pair_relay' @{ url = $relayUrl; deviceName = 'Windows acceptance'; pairingCode = $pairingCode }
         $null = Invoke-Tool 'push_workspace'
-        $peer = Invoke-RestMethod -Method Post -Uri "$relayUrl/v1/devices/pair" -ContentType 'application/json' -Body (
+        $peerHeaders = @{ 'X-CommandTray-Client-Version' = $health.relayVersion }
+        $peer = Invoke-RestMethod -Method Post -Uri "$relayUrl/v1/devices/pair" -ContentType 'application/json' -Headers $peerHeaders -Body (
             @{ deviceName = 'Peer acceptance'; pairingCode = $pairingCode } | ConvertTo-Json)
-        $remote = Invoke-RestMethod -Uri "$relayUrl/v1/workspace" -Headers @{ Authorization = "Bearer $($peer.token)" }
+        $peerHeaders.Authorization = "Bearer $($peer.token)"
+        $remote = Invoke-RestMethod -Uri "$relayUrl/v1/workspace" -Headers $peerHeaders
         $found = ($remote.document.spaces | Where-Object id -eq $space).items | Where-Object id -eq $note
         if ($found.data.text -ne 'native MCP note' -or $found.width -ne 380) { throw 'The relay lost Windows workspace content or geometry.' }
         'Windows MCP workspace roundtrip through the relay passed.'

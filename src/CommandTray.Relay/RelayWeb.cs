@@ -2,7 +2,7 @@ namespace CommandTray.Relay;
 
 internal static class RelayWeb
 {
-    public static void Map(WebApplication app)
+    public static void Map(WebApplication app, string version)
     {
         MapAsset("/", "index.html", "text/html; charset=utf-8");
         MapAsset("/commandtray.css", "commandtray.css", "text/css; charset=utf-8");
@@ -20,6 +20,11 @@ internal static class RelayWeb
                     "form-action 'self'; frame-ancestors 'none'; base-uri 'none'";
                 var asset = typeof(RelayWeb).Assembly.GetManifestResourceStream("CommandTray.Web." + name)
                     ?? throw new InvalidOperationException($"The relay Web asset '{name}' is missing.");
+                if (name == "index.html")
+                {
+                    using var reader = new StreamReader(asset);
+                    return Results.Content(reader.ReadToEnd().Replace("__SUITE_VERSION__", version, StringComparison.Ordinal), contentType);
+                }
                 return Results.File(asset, contentType);
             }).ExcludeFromDescription();
     }

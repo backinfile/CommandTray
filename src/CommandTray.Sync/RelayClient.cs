@@ -189,6 +189,7 @@ public sealed class RelayClient
     private HttpRequestMessage Create(HttpMethod method, string relativePath)
     {
         var request = new HttpRequestMessage(method, new Uri(_server, relativePath));
+        request.Headers.Add(RelayClientVersion.Header, RelayClientVersion.Current);
         if (!string.IsNullOrWhiteSpace(_token))
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _token);
         return request;

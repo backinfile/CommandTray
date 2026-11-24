@@ -22,6 +22,7 @@ internal static class TrayGlyph
                 "capture" => "M8,5 L10,3 H14 L16,5 H21 V20 H3 V5 Z M16,12 A4,4 0 1 1 8,12 A4,4 0 1 1 16,12",
                 "ssh" => "M14,8 A5,5 0 1 1 4,8 A5,5 0 1 1 14,8 M13,12 L21,20 M17,16 L19,14",
                 "plus" => "M12,4 V20 M4,12 H20",
+                "check" => "M5,12 L10,17 L19,7",
                 "minus" => "M4,12 H20 M4,12.1 H20",
                 "pointer" => "M4,3 L11,20 L13,13 L20,11 Z",
                 "pen" => "M4,20 L5,14 L16,3 L21,8 L10,19 Z M14,5 L19,10",

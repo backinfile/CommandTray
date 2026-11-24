@@ -256,7 +256,7 @@ public sealed partial class ClientView
         if (kind is "files" or "terminal") fields.Add(new("path", L("目录", "Directory")));
         if (kind == "terminal")
             fields.Add(new("shell", L("Shell", "Shell"), OperatingSystem.IsWindows() ? "cmd" : "/bin/sh"));
-        return Form(name, values =>
+        return ModalForm(L($"添加{name}", $"Add {name}"), L("添加", "Add"), values =>
         {
             var title = values.Text("title", name);
             var data = kind switch
@@ -267,7 +267,7 @@ public sealed partial class ClientView
                 "todo" => new JsonObject { ["tasks"] = new JsonArray() },
                 _ => new JsonObject()
             };
-            return Change("item_save", new() { ["spaceId"] = spaceId, ["item"] = NewItem(kind, title, data) });
+            return Change("item_save", new() { ["spaceId"] = spaceId, ["item"] = NewItem(kind, title, data) }, preserveViewport: true);
         }, fields.ToArray());
     }
 
@@ -479,8 +479,8 @@ public sealed partial class ClientView
             return SaveItem(spaceId, copy);
         }, fields);
 
-    private Task SaveItem(string spaceId, JsonObject item) =>
-        Change("item_save", new() { ["spaceId"] = spaceId, ["item"] = item });
+    private Task SaveItem(string spaceId, JsonObject item, bool preserveViewport = false) =>
+        Change("item_save", new() { ["spaceId"] = spaceId, ["item"] = item }, preserveViewport);
 
     private Control NoteComponent(string spaceId, JsonObject item)
     {
@@ -512,19 +512,73 @@ public sealed partial class ClientView
         foreach (var task in entries)
         {
             var id = task.Text("id");
-            var check = new CheckBox { Content = Body(task.Text("text")), IsChecked = task.Flag("completed"), MinHeight = _compact ? 48 : 40 };
+            var check = new CheckBox
+            {
+                Content = Body(task.Text("text")),
+                IsChecked = task.Flag("completed"),
+                MinHeight = _compact ? 48 : 40,
+                VerticalContentAlignment = VerticalAlignment.Center
+            };
+            check.Classes.Add("checklist-item");
             check.Click += async (_, _) => await Act(() => UpdateTask(spaceId, item, id, null, check.IsChecked));
-            tasks.Children.Add(TitleRow(check, Menu("⋯",
+            var menu = Menu("⋯",
                 (L("编辑", "Edit"), () => EditTask(spaceId, item, task)),
                 (L("删除", "Delete"), () => Confirm(L("删除该待办？", "Delete task?"),
-                    () => UpdateTask(spaceId, item, id, null, null))))));
+                    () => UpdateTask(spaceId, item, id, null, null))));
+            menu.VerticalAlignment = VerticalAlignment.Center;
+            tasks.Children.Add(TitleRow(check, menu));
         }
-        tasks.Children.Add(Action(L("新增待办", "Add task"), () => EditTask(spaceId, item, null), glyph: "plus"));
+        var input = new TextBox { PlaceholderText = L("待办内容", "Task"), MaxLength = 500 };
+        Avalonia.Automation.AutomationProperties.SetName(input, L("待办内容", "Task"));
+        var actions = Row();
+        var editor = TitleRow(input, actions);
+        editor.IsVisible = false;
+        var addArea = new Panel();
+        var add = Action(L("新增待办", "Add task"), () =>
+        {
+            ShowEditor(true);
+            return Task.CompletedTask;
+        }, glyph: "plus");
+        addArea.Children.Add(add);
+        var confirm = IconButton("check", L("添加待办", "Add task"), Submit);
+        confirm.IsEnabled = false;
+        var cancel = IconButton("close", L("取消", "Cancel"), () =>
+        {
+            ShowEditor(false);
+            return Task.CompletedTask;
+        });
+        actions.Children.Add(confirm);
+        actions.Children.Add(cancel);
+        input.TextChanged += (_, _) => confirm.IsEnabled = !string.IsNullOrWhiteSpace(input.Text);
+        input.KeyDown += async (_, args) =>
+        {
+            if (args.Key == Key.Enter) { args.Handled = true; await Act(Submit); }
+            else if (args.Key == Key.Escape && editor.IsEnabled) { args.Handled = true; ShowEditor(false); }
+        };
+        tasks.Children.Add(addArea);
+        tasks.Children.Add(editor);
         return tasks;
+
+        void ShowEditor(bool open)
+        {
+            if (!open) input.Text = "";
+            editor.IsVisible = open;
+            addArea.IsVisible = !open;
+            if (open) input.Focus();
+            else addArea.Children[0].Focus();
+        }
+
+        async Task Submit()
+        {
+            if (!editor.IsEnabled || string.IsNullOrWhiteSpace(input.Text)) return;
+            editor.IsEnabled = false;
+            try { await UpdateTask(spaceId, item, null, input.Text.Trim(), null); }
+            finally { editor.IsEnabled = true; }
+        }
     }
 
     private Task EditTask(string spaceId, JsonObject item, JsonObject? task) =>
-        Form(L("待办", "Task"), values => UpdateTask(spaceId, item, task?.Text("id"), values.RequireText("text"), null),
+        ModalForm(L("编辑待办", "Edit task"), L("保存", "Save"), values => UpdateTask(spaceId, item, task?.Text("id"), values.RequireText("text"), null),
             new Field("text", L("内容", "Text"), task.Text("text")));
 
     private Task UpdateTask(string spaceId, JsonObject item, string? id, string? title, bool? done)
@@ -546,7 +600,7 @@ public sealed partial class ClientView
             else if (title is not null) task["text"] = title;
             else list.Remove(task);
         }
-        return SaveItem(spaceId, copy);
+        return SaveItem(spaceId, copy, preserveViewport: true);
     }
 
     private static JsonObject EnsureData(JsonObject item)

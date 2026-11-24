@@ -126,6 +126,7 @@ public sealed partial class ClientView : UserControl
         if (_openMenu is { IsOpen: true } menu) menu.Hide();
         else if (_toolbar.Children.OfType<ComboBox>().FirstOrDefault() is { IsDropDownOpen: true } picker)
             picker.IsDropDownOpen = false;
+        else if (_paletteOverlay.IsVisible) ClosePalette();
         else if (_editing) _ = LoadAsync();
         else if (_page != "workspace") Navigate("workspace");
         else return;
@@ -139,6 +140,7 @@ public sealed partial class ClientView : UserControl
             Dispatcher.UIThread.Post(() => Navigate(page, spaceId, componentId));
             return;
         }
+        ClosePalette(restoreFocus: false);
         _page = page switch
         {
             "services" or "service" or "logs" or "manager" or "commands" => Has(ClientFeatures.Commands) ? "commands" : "workspace",
@@ -300,11 +302,19 @@ public sealed partial class ClientView : UserControl
         finally { _contents.Children.Remove(loading); }
     }
 
-    private async Task Change(string operation, JsonObject arguments)
+    private async Task Change(string operation, JsonObject arguments, bool preserveViewport = false)
     {
         var page = _loading;
+        var offset = _viewport.Offset;
         await Execute(operation, arguments);
-        if (ReferenceEquals(page, _loading)) await LoadAsync();
+        if (!ReferenceEquals(page, _loading)) return;
+        await LoadAsync();
+        if (!preserveViewport || offset == default) return;
+        page = _loading;
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            if (ReferenceEquals(page, _loading)) _viewport.Offset = offset;
+        }, DispatcherPriority.Loaded);
     }
 
     private void Report(string message)
@@ -503,15 +513,45 @@ public sealed partial class ClientView : UserControl
         => Form(title, submitLabel, pendingLabel, (values, _) => save(values), fields);
 
     private Task Form(string title, string submitLabel, string pendingLabel,
-        Func<JsonObject, CancellationToken, Task> save, params Field[] fields)
+        Func<JsonObject, CancellationToken, Task> save, params Field[] fields) =>
+        ShowForm(title, submitLabel, pendingLabel, save, fields, modal: false);
+
+    private Task ModalForm(string title, string submitLabel, Func<JsonObject, Task> save, params Field[] fields) =>
+        ShowForm(title, submitLabel, L("正在处理…", "Working…"), (values, _) => save(values), fields, modal: true);
+
+    private Task ShowForm(string title, string submitLabel, string pendingLabel,
+        Func<JsonObject, CancellationToken, Task> save, Field[] fields, bool modal)
     {
-        _editing = true;
-        _workspaceGrid.IsVisible = false;
-        _terminals.Clear();
-        _contents.Children.Clear();
-        _viewport.Offset = default;
+        var body = modal ? new StackPanel { Spacing = 8 } : _contents;
+        Border? dialog = null;
+        Control? firstInput = null;
         Report("");
-        Header(title, Action(L("取消", "Cancel"), LoadAsync));
+        if (modal)
+        {
+            _focusBeforePalette = TopLevel.GetTopLevel(this)?.FocusManager?.GetFocusedElement();
+            body.Children.Add(Heading(title));
+            dialog = new Border
+            {
+                Width = Math.Clamp(Bounds.Width - 40, 1, 460),
+                MaxHeight = Math.Max(1, Bounds.Height - 40),
+                Padding = new Thickness(16),
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+                Child = new ScrollViewer { Content = body }
+            };
+            dialog.Classes.Add("palette");
+            Avalonia.Automation.AutomationProperties.SetName(dialog, title);
+            KeyboardNavigation.SetTabNavigation(dialog, KeyboardNavigationMode.Cycle);
+        }
+        else
+        {
+            _editing = true;
+            _workspaceGrid.IsVisible = false;
+            _terminals.Clear();
+            _contents.Children.Clear();
+            _viewport.Offset = default;
+            Header(title, Action(L("取消", "Cancel"), LoadAsync));
+        }
         var error = new TextBlock { IsVisible = false, TextWrapping = TextWrapping.Wrap };
         error.Classes.Add("form-error");
         var inputs = new List<(string Key, Func<JsonNode?> Value)>();
@@ -520,7 +560,8 @@ public sealed partial class ClientView : UserControl
             if (field.Toggle)
             {
                 var checkbox = new CheckBox { Content = field.Label, IsChecked = field.Value == "true" };
-                _contents.Children.Add(checkbox);
+                body.Children.Add(checkbox);
+                firstInput ??= checkbox;
                 inputs.Add((field.Key, () => JsonValue.Create(checkbox.IsChecked == true)));
                 continue;
             }
@@ -532,8 +573,9 @@ public sealed partial class ClientView : UserControl
             input.Classes.Add("entry");
             Avalonia.Automation.AutomationProperties.SetName(input, field.Label);
             input.TextChanged += (_, _) => error.IsVisible = false;
-            _contents.Children.Add(Muted(field.Label));
-            _contents.Children.Add(input);
+            body.Children.Add(Muted(field.Label));
+            body.Children.Add(input);
+            firstInput ??= input;
             inputs.Add((field.Key, () => JsonValue.Create(input.Text ?? "")));
         }
         var progress = Muted(pendingLabel);
@@ -545,7 +587,11 @@ public sealed partial class ClientView : UserControl
             foreach (var input in inputs) values[input.Key] = input.Value();
             error.IsVisible = false;
             progress.IsVisible = true;
-            try { await save(values, token); }
+            try
+            {
+                await save(values, token);
+                if (dialog is not null && ReferenceEquals(_paletteOverlay.Child, dialog)) ClosePalette();
+            }
             catch (OperationCanceledException) when (token.IsCancellationRequested) { }
             catch (Exception failure) when (!token.IsCancellationRequested)
             {
@@ -555,9 +601,20 @@ public sealed partial class ClientView : UserControl
             }
             finally { progress.IsVisible = false; }
         });
-        _contents.Children.Add(new WrapPanel { ItemSpacing = 8, Children = { button, progress } });
+        var actions = new WrapPanel { ItemSpacing = 8, Children = { button, progress } };
+        body.Children.Add(actions);
         progress.VerticalAlignment = VerticalAlignment.Center;
-        _contents.Children.Add(error);
+        body.Children.Add(error);
+        if (dialog is not null)
+        {
+            actions.Children.Insert(0, Action(L("取消", "Cancel"), () => { ClosePalette(); return Task.CompletedTask; }));
+            _paletteOverlay.Child = dialog;
+            _paletteOverlay.IsVisible = true;
+            Dispatcher.UIThread.Post(() =>
+            {
+                if (ReferenceEquals(_paletteOverlay.Child, dialog)) (firstInput ?? button).Focus();
+            }, DispatcherPriority.Input);
+        }
         return Task.CompletedTask;
     }
 }
