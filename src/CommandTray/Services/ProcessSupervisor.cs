@@ -63,7 +63,7 @@ public sealed class ProcessSupervisor : IAsyncDisposable
                 }
                 else runtime.Log.Write("ERR", e.Data);
             };
-            process.Exited += (_, _) => _ = HandleUnexpectedExitAsync(runtime);
+            process.Exited += (_, _) => _ = HandleExitAsync(runtime, process);
 
             var job = new WindowsJob();
             try
@@ -173,17 +173,19 @@ public sealed class ProcessSupervisor : IAsyncDisposable
 
     private ManagedRuntime GetRuntime(ServiceDefinition service) => _runtimes.GetOrAdd(service.Id, _ => new ManagedRuntime(service, _logRoot));
 
-    private async Task HandleUnexpectedExitAsync(ManagedRuntime runtime)
+    private async Task HandleExitAsync(ManagedRuntime runtime, Process process)
     {
         await runtime.Gate.WaitAsync();
         CancellationTokenSource? restart = null;
         try
         {
-            var exitCode = runtime.Process is { } p && p.HasExited ? p.ExitCode : -1;
+            if (!ReferenceEquals(runtime.Process, process)) return;
+            var exitCode = process.ExitCode;
             runtime.Log.Write("SYS", $"PID exited with code {exitCode}.");
             CleanupProcess(runtime);
-            if (_shuttingDown || runtime.IntentionalStop)
+            if (_shuttingDown || runtime.IntentionalStop || exitCode == 0)
             {
+                runtime.RestartAttempts = 0;
                 SetState(runtime, ServiceState.Stopped, null);
                 return;
             }

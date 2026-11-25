@@ -21,8 +21,19 @@ public sealed partial class ClientView
         _displayedWorkspace = document;
         _displayedWorkspaceConflict = HasWorkspaceConflict(relay);
         var spaces = document.Array("spaces").OfType<JsonObject>().ToArray();
-        var selected = spaces.FirstOrDefault(space =>
-            space.Text("id") == (_spaceId ?? document.Text("activeSpaceId"))) ?? spaces.FirstOrDefault();
+        var activeSpaceId = document.Text("activeSpaceId");
+        if (_requestedSpaceId is null && activeSpaceId != _observedActiveSpaceId && _spaceId != activeSpaceId)
+        {
+            _spaceId = activeSpaceId;
+            _workspaceSection = "overview";
+            _focusedPanelId = null;
+            _componentId = null;
+            _viewport.Offset = default;
+        }
+        _requestedSpaceId = null;
+        _observedActiveSpaceId = activeSpaceId;
+        var selected = spaces.FirstOrDefault(space => space.Text("id") == _spaceId)
+            ?? spaces.FirstOrDefault(space => space.Text("id") == activeSpaceId) ?? spaces.FirstOrDefault();
         _spaceId = selected?.Text("id");
 
         bool paired = relay.Flag("paired");
@@ -256,7 +267,7 @@ public sealed partial class ClientView
         if (kind is "files" or "terminal") fields.Add(new("path", L("目录", "Directory")));
         if (kind == "terminal")
             fields.Add(new("shell", L("Shell", "Shell"), OperatingSystem.IsWindows() ? "cmd" : "/bin/sh"));
-        return ModalForm(L($"添加{name}", $"Add {name}"), L("添加", "Add"), values =>
+        return Form(L($"添加{name}", $"Add {name}"), L("添加", "Add"), values =>
         {
             var title = values.Text("title", name);
             var data = kind switch
@@ -578,7 +589,7 @@ public sealed partial class ClientView
     }
 
     private Task EditTask(string spaceId, JsonObject item, JsonObject? task) =>
-        ModalForm(L("编辑待办", "Edit task"), L("保存", "Save"), values => UpdateTask(spaceId, item, task?.Text("id"), values.RequireText("text"), null),
+        Form(L("编辑待办", "Edit task"), L("保存", "Save"), values => UpdateTask(spaceId, item, task?.Text("id"), values.RequireText("text"), null),
             new Field("text", L("内容", "Text"), task.Text("text")));
 
     private Task UpdateTask(string spaceId, JsonObject item, string? id, string? title, bool? done)

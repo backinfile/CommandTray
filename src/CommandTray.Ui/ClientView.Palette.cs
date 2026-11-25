@@ -32,6 +32,15 @@ public sealed partial class ClientView
     private void HandleWindowKey(object? sender, KeyEventArgs args)
     {
         _lastInteraction = DateTimeOffset.UtcNow;
+        if (_actionOverlay.IsVisible)
+        {
+            if (args.Key == Key.Escape)
+            {
+                args.Handled = true;
+                CloseActionDialog();
+            }
+            return;
+        }
         if (args.Key == Key.K && args.KeyModifiers == KeyModifiers.Control && !_compact)
         {
             args.Handled = true;

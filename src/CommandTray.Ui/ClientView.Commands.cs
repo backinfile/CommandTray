@@ -17,6 +17,8 @@ public sealed partial class ClientView
     private bool _showCommandDetails;
     private string _logQuery = "";
     private int _logLevel;
+    private bool _followLogs = true;
+    private bool _wrapLogs = true;
 
     private async Task RenderCommandsAsync(CancellationToken token)
     {
@@ -31,15 +33,48 @@ public sealed partial class ClientView
         }
         var active = commands.FirstOrDefault(command => CommandId(command) == _commandSelection) ?? commands.FirstOrDefault();
         _commandSelection = active is null ? null : CommandId(active);
-        int running = commands.Count(command => command.Text("state").Equals("running", StringComparison.OrdinalIgnoreCase));
-        _contents.Children.Add(PageHeading(L("命令", "Commands"),
-            Muted(L($"{running} 个运行中 · {commands.Length} 个命令", $"{running} running · {commands.Length} commands")),
-            Row(IconButton("sync", L("刷新", "Refresh"), LoadAsync), create)));
+        var summary = Muted("");
+        var heading = PageHeading(L("命令", "Commands"), summary, Row(IconButton("sync", L("刷新", "Refresh"), LoadAsync), create));
+        var rows = new Dictionary<string, TextBlock>(StringComparer.Ordinal);
+        Action? refreshDetails = null;
+        var snapshots = commands.ToDictionary(CommandId, StringComparer.Ordinal);
+        UpdateSummary();
+        if (snapshots.Count > 0)
+        {
+            var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+            bool refreshing = false;
+            timer.Tick += async (_, _) =>
+            {
+                if (refreshing || token.IsCancellationRequested) return;
+                refreshing = true;
+                try
+                {
+                    var latest = await Execute("commands_list", [], token) as JsonArray ?? [];
+                    foreach (var entry in latest.OfType<JsonObject>())
+                    {
+                        var id = CommandId(entry);
+                        if (!snapshots.TryGetValue(id, out var command)) continue;
+                        command["state"] = entry["state"]?.DeepClone();
+                        command["processId"] = entry["processId"]?.DeepClone();
+                        if (rows.TryGetValue(id, out var state))
+                            state.Text = ServiceStateLabel(command.Text("state"));
+                    }
+                    UpdateSummary();
+                    refreshDetails?.Invoke();
+                }
+                catch (OperationCanceledException) when (token.IsCancellationRequested) { }
+                catch (Exception error) when (!token.IsCancellationRequested) { Report(error.Message); }
+                finally { refreshing = false; }
+            };
+            heading.AttachedToVisualTree += (_, _) => timer.Start();
+            heading.DetachedFromVisualTree += (_, _) => timer.Stop();
+        }
+        _contents.Children.Add(heading);
 
         if (_compact && _showCommandDetails && active is not null)
         {
             Header(L("命令", "Commands"), Action(L("返回", "Back"), async () => { _showCommandDetails = false; await LoadAsync(); }));
-            _contents.Children.Add(CommandDetails(active, token));
+            _contents.Children.Add(ShowDetails(active));
             return;
         }
 
@@ -50,15 +85,30 @@ public sealed partial class ClientView
         var left = WorkbenchPanel(L("命令列表", "Commands"), "terminal",
             new StackPanel { Children = { search, list } });
         var details = new ContentControl { HorizontalContentAlignment = HorizontalAlignment.Stretch };
-        details.Content = active is null ? EmptyState("terminal", L("暂无命令", "No commands")) : CommandDetails(active, token);
+        if (!_compact)
+            details.Content = active is null ? EmptyState("terminal", L("暂无命令", "No commands")) : ShowDetails(active);
         _contents.Children.Add(_compact ? left : WorkbenchSplit(left, details, "1*,1.75*"));
         search.TextChanged += (_, _) => { _commandQuery = search.Text ?? ""; DrawList(); };
         DrawList();
+
+        Control ShowDetails(JsonObject command)
+        {
+            var (panel, refresh) = CommandDetails(command, token);
+            refreshDetails = refresh;
+            return panel;
+        }
+
+        void UpdateSummary()
+        {
+            int running = commands.Count(IsCommandRunning);
+            summary.Text = L($"{running} 个运行中 · {commands.Length} 个命令", $"{running} running · {commands.Length} commands");
+        }
 
         void DrawList()
         {
             var query = _commandQuery.Trim();
             list.Children.Clear();
+            rows.Clear();
             foreach (var command in commands.Where(item => item.Text("name").Contains(query, StringComparison.CurrentCultureIgnoreCase) ||
                 item.Text("command").Contains(query, StringComparison.OrdinalIgnoreCase)))
             {
@@ -74,7 +124,7 @@ public sealed partial class ClientView
                     }
                     else
                     {
-                        details.Content = CommandDetails(command, token);
+                        details.Content = ShowDetails(command);
                         DrawList();
                     }
                 });
@@ -84,9 +134,11 @@ public sealed partial class ClientView
                     FontFamily = new FontFamily("monospace")
                 };
                 line.Classes.Add("muted");
+                var state = Muted(ServiceStateLabel(command.Text("state")));
+                rows[id] = state;
                 row.Content = new StackPanel { Spacing = 4, Children =
                 {
-                    TitleRow(Heading(command.Text("name")), Muted(ServiceStateLabel(command.Text("state")))), line
+                    TitleRow(Heading(command.Text("name")), state), line
                 }};
                 row.Classes.Add("workbench-list-row");
                 row.Classes.Set("selected", _commandSelection == id && !_compact);
@@ -100,6 +152,9 @@ public sealed partial class ClientView
 
     private static string CommandId(JsonObject command) => command.Text("id", command.Text("name"));
 
+    private static bool IsCommandRunning(JsonObject command) =>
+        command.Text("state").Equals("running", StringComparison.OrdinalIgnoreCase);
+
     private string ServiceStateLabel(string state) => state.ToLowerInvariant() switch
     {
         "running" => L("运行中", "Running"), "stopped" => L("已停止", "Stopped"),
@@ -107,20 +162,17 @@ public sealed partial class ClientView
         "faulted" or "failed" => L("异常", "Failed"), _ => state
     };
 
-    private Border CommandDetails(JsonObject command, CancellationToken pageCancellation)
+    private (Border Panel, Action RefreshStatus) CommandDetails(JsonObject command, CancellationToken pageCancellation)
     {
         var arguments = new JsonObject { ["id"] = CommandId(command) };
         var name = command.Text("name");
-        var serviceState = command.Text("state");
-        bool running = serviceState.Equals("running", StringComparison.OrdinalIgnoreCase);
-        bool busy = serviceState.Equals("starting", StringComparison.OrdinalIgnoreCase) ||
-                    serviceState.Equals("stopping", StringComparison.OrdinalIgnoreCase);
         bool attached = false;
+        bool changingState = false;
         var actions = Row();
-        var state = Muted(ServiceStateLabel(serviceState));
-        var lifecycle = PrimaryAction(running ? L("停止", "Stop") : L("启动", "Start"),
-            () => RunCommandAsync(running ? "command_stop" : "command_start"), running ? "stop" : "play");
-        lifecycle.IsEnabled = !busy;
+        var state = Muted("");
+        var processId = Muted("");
+        var lifecycle = PrimaryAction("", () => RunCommandAsync(IsCommandRunning(command) ? "command_stop" : "command_start"));
+        RefreshStatus();
         var choices = new List<(string Label, Func<Task> Action)>
         {
             (L("重启", "Restart"), () => RunCommandAsync("command_restart")),
@@ -137,7 +189,7 @@ public sealed partial class ClientView
             Children =
             {
                 SettingRow(L("工作目录", "Working directory"), state, command.Text("workingDirectory", "—")),
-                SettingRow(L("进程 ID", "Process ID"), Muted(command["processId"]?.ToString() ?? "—"))
+                SettingRow(L("进程 ID", "Process ID"), processId)
             }
         };
         var search = new TextBox { Text = _logQuery, PlaceholderText = L("搜索日志", "Search logs"), MinWidth = 138 };
@@ -148,10 +200,10 @@ public sealed partial class ClientView
             SelectedIndex = _logLevel
         };
         AutomationProperties.SetName(level, L("日志级别", "Log level"));
-        var follow = new CheckBox { Content = L("跟随", "Follow"), IsChecked = true };
-        var wrap = new CheckBox { Content = L("换行", "Wrap"), IsChecked = true };
+        var follow = new CheckBox { Content = L("跟随", "Follow"), IsChecked = _followLogs };
+        var wrap = new CheckBox { Content = L("换行", "Wrap"), IsChecked = _wrapLogs };
         var transcript = "";
-        var text = new TextBox { IsReadOnly = true, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap,
+        var text = new TextBox { IsReadOnly = true, AcceptsReturn = true, TextWrapping = _wrapLogs ? TextWrapping.Wrap : TextWrapping.NoWrap,
             FontFamily = new FontFamily("monospace"), MinHeight = 180, MaxHeight = 425 };
         text.Classes.Add("terminal");
         var status = Muted(L("正在加载…", "Loading…"));
@@ -167,16 +219,38 @@ public sealed partial class ClientView
         details.Children.Add(text);
         search.TextChanged += (_, _) => { _logQuery = search.Text ?? ""; DrawLog(); };
         level.SelectionChanged += (_, _) => { _logLevel = Math.Max(0, level.SelectedIndex); DrawLog(); };
-        wrap.IsCheckedChanged += (_, _) => text.TextWrapping = wrap.IsChecked == true ? TextWrapping.Wrap : TextWrapping.NoWrap;
+        follow.IsCheckedChanged += (_, _) => _followLogs = follow.IsChecked == true;
+        wrap.IsCheckedChanged += (_, _) =>
+        {
+            _wrapLogs = wrap.IsChecked == true;
+            text.TextWrapping = _wrapLogs ? TextWrapping.Wrap : TextWrapping.NoWrap;
+        };
         var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         var reading = false;
         timer.Tick += async (_, _) => { if (follow.IsChecked == true) await ReadLogAsync(); };
         details.AttachedToVisualTree += async (_, _) => { attached = true; timer.Start(); await ReadLogAsync(); };
         details.DetachedFromVisualTree += (_, _) => { attached = false; timer.Stop(); };
-        return WorkbenchPanel(name, "terminal", details, actions);
+        return (WorkbenchPanel(name, "terminal", details, actions), RefreshStatus);
+
+        void RefreshStatus()
+        {
+            if (changingState) return;
+            var serviceState = command.Text("state").ToLowerInvariant();
+            state.Text = ServiceStateLabel(serviceState);
+            processId.Text = command["processId"]?.ToString() ?? "—";
+            bool running = serviceState == "running";
+            string label = running ? L("停止", "Stop") : L("启动", "Start");
+            if (AutomationProperties.GetName(lifecycle) != label)
+            {
+                lifecycle.Content = IconLabel(running ? "stop" : "play", label);
+                AutomationProperties.SetName(lifecycle, label);
+            }
+            lifecycle.IsEnabled = serviceState is not ("starting" or "stopping");
+        }
 
         async Task RunCommandAsync(string operation)
         {
+            changingState = true;
             actions.IsEnabled = false;
             state.Text = operation switch
             {
@@ -186,9 +260,10 @@ public sealed partial class ClientView
             try { await Change(operation, arguments); }
             finally
             {
+                changingState = false;
                 if (attached)
                 {
-                    state.Text = ServiceStateLabel(serviceState);
+                    state.Text = ServiceStateLabel(command.Text("state"));
                     actions.IsEnabled = true;
                 }
             }

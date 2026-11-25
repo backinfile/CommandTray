@@ -70,6 +70,30 @@ public sealed class ProcessSupervisorTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task SuccessfulExitStopsWithoutFailureOrRestart()
+    {
+        var service = new ServiceDefinition
+        {
+            Name = "One-shot command",
+            Command = "exit /b 0",
+            WorkingDirectory = _directory,
+            RestartOnUnexpectedExit = true
+        };
+        var states = new List<ServiceState>();
+        var stopped = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _supervisor!.StateChanged += (_, snapshot) =>
+        {
+            states.Add(snapshot.State);
+            if (snapshot.State == ServiceState.Stopped) stopped.TrySetResult();
+        };
+
+        await _supervisor.StartAsync(service);
+        await stopped.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal(new[] { ServiceState.Starting, ServiceState.Running, ServiceState.Stopped }, states);
+        Assert.Null(_supervisor.GetSnapshot(service).Error);
+    }
+
+    [Fact]
     public async Task MissingWorkingDirectoryFailsWithoutStartingAnything()
     {
         var service = CreateService();

@@ -83,17 +83,7 @@ public sealed partial class ClientView
         await LoadAsync();
     }
 
-    private Task Confirm(string message, Func<Task> action)
-    {
-        _editing = true;
-        _contents.Children.Clear();
-        _viewport.Offset = default;
-        Header(message, Action(L("取消", "Cancel"), LoadAsync));
-        _contents.Children.Add(PrimaryAction(L("确认", "Confirm"), action));
-        return Task.CompletedTask;
-    }
-
-    private async Task CommandForm(JsonObject? command)
+    private Task CommandForm(JsonObject? command)
     {
         var fields = new List<Field>
         {
@@ -112,48 +102,65 @@ public sealed partial class ClientView
             fields.Add(new("restartOnUnexpectedExit", L("异常退出后重启", "Restart after unexpected exit"),
                 command.Flag("restartOnUnexpectedExit") ? "true" : "false", Toggle: true));
         }
-        await Form(L("命令配置", "Command configuration"), values =>
+        var environment = OperatingSystem.IsWindows() && command is not null
+            ? Action(L("环境变量", "Environment variables"), () => EnvironmentForm(command))
+            : null;
+        var title = command is null ? L("新建命令", "Add command") : L("编辑命令", "Edit command");
+        return ShowForm(title, L("保存", "Save"), L("正在保存…", "Saving…"), (values, _) =>
         {
             if (values.ContainsKey("stopTimeoutSeconds"))
-                values["stopTimeoutSeconds"] = int.Parse(values.RequireText("stopTimeoutSeconds"), CultureInfo.InvariantCulture);
+            {
+                if (!int.TryParse(values.Text("stopTimeoutSeconds"), NumberStyles.Integer, CultureInfo.InvariantCulture, out int seconds))
+                    throw new ArgumentException(L("停止等待秒数必须是整数。", "The stop timeout must be a whole number."));
+                values["stopTimeoutSeconds"] = seconds;
+            }
             var id = command.Text("id", command.Text("name"));
             if (id.Length > 0) values["id"] = id;
             return Change("command_save", values);
-        }, fields.ToArray());
-        if (OperatingSystem.IsWindows() && command is not null)
-            _contents.Children.Add(Action(L("环境变量", "Environment variables"), () => EnvironmentForm(command)));
+        }, fields.ToArray(), environment);
     }
 
     private Task EnvironmentForm(JsonObject command)
     {
-        var entries = command.Array("environment").OfType<JsonObject>().ToArray();
-        _editing = true;
-        _contents.Children.Clear();
-        Header(L("环境变量", "Environment variables"), Action("+", () => EditVariable(null),
-            L("添加变量", "Add variable")), Action(L("返回", "Back"), () => CommandForm(command)));
-        foreach (var entry in entries)
-        {
-            _contents.Children.Add(Section(TitleRow(Heading(entry.Text("name")), Menu("⋯",
-                (L("编辑", "Edit"), () => EditVariable(entry)),
-                (L("删除", "Delete"), () => Confirm(L("删除变量？", "Delete this variable?"),
-                    () => SaveVariables(entries.Where(other => other != entry))))))));
-        }
+        var list = new StackPanel();
+        var back = CloseActionButton(L("返回", "Back"));
+        var add = PrimaryAction(L("添加变量", "Add variable"), () => EditVariable(null), "plus");
+        DrawVariables();
+        OpenActionDialog(L("环境变量", "Environment variables"), list, Row(back, add), add);
         return Task.CompletedTask;
+
+        IEnumerable<JsonObject> Entries() => command.Array("environment").OfType<JsonObject>();
+
+        void DrawVariables()
+        {
+            list.Children.Clear();
+            foreach (var entry in Entries())
+                list.Children.Add(Section(TitleRow(Heading(entry.Text("name")), Menu("⋯",
+                    (L("编辑", "Edit"), () => EditVariable(entry)),
+                    (L("删除", "Delete"), () => Confirm(L("删除变量？", "Delete this variable?"),
+                        () => SaveVariables(Entries().Where(other => other != entry))))))));
+            if (list.Children.Count == 0) list.Children.Add(Muted(L("暂无变量", "No variables")));
+        }
 
         Task EditVariable(JsonObject? entry) => Form(L("环境变量", "Environment variable"), values =>
         {
             var value = values.Text("value");
             if (values.Flag("isSecret") && entry?.Flag("isSecret") == true && value.Length == 0) values["value"] = null;
-            return SaveVariables(entries.Where(other => other != entry).Append(values));
+            return SaveVariables(Entries().Where(other => other != entry).Append(values));
         }, new Field("name", L("名称", "Name"), entry.Text("name")),
             new Field("value", L("值", "Value"), entry.Flag("isSecret") ? "" : entry.Text("value"), Secret: true),
             new Field("isSecret", L("加密保存", "Encrypt on this device"), entry.Flag("isSecret") ? "true" : "false", Toggle: true));
 
-        Task SaveVariables(IEnumerable<JsonObject> variables) => Change("command_save", new()
+        async Task SaveVariables(IEnumerable<JsonObject> variables)
         {
-            ["id"] = command.Text("id"), ["name"] = command.Text("name"), ["command"] = command.Text("command"),
-            ["environment"] = new JsonArray(variables.Select(variable => variable.DeepClone()).ToArray())
-        });
+            var saved = await Execute("command_save", new()
+            {
+                ["id"] = command.Text("id"),
+                ["environment"] = new JsonArray(variables.Select(variable => variable.DeepClone()).ToArray())
+            }, CurrentActionCancellation);
+            command["environment"] = saved.Array("environment").DeepClone();
+            DrawVariables();
+        }
     }
 
     private static string HostAddress(JsonObject host) => $"{host.Text("username")}@{host.Text("address")}:{host.Integer("port", 22)}";
@@ -171,15 +178,28 @@ public sealed partial class ClientView
 
     private async Task ShowKeysAsync()
     {
-        var keys = await Execute("ssh_keys", []) as JsonArray ?? [];
-        _contents.Children.Clear();
-        Header(L("SSH 密钥", "SSH keys"), Action(L("返回", "Back"), LoadAsync));
-        foreach (var key in keys)
+        var initial = await Execute("ssh_keys", [], _loading?.Token ?? CancellationToken.None) as JsonArray ?? [];
+        if (_actionOverlay.IsVisible) return;
+        var list = new StackPanel();
+        var back = CloseActionButton(L("返回", "Back"));
+        DrawKeys(initial);
+        OpenActionDialog(L("SSH 密钥", "SSH keys"), list, Row(back), back);
+
+        void DrawKeys(JsonArray keys)
         {
-            var id = key.Text("id");
-            _contents.Children.Add(Section(TitleRow(Heading(key.Text("name", id)),
-                Action(L("删除", "Delete"), () => Confirm(L("删除密钥？", "Delete key?"),
-                    () => Change("ssh_key_delete", new() { ["id"] = id }))))));
+            list.Children.Clear();
+            foreach (var key in keys)
+            {
+                var id = key.Text("id");
+                list.Children.Add(Section(TitleRow(Heading(key.Text("name", id)),
+                    Action(L("删除", "Delete"), () => Confirm(L("删除密钥？", "Delete key?"), async () =>
+                    {
+                        await Change("ssh_key_delete", new() { ["id"] = id });
+                        var current = await Execute("ssh_keys", [], CurrentActionCancellation) as JsonArray ?? [];
+                        DrawKeys(current);
+                    })))));
+            }
+            if (list.Children.Count == 0) list.Children.Add(Muted(L("暂无密钥", "No keys")));
         }
     }
 

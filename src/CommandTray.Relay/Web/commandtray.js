@@ -41,7 +41,9 @@ try { device = JSON.parse(sessionStorage.getItem(sessionKey)); } catch {}
 let page = "workspace", group = "all", workspace = null, selected = null;
 let files = [], history = [], devices = [], pinnedClips = new Map();
 let fileQuery = "", fileFolder = "", clipQuery = "", clipSource = "", clipSelection = null;
-let collapsed = false, loading = false, navigation = 0, pageRequest, feedbackTimer, transfer, conflict;
+let collapsed = false, loading = false, navigation = 0, pageRequest, feedbackTimer, conflict;
+const transfers = [];
+let activeTransfer = null;
 let pendingWrite = Promise.resolve();
 let clientDatabase;
 let conflictPersisted = false;
@@ -105,8 +107,10 @@ function setDevice(value) {
 function dropDevice() {
   navigation++;
   pageRequest?.abort();
-  transfer?.xhr?.abort();
-  transfer = null;
+  const previousTransfer = activeTransfer;
+  activeTransfer = null;
+  transfers.length = 0;
+  previousTransfer?.xhr?.abort();
   if (device && conflict) clearConflict(device).catch(() => {});
   setDevice(null);
   workspace = null;
@@ -293,8 +297,9 @@ function renderWorkspace() {
     tasks.length ? `${tasks.filter(task=>task.completed).length} / ${tasks.length} 项待办已完成` : "");
   const notice = conflict ? `<div class="toolbar conflict"><span>同步冲突</span>${button("比较版本", "compare-conflict", true)}</div>` : "";
   if (!space) return header + notice + empty("暂无空间");
-  const tabs = `<div class="tabs" role="tablist" aria-label="工作区组件">${groups.map(([kind,label,icon]) =>
-    `<button class="tab" type="button" role="tab" data-action="group:${kind}" aria-selected="${group === kind}">${svg(icon)}${label}</button>`).join("")}</div>`;
+  const tabs = `<div id="workspace-tabs" class="tabs" role="tablist" aria-label="工作区组件">${groups.map(([kind,label,icon]) =>
+    `<button id="workspace-tab-${kind}" class="tab" type="button" role="tab" data-action="group:${kind}"
+      aria-selected="${group === kind}" aria-controls="workspace-panel" tabindex="${group === kind ? 0 : -1}">${svg(icon)}${label}</button>`).join("")}</div>`;
   const items = (space.items ?? []).filter(item => groups.some(([id])=>id===category(item.kind)) && (group === "all" || category(item.kind) === group));
   const tiles = items.map(item => {
     const data = item.data ?? {};
@@ -314,7 +319,8 @@ function renderWorkspace() {
     }
     return surface(name, button("导出 PNG", "board-export:" + item.id) + remove, boardMarkup(item.id, name), "tile-board");
   }).join("");
-  return header + tabs + notice + (tiles ? `<div class="workbench ${group==="all"?"":"single"}">${tiles}</div>` : empty("暂无组件"));
+  return header + tabs + notice + `<div id="workspace-panel" role="tabpanel" aria-labelledby="workspace-tab-${group}">${tiles ?
+    `<div class="workbench ${group==="all"?"":"single"}">${tiles}</div>` : empty("暂无组件")}</div>`;
 }
 
 function same(first, second) { return JSON.stringify(first) === JSON.stringify(second); }
@@ -341,6 +347,16 @@ function edits(before, after, path = [], result = [], hadBefore = true, hasAfter
   }
 }
 
+function redrawWorkspace() {
+  const focused = document.activeElement;
+  const { item, task, action } = focused?.dataset ?? {};
+  render();
+  if (task)
+    document.querySelector(`input[data-item="${CSS.escape(item)}"][data-task="${CSS.escape(task)}"]`)?.focus({preventScroll:true});
+  else if (action?.startsWith("edit-task:") || action?.startsWith("group:"))
+    document.querySelector(`[data-action="${CSS.escape(action)}"]`)?.focus({preventScroll:true});
+}
+
 function writeWorkspace(change, redraw = true) {
   const section = selected;
   const identity = device;
@@ -356,11 +372,11 @@ function writeWorkspace(change, redraw = true) {
       const response = await request("workspace/changes", { method: "PATCH", body: { baseRevision: revision, operationId: uuid(), changes } });
       if (device !== identity) return;
       acceptWorkspace(await response.json());
-      if (redraw && page === "workspace" && !loading) render();
+      if (redraw && page === "workspace" && !loading) redrawWorkspace();
     } catch (error) {
       if (!(error instanceof WorkspaceConflict) || device !== identity) throw error;
       const saved = await saveConflict({ local:updated, remote:error.snapshot }, identity);
-      if (device === identity && page === "workspace" && !loading) render();
+      if (device === identity && page === "workspace" && !loading) redrawWorkspace();
       throw new Error(saved ? "未提交的修改已保留，请比较冲突版本。" : "无法保存草稿，请在刷新前比较版本并导出。");
     }
   });
@@ -485,24 +501,37 @@ function renderSettings() {
 }
 
 const field = (label, control) => `<label class="field">${escape(label)}${control}</label>`;
-const input = (label,value="",maxlength=120) => field(label,
-  `<input name="text" value="${escape(value)}" maxlength="${maxlength}" autocomplete="off" required>`);
-const textarea = (label,value="") => field(label, `<textarea name="text" maxlength="1000000" required>${escape(value)}</textarea>`);
-function showDialog(title, content) {
+const input = (label,value="",maxlength=120,required=true) => field(label,
+  `<input name="text" value="${escape(value)}" maxlength="${maxlength}" autocomplete="off"${required ? " required" : ""}>`);
+const textarea = (label,value="",required=true) => field(label,
+  `<textarea name="text" maxlength="1000000"${required ? " required" : ""}>${escape(value)}</textarea>`);
+function showDialog(title, content, mode = "action") {
+  const dialog = el("dialog");
+  dialog.dataset.mode = mode;
   el("dialog-title").textContent = title;
   el("dialog-content").innerHTML = content;
-  if (!el("dialog").open) el("dialog").showModal();
+  el("dialog-close").disabled = false;
+  if (!dialog.open) dialog.showModal();
+  el("dialog-content").querySelector("input, textarea, select, [data-action='close-dialog']")?.focus();
 }
+const dialogPending = () => el("dialog").querySelector("form[data-pending]") !== null;
+function closeUserDialog() { if (!dialogPending()) el("dialog").close(); }
+
 function modal(title, description, fields, submit, action) {
   showDialog(title, `<form>${description ? `<p class="dialog-description">${escape(description)}</p>` : ""}${fields}
-    <div class="actions"><button type="submit" class="primary">${escape(submit)}</button></div><p class="form-status" role="status"></p></form>`);
+    <div class="actions">${button("取消", "close-dialog")}<button type="submit" class="primary">${escape(submit)}</button></div><p class="form-status" role="status"></p></form>`);
   const form = el("dialog-content").querySelector("form");
   form.addEventListener("submit", async event => {
     event.preventDefault();
     const submitButton = form.querySelector("button[type=submit]");
     if (submitButton.disabled) return;
+    const cancelButton = form.querySelector("[data-action='close-dialog']");
+    const closeButton = el("dialog-close");
     const feedback = form.querySelector(".form-status");
+    form.dataset.pending = "";
     submitButton.disabled = true;
+    cancelButton.disabled = true;
+    closeButton.disabled = true;
     const label = submitButton.textContent;
     submitButton.textContent = "正在处理…";
     feedback.classList.remove("error");
@@ -514,12 +543,20 @@ function modal(title, description, fields, submit, action) {
       feedback.classList.add("error");
       feedback.textContent = failure.message;
     } finally {
+      delete form.dataset.pending;
       submitButton.disabled = false;
+      cancelButton.disabled = false;
+      if (form.isConnected) closeButton.disabled = false;
       submitButton.textContent = label;
     }
   });
 }
 const itemWithId = id => selectedSpace()?.items?.find(item=>item.id===id);
+function taskText(values) {
+  const text = values.get("text").trim();
+  if (!text) throw new Error("请输入待办内容。");
+  return text;
+}
 function compareConflict() {
   if (!conflict) return;
   const summary = document => document.spaces.map(space => `<div class="version-space"><strong>${escape(space.name)}</strong>${
@@ -540,33 +577,54 @@ function downloadBlob(blob, name) {
   setTimeout(()=>URL.revokeObjectURL(url),30_000);
 }
 function transferMarkup() {
-  if (!transfer) return "";
-  const job = transfer;
-  const busy = job.state === "running" || job.state === "verifying";
-  const actions = job.state==="running"?button("取消","transfer-cancel"):
-    job.state==="cancelled"||job.state==="failed"?button("重试","transfer-retry"):
-    job.state==="done"?button("关闭","transfer-dismiss"):"";
-  const labels = {running:job.upload?"正在上传…":"正在下载…",verifying:"正在校验…",done:job.upload?"上传完成":"已交给浏览器下载",
-    cancelled:"已取消",failed:job.error};
-  return surface("传输队列",actions,`<div class="body transfer-body"><strong>${escape(job.name)}</strong><small>${escape(labels[job.state])}
-    <span id="transfer-percent"></span></small>${busy?'<progress id="transfer-progress" aria-label="传输进度" max="100"></progress>':""}</div>`,"transfer");
+  if (!transfers.length) return "";
+  const rows = transfers.map(job => {
+    const busy = job.state === "running" || job.state === "verifying";
+    const retryable = job.state === "cancelled" || job.state === "failed";
+    const dismiss = button("关闭", "transfer-dismiss:" + job.id);
+    const actions = job.state === "running" || job.state === "queued" ? button("取消", "transfer-cancel:" + job.id) :
+      retryable ? button("重试", "transfer-retry:" + job.id) + dismiss : job.state === "done" ? dismiss : "";
+    const labels = {queued:"排队中",running:job.upload?"正在上传…":"正在下载…",verifying:"正在校验…",
+      done:job.upload?"上传完成":"已交给浏览器下载",cancelled:"已取消",failed:job.error};
+    const percent = transferPercent(job);
+    const progress = !busy ? "" : `<progress aria-label="传输进度" max="100"${percent === null ? "" : ` value="${percent}"`}></progress>`;
+    return `<div class="setting-row transfer-job" id="transfer-${job.id}"><div class="transfer-body"><strong>${escape(job.name)}</strong>
+      <small>${escape(labels[job.state])}<span class="transfer-percent">${busy && percent !== null ? " " + percent + "%" : ""}</span></small>
+      ${progress}</div><div class="actions">${actions}</div></div>`;
+  });
+  return surface("传输队列", "", rows.join(""), "transfer");
 }
-function drawTransfer() {
-  if (!el("transfer-queue")) return;
-  el("transfer-queue").innerHTML = transferMarkup();
-  drawTransferProgress();
+function drawTransfers() {
+  const queue = el("transfer-queue");
+  if (queue) queue.innerHTML = transferMarkup();
 }
-function drawTransferProgress() {
-  const progress = el("transfer-progress");
-  if (!progress || !(transfer?.total > 0)) return;
-  progress.value = Math.min(100, 100 * transfer.loaded / transfer.total);
-  el("transfer-percent").textContent = " " + Math.round(progress.value) + "%";
+function transferPercent(job) {
+  return job.total > 0 ? Math.min(100, Math.round(100 * job.loaded / job.total)) : null;
 }
-function startTransfer(spec) {
-  if (transfer?.state==="running"||transfer?.state==="verifying") throw new Error("已有传输正在进行。");
+function drawTransferProgress(job) {
+  const row = el("transfer-" + job.id);
+  const progress = row?.querySelector("progress");
+  const percent = transferPercent(job);
+  if (!progress || percent === null) return;
+  progress.value = percent;
+  row.querySelector(".transfer-percent").textContent = " " + percent + "%";
+}
+function enqueueTransfer(spec) {
+  transfers.push({...spec, id:uuid(), state:"queued", loaded:0});
+  advanceTransfers();
+}
+function advanceTransfers() {
+  const next = !activeTransfer && device && transfers.find(job => job.state === "queued");
+  if (next) startTransfer(next);
+  else drawTransfers();
+}
+function startTransfer(job) {
   const identity = device;
   const xhr = new XMLHttpRequest();
-  const job = transfer = {...spec, state:"running", xhr, loaded:0};
+  activeTransfer = job;
+  job.state = "running";
+  job.xhr = xhr;
+  job.loaded = 0;
   xhr.open(job.upload ? "POST" : "GET", "/v1/" + job.path);
   xhr.setRequestHeader(versionHeader, clientVersion);
   xhr.setRequestHeader("Authorization", "Bearer " + identity.token);
@@ -576,19 +634,24 @@ function startTransfer(spec) {
   const update = event => {
     job.loaded = event.loaded;
     if (event.lengthComputable) job.total = event.total;
-    if (transfer === job) drawTransferProgress();
+    if (activeTransfer === job) drawTransferProgress(job);
   };
   (job.upload?xhr.upload:xhr).addEventListener("progress", update);
   function finish(state, error) {
+    if (activeTransfer !== job || device !== identity) return;
     job.state = state;
     job.error = error;
-    if (transfer === job && device === identity) drawTransfer();
+    if (state === "verifying") { drawTransfers(); return; }
+    job.xhr = null;
+    if (state === "done") job.file = null;
+    activeTransfer = null;
+    advanceTransfers();
   }
   xhr.addEventListener("abort",()=>finish("cancelled"));
   xhr.addEventListener("timeout",()=>finish("failed","传输超时。"));
   xhr.addEventListener("error",()=>finish("failed","中转连接中断。"));
   xhr.addEventListener("load",async () => {
-    if (device !== identity) return;
+    if (device !== identity || activeTransfer !== job) return;
     if (xhr.status===401) { dropDevice(); report("配对已失效，请重新连接。",true); return; }
     if (xhr.status<200||xhr.status>=300) {
       finish("failed",xhr.status===413 ? "文件超过 128 MiB。" : "传输失败（"+xhr.status+"）。");
@@ -603,15 +666,16 @@ function startTransfer(spec) {
         const digest = await crypto.subtle.digest("SHA-256",await blob.arrayBuffer());
         const hash = Array.from(new Uint8Array(digest),value=>value.toString(16).padStart(2,"0")).join("");
         if (hash!==job.sha.toLowerCase()) throw new Error("文件校验失败。");
-        if (device !== identity) return;
+        if (device !== identity || activeTransfer !== job) return;
         downloadBlob(blob, job.name);
       }
       finish("done");
       if (job.upload && page==="files") await open("files");
     } catch (error) { finish("failed",error.message); }
   });
-  drawTransfer();
-  xhr.send(job.upload ? job.file : null);
+  drawTransfers();
+  try { xhr.send(job.upload ? job.file : null); }
+  catch (failure) { finish("failed", failure.message); }
 }
 
 function search() {
@@ -620,7 +684,7 @@ function search() {
     ...(workspace?.document?.spaces??[]).map(space=>({label:space.name,space:space.id,scope:"空间"})),
     ...groups.slice(1).map(([id,label])=>({label,action:"group:"+id,scope:"组件"}))
   ];
-  showDialog("快速查找",'<input id="search-query" type="search" placeholder="搜索页面、空间和组件" aria-label="快速查找"><div id="search-results" class="search-results"></div>');
+  showDialog("快速查找",'<input id="search-query" type="search" placeholder="搜索页面、空间和组件" aria-label="快速查找"><div id="search-results" class="search-results"></div>', "search");
   const query = el("search-query"), list = el("search-results");
   let focus = 0;
   function draw() {
@@ -652,8 +716,10 @@ async function perform(operation, argument) {
     case "refresh": return open(page);
     case "group":
       group = argument;
-      if (page !== "workspace") return open("workspace");
-      render(); return;
+      if (page !== "workspace") await open("workspace");
+      else render();
+      el("workspace-tabs")?.querySelector('[aria-selected="true"]')?.focus();
+      return;
     case "new-space": return modal("新建空间", "", input("名称"), "创建", async values => {
       const id = uuid(), name = values.get("text").trim();
       if (!name) throw new Error("请输入空间名称。");
@@ -676,24 +742,30 @@ async function perform(operation, argument) {
     }
     case "remove-item": return modal("移除组件", itemWithId(argument)?.title, "", "移除", () =>
       writeWorkspace((_,space)=>{space.items=space.items.filter(item=>item.id!==argument);}));
-    case "edit": return modal("编辑便签", "", textarea("正文",itemWithId(argument).data?.text), "保存", values =>
+    case "edit": return modal("编辑便签", "", textarea("正文",itemWithId(argument).data?.text,false), "保存", values =>
       writeWorkspace((_, space) => { (space.items.find(item => item.id === argument).data ??= {}).text = values.get("text"); }));
-    case "add-task": return modal("新增待办", "", input("内容", "", 500), "添加", values =>
-      writeWorkspace((_, space) => {
+    case "add-task": return modal("新增待办", "", input("内容", "", 500), "添加", values => {
+      const text = taskText(values);
+      return writeWorkspace((_, space) => {
         const item = space.items.find(item => item.id === argument);
-        ((item.data ??= {}).tasks ??= []).push({ id:uuid(),text:values.get("text").trim(),completed:false });
-      }));
+        ((item.data ??= {}).tasks ??= []).push({ id:uuid(),text,completed:false });
+      });
+    });
     case "edit-task": {
       const [itemId, taskId] = argument.split("/");
       const task = itemWithId(itemId)?.data?.tasks?.find(entry=>entry.id===taskId);
       if (!task) return;
-      return modal("编辑待办", "", input("内容", task.text, 500) +
+      return modal("编辑待办", "", input("内容", task.text, 500, false) +
         field("操作", '<select name="mode"><option value="save">保存</option><option value="remove">删除此任务</option></select>'),
-        "确认", values => writeWorkspace((_,space) => {
-          const data=space.items.find(item=>item.id===itemId).data;
-          if (values.get("mode")==="remove") data.tasks=data.tasks.filter(entry=>entry.id!==taskId);
-          else data.tasks.find(entry=>entry.id===taskId).text=values.get("text").trim();
-        }));
+        "确认", values => {
+          const remove = values.get("mode") === "remove";
+          const text = remove ? null : taskText(values);
+          return writeWorkspace((_,space) => {
+            const data=space.items.find(item=>item.id===itemId).data;
+            if (remove) data.tasks=data.tasks.filter(entry=>entry.id!==taskId);
+            else data.tasks.find(entry=>entry.id===taskId).text=text;
+          });
+        });
     }
     case "board-export": exportWorkspaceBoard(argument); return;
     case "compare-conflict": compareConflict(); return;
@@ -723,16 +795,36 @@ async function perform(operation, argument) {
         const file = values.get("file");
         if (file.size > 128 * 1048576) throw new Error("文件超过 128 MiB。");
         const query = new URLSearchParams({ name:file.name, folder:values.get("folder") });
-        startTransfer({upload:true,file,name:file.name,path:"files?"+query,total:file.size});
+        enqueueTransfer({upload:true,file,name:file.name,path:"files?"+query,total:file.size});
       });
     case "download": {
       const file=files.find(item=>item.id===argument);
-      if (file) startTransfer({upload:false,path:"files/"+encodeURIComponent(file.id),name:file.name,size:file.size,total:file.size,sha:file.sha256});
+      if (file) enqueueTransfer({upload:false,path:"files/"+encodeURIComponent(file.id),name:file.name,size:file.size,total:file.size,sha:file.sha256});
       return;
     }
-    case "transfer-cancel": transfer?.xhr?.abort(); return;
-    case "transfer-retry": if (transfer) startTransfer(transfer); return;
-    case "transfer-dismiss": transfer=null; drawTransfer(); return;
+    case "transfer-cancel":
+    case "transfer-retry":
+    case "transfer-dismiss": {
+      const index = transfers.findIndex(job => job.id === argument);
+      if (index < 0) return;
+      const job = transfers[index];
+      const retryable = job.state === "cancelled" || job.state === "failed";
+      if (operation === "transfer-cancel" && job.state === "running") job.xhr?.abort();
+      else if (operation === "transfer-cancel" && job.state === "queued") {
+        job.state = "cancelled";
+        drawTransfers();
+      } else if (operation === "transfer-retry" && retryable) {
+        transfers.splice(index, 1);
+        job.state = "queued";
+        job.loaded = 0;
+        transfers.push(job);
+        advanceTransfers();
+      } else if (operation === "transfer-dismiss" && (retryable || job.state === "done")) {
+        transfers.splice(index, 1);
+        drawTransfers();
+      }
+      return;
+    }
     case "remove-file": return modal("删除共享文件", files.find(file => file.id === argument)?.name, "", "删除", async () => {
       await request("files/" + encodeURIComponent(argument), { method:"DELETE" });
       await open("files");
@@ -764,13 +856,15 @@ async function perform(operation, argument) {
   }
 }
 
-el("dialog-close").addEventListener("click", () => el("dialog").close());
+el("dialog-close").addEventListener("click", closeUserDialog);
+el("dialog").addEventListener("cancel", event => { if (dialogPending()) event.preventDefault(); });
 document.body.addEventListener("click", async event => {
   const control = event.target.closest("button");
   if (!control || control.disabled) return;
   if (control.dataset.palette) el("dialog").close();
   try {
-    if (control.dataset.page) await open(control.dataset.page);
+    if (control.dataset.action === "close-dialog") closeUserDialog();
+    else if (control.dataset.page) await open(control.dataset.page);
     else if (control.dataset.space) {
       selected = control.dataset.space;
       group = "all";
@@ -793,23 +887,39 @@ document.body.addEventListener("change", async event => {
   else if (control.id==="file-folder") { fileFolder=control.value; el("file-rows").innerHTML=fileRows(); }
   else if (control.id==="clip-source") { clipSource=control.value; refreshClips(); }
   else if (control.dataset.task) {
-    control.disabled = true;
+    if (control.hasAttribute("aria-disabled")) { control.checked = !control.checked; return; }
+    const checked = control.checked;
+    control.setAttribute("aria-disabled", "true");
     try {
       await writeWorkspace((_, space) => {
         const task = space.items.find(item => item.id === control.dataset.item).data.tasks.find(task => task.id === control.dataset.task);
-        task.completed = control.checked;
+        task.completed = checked;
       });
     } catch (failure) {
-      control.checked = !control.checked;
+      control.checked = !checked;
       report(failure.message,true);
-    } finally { control.disabled = false; }
+    } finally { control.removeAttribute("aria-disabled"); }
   }
 });
 document.addEventListener("keydown",event=>{
-  if (!device || !(event.ctrlKey || event.metaKey)) return;
+  if (!device) return;
+  const focusedTab = event.target.closest?.("#workspace-tabs [role=tab]");
+  if (focusedTab && !event.altKey && !event.ctrlKey && !event.metaKey &&
+      ["ArrowLeft","ArrowRight","Home","End"].includes(event.key)) {
+    event.preventDefault();
+    const tabs = [...el("workspace-tabs").querySelectorAll("[role=tab]")];
+    const current = tabs.indexOf(focusedTab);
+    const next = event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1 :
+      (current + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length;
+    tabs[next].click();
+    return;
+  }
+  if (!(event.ctrlKey || event.metaKey)) return;
   if (event.key.toLowerCase()==="k") {
     event.preventDefault();
-    if (el("dialog").open) el("dialog").close();
+    if (el("dialog").open) {
+      if (el("dialog").dataset.mode === "search") closeUserDialog();
+    }
     else search();
   }
 });

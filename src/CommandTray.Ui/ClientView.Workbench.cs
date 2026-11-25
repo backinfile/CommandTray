@@ -147,6 +147,7 @@ public sealed partial class ClientView
 
     private async Task ImportConfigurationAsync()
     {
+        var cancellation = _loading?.Token ?? CancellationToken.None;
         var files = await RequireTopLevel().StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
         {
             FileTypeFilter = [new FilePickerFileType("JSON") { Patterns = ["*.json"] }]
@@ -154,21 +155,19 @@ public sealed partial class ClientView
         if (files.FirstOrDefault() is not { } selected) return;
         if (selected.TryGetLocalPath() is not string path) throw new IOException(L("无法读取此文件。", "Could not read this file."));
         var arguments = new JsonObject { ["path"] = path };
-        var envelope = await Execute("configuration_preview", arguments);
+        cancellation.ThrowIfCancellationRequested();
+        var envelope = await Execute("configuration_preview", arguments, cancellation);
         var preview = envelope.Array("services");
         arguments["sha256"] = envelope.Text("sha256");
-        _editing = true;
-        _contents.Children.Clear();
-        _viewport.Offset = default;
-        Header(L("导入服务配置", "Import service configuration"), Action(L("取消", "Cancel"), LoadAsync));
-        var commands = new StackPanel { Spacing = 6, Margin = new Thickness(13) };
+        var commands = new StackPanel { Spacing = 6 };
         commands.Children.Add(Body(L("导入会备份并替换当前服务配置。", "Import backs up and replaces the current service configuration.")));
+        commands.Children.Add(Heading(L($"{preview.Count} 条服务配置", $"{preview.Count} service definitions")));
         foreach (var name in preview.OfType<JsonValue>()) commands.Children.Add(Muted(name.GetValue<string>()));
-        _contents.Children.Add(WorkbenchPanel(L($"{preview.Count} 条服务配置", $"{preview.Count} service definitions"), "folder-open", commands,
-            PrimaryAction(L("备份并导入", "Back up and import"), async () =>
-            {
-                await Change("configuration_import", arguments);
-                Report(L("服务配置已导入", "Service configuration imported"));
-            })));
+        await ShowForm(L("导入服务配置", "Import service configuration"), L("备份并导入", "Back up and import"),
+            L("正在导入…", "Importing…"), async (_, _) =>
+        {
+            await Change("configuration_import", arguments);
+            Report(L("服务配置已导入", "Service configuration imported"));
+        }, [], commands);
     }
 }

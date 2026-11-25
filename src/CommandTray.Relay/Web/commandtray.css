@@ -121,7 +121,7 @@ tbody tr:last-child td { border-bottom: 0 }
 .setting-row { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:12px 14px; border-bottom:1px solid var(--line) }
 .setting-row:last-child { border-bottom:0 }
 .transfer { margin-bottom:13px }
-.transfer-body { display:grid; gap:5px }
+.transfer-body { display:grid; gap:5px; min-width:0; overflow-wrap:anywhere }
 .empty { padding:16px 13px }
 .search-results { display:grid; margin-top:8px; max-height:44dvh; overflow:auto }
 .search-results small { margin-left:auto }

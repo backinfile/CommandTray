@@ -25,15 +25,25 @@ public sealed partial class ClientView
         var capture = PrimaryAction(L("区域截图", "Capture region"), () => Change("capture_select", []), "capture");
         var record = Action(isRecording ? L("结束录屏", "Stop recording") : L("开始录屏", "Record screen"),
             () => Change(isRecording ? "capture_record_stop" : "capture_record_start", []), glyph: isRecording ? "stop" : "play");
+        Field[] coordinates =
+        [
+            new("x", "X"), new("y", "Y"), new("width", L("宽", "Width")), new("height", L("高", "Height"))
+        ];
         var more = Menu("⋯",
             (L("全屏截图", "Capture full screen"), () => Change("capture_take", [])),
             (L("输入区域坐标", "Enter region coordinates"), () => Form(L("区域截图", "Region capture"), values =>
             {
                 var area = new JsonObject();
-                foreach (var key in new[] { "x", "y", "width", "height" })
-                    area[key] = int.Parse(values.RequireText(key), CultureInfo.InvariantCulture);
+                foreach (var field in coordinates)
+                {
+                    if (!int.TryParse(values.Text(field.Key), NumberStyles.Integer, CultureInfo.InvariantCulture, out int value))
+                        throw new ArgumentException(L($"{field.Label} 必须是整数。", $"{field.Label} must be a whole number."));
+                    if ((field.Key is "width" or "height") && value <= 0)
+                        throw new ArgumentException(L($"{field.Label} 必须大于 0。", $"{field.Label} must be greater than zero."));
+                    area[field.Key] = value;
+                }
                 return Change("capture_take", area);
-            }, new Field("x", "X"), new Field("y", "Y"), new Field("width", L("宽", "Width")), new Field("height", L("高", "Height")))));
+            }, coordinates)));
         var heading = PageHeading(L("屏幕捕获", "Screen capture"),
             Muted(isRecording ? L("正在录制", "Recording") : L($"{captures.Length} 项", $"{captures.Length} captures")),
             _compact ? null : Row(capture, record, more));

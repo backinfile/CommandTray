@@ -27,11 +27,14 @@ public sealed partial class ClientView : UserControl
     private readonly TextBlock _status;
     private readonly Border _workspaceGrid;
     private readonly Border _paletteOverlay;
+    private readonly Border _actionOverlay;
     private readonly List<TerminalTile> _terminals = [];
     private readonly DispatcherTimer _terminalTimer;
     private readonly DispatcherTimer _workspaceTimer;
     private string _page = "workspace";
     private string? _spaceId;
+    private string? _requestedSpaceId;
+    private string? _observedActiveSpaceId;
     private string? _componentId;
     private bool _compact = true;
     private bool _english = !CultureInfo.CurrentUICulture.Name.StartsWith("zh", StringComparison.OrdinalIgnoreCase);
@@ -61,6 +64,7 @@ public sealed partial class ClientView : UserControl
         _status = this.FindControl<TextBlock>("StatusLine")!;
         _workspaceGrid = this.FindControl<Border>("WorkspaceGrid")!;
         _paletteOverlay = this.FindControl<Border>("PaletteOverlay")!;
+        _actionOverlay = this.FindControl<Border>("ActionOverlay")!;
         _paletteOverlay.PointerPressed += (_, args) =>
         {
             if (ReferenceEquals(args.Source, _paletteOverlay)) ClosePalette();
@@ -109,6 +113,7 @@ public sealed partial class ClientView : UserControl
         {
             if (_backHost is { } host) host.BackRequested -= HandleAndroidBack;
             _backHost = null;
+            CloseActionDialogs();
             ClosePalette(restoreFocus: false);
             _loading?.Cancel();
             foreach (var transfer in _transfers) transfer.Cancellation?.Cancel();
@@ -124,6 +129,7 @@ public sealed partial class ClientView : UserControl
     private void HandleAndroidBack(object? sender, Avalonia.Interactivity.RoutedEventArgs args)
     {
         if (_openMenu is { IsOpen: true } menu) menu.Hide();
+        else if (_actionOverlay.IsVisible) CloseActionDialog();
         else if (_toolbar.Children.OfType<ComboBox>().FirstOrDefault() is { IsDropDownOpen: true } picker)
             picker.IsDropDownOpen = false;
         else if (_paletteOverlay.IsVisible) ClosePalette();
@@ -140,6 +146,7 @@ public sealed partial class ClientView : UserControl
             Dispatcher.UIThread.Post(() => Navigate(page, spaceId, componentId));
             return;
         }
+        CloseActionDialogs();
         ClosePalette(restoreFocus: false);
         _page = page switch
         {
@@ -151,6 +158,7 @@ public sealed partial class ClientView : UserControl
             "ssh" => Has(ClientFeatures.Ssh) ? "ssh" : "workspace",
             _ => "workspace"
         };
+        _requestedSpaceId = spaceId;
         if (spaceId is not null) _spaceId = spaceId;
         _workspaceSection = "overview";
         _focusedPanelId = null;
@@ -221,7 +229,8 @@ public sealed partial class ClientView : UserControl
 
     private async Task RefreshWorkspaceAsync()
     {
-        if (_page != "workspace" || _displayedWorkspace is null || _editing || _refreshingWorkspace || _paletteOverlay.IsVisible ||
+        if (_page != "workspace" || _displayedWorkspace is null || _editing || _refreshingWorkspace ||
+            _paletteOverlay.IsVisible || _actionOverlay.IsVisible ||
             _drawings.Any(board => board.Editing) ||
             DateTimeOffset.UtcNow - _lastInteraction < TimeSpan.FromSeconds(2) ||
             TopLevel.GetTopLevel(this)?.FocusManager?.GetFocusedElement() is TextBox) return;
@@ -234,7 +243,7 @@ public sealed partial class ClientView : UserControl
             bool changed = !JsonNode.DeepEquals(current, displayed);
             if (!changed && OperatingSystem.IsAndroid())
                 changed = HasWorkspaceConflict(await Execute("relay_status", [])) != displayedConflict;
-            if (changed && _page == "workspace" && !_editing && !_drawings.Any(board => board.Editing) &&
+            if (changed && _page == "workspace" && !_editing && !_actionOverlay.IsVisible && !_drawings.Any(board => board.Editing) &&
                 ReferenceEquals(displayed, _displayedWorkspace))
                 await LoadAsync();
         }
@@ -306,7 +315,8 @@ public sealed partial class ClientView : UserControl
     {
         var page = _loading;
         var offset = _viewport.Offset;
-        await Execute(operation, arguments);
+        preserveViewport |= _actionOverlay.IsVisible;
+        await Execute(operation, arguments, CurrentActionCancellation);
         if (!ReferenceEquals(page, _loading)) return;
         await LoadAsync();
         if (!preserveViewport || offset == default) return;
@@ -500,121 +510,4 @@ public sealed partial class ClientView : UserControl
     private static string TextOf(JsonNode? value, string key = "text") =>
         value is JsonValue scalar && scalar.TryGetValue<string>(out var text) ? text : value.Text(key);
 
-    private readonly record struct Field(string Key, string Label, string Value = "", bool Secret = false,
-        bool Multiline = false, bool Toggle = false);
-
-    private Task Form(string title, Func<JsonObject, Task> save, params Field[] fields) =>
-        Form(title, L("保存", "Save"), save, fields);
-
-    private Task Form(string title, string submitLabel, Func<JsonObject, Task> save, params Field[] fields)
-        => Form(title, submitLabel, L("正在处理…", "Working…"), save, fields);
-
-    private Task Form(string title, string submitLabel, string pendingLabel, Func<JsonObject, Task> save, params Field[] fields)
-        => Form(title, submitLabel, pendingLabel, (values, _) => save(values), fields);
-
-    private Task Form(string title, string submitLabel, string pendingLabel,
-        Func<JsonObject, CancellationToken, Task> save, params Field[] fields) =>
-        ShowForm(title, submitLabel, pendingLabel, save, fields, modal: false);
-
-    private Task ModalForm(string title, string submitLabel, Func<JsonObject, Task> save, params Field[] fields) =>
-        ShowForm(title, submitLabel, L("正在处理…", "Working…"), (values, _) => save(values), fields, modal: true);
-
-    private Task ShowForm(string title, string submitLabel, string pendingLabel,
-        Func<JsonObject, CancellationToken, Task> save, Field[] fields, bool modal)
-    {
-        var body = modal ? new StackPanel { Spacing = 8 } : _contents;
-        Border? dialog = null;
-        Control? firstInput = null;
-        Report("");
-        if (modal)
-        {
-            _focusBeforePalette = TopLevel.GetTopLevel(this)?.FocusManager?.GetFocusedElement();
-            body.Children.Add(Heading(title));
-            dialog = new Border
-            {
-                Width = Math.Clamp(Bounds.Width - 40, 1, 460),
-                MaxHeight = Math.Max(1, Bounds.Height - 40),
-                Padding = new Thickness(16),
-                HorizontalAlignment = HorizontalAlignment.Center,
-                VerticalAlignment = VerticalAlignment.Center,
-                Child = new ScrollViewer { Content = body }
-            };
-            dialog.Classes.Add("palette");
-            Avalonia.Automation.AutomationProperties.SetName(dialog, title);
-            KeyboardNavigation.SetTabNavigation(dialog, KeyboardNavigationMode.Cycle);
-        }
-        else
-        {
-            _editing = true;
-            _workspaceGrid.IsVisible = false;
-            _terminals.Clear();
-            _contents.Children.Clear();
-            _viewport.Offset = default;
-            Header(title, Action(L("取消", "Cancel"), LoadAsync));
-        }
-        var error = new TextBlock { IsVisible = false, TextWrapping = TextWrapping.Wrap };
-        error.Classes.Add("form-error");
-        var inputs = new List<(string Key, Func<JsonNode?> Value)>();
-        foreach (var field in fields)
-        {
-            if (field.Toggle)
-            {
-                var checkbox = new CheckBox { Content = field.Label, IsChecked = field.Value == "true" };
-                body.Children.Add(checkbox);
-                firstInput ??= checkbox;
-                inputs.Add((field.Key, () => JsonValue.Create(checkbox.IsChecked == true)));
-                continue;
-            }
-            var input = new TextBox
-            {
-                Text = field.Value, AcceptsReturn = field.Multiline, TextWrapping = TextWrapping.Wrap,
-                PasswordChar = field.Secret ? '●' : '\0', MinHeight = field.Multiline ? 100 : 36
-            };
-            input.Classes.Add("entry");
-            Avalonia.Automation.AutomationProperties.SetName(input, field.Label);
-            input.TextChanged += (_, _) => error.IsVisible = false;
-            body.Children.Add(Muted(field.Label));
-            body.Children.Add(input);
-            firstInput ??= input;
-            inputs.Add((field.Key, () => JsonValue.Create(input.Text ?? "")));
-        }
-        var progress = Muted(pendingLabel);
-        progress.IsVisible = false;
-        var button = PrimaryAction(submitLabel, async () =>
-        {
-            var token = _loading?.Token ?? CancellationToken.None;
-            var values = new JsonObject();
-            foreach (var input in inputs) values[input.Key] = input.Value();
-            error.IsVisible = false;
-            progress.IsVisible = true;
-            try
-            {
-                await save(values, token);
-                if (dialog is not null && ReferenceEquals(_paletteOverlay.Child, dialog)) ClosePalette();
-            }
-            catch (OperationCanceledException) when (token.IsCancellationRequested) { }
-            catch (Exception failure) when (!token.IsCancellationRequested)
-            {
-                error.Text = failure.Message;
-                error.IsVisible = true;
-                error.BringIntoView();
-            }
-            finally { progress.IsVisible = false; }
-        });
-        var actions = new WrapPanel { ItemSpacing = 8, Children = { button, progress } };
-        body.Children.Add(actions);
-        progress.VerticalAlignment = VerticalAlignment.Center;
-        body.Children.Add(error);
-        if (dialog is not null)
-        {
-            actions.Children.Insert(0, Action(L("取消", "Cancel"), () => { ClosePalette(); return Task.CompletedTask; }));
-            _paletteOverlay.Child = dialog;
-            _paletteOverlay.IsVisible = true;
-            Dispatcher.UIThread.Post(() =>
-            {
-                if (ReferenceEquals(_paletteOverlay.Child, dialog)) (firstInput ?? button).Focus();
-            }, DispatcherPriority.Input);
-        }
-        return Task.CompletedTask;
-    }
 }

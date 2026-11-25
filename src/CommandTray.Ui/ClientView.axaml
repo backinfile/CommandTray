@@ -32,5 +32,7 @@
                   ShowsPreview="False" Classes="sidebar-splitter" />
     <Border x:Name="PaletteOverlay" Grid.ColumnSpan="2" Grid.RowSpan="4"
             Background="#AB060D1B" IsVisible="False" />
+    <Border x:Name="ActionOverlay" Grid.ColumnSpan="2" Grid.RowSpan="4"
+            Background="#AB060D1B" IsVisible="False" />
   </Grid>
 </UserControl>
