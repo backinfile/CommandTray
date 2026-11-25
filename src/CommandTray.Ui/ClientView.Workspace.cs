@@ -11,11 +11,12 @@ namespace CommandTray.Ui;
 
 public sealed partial class ClientView
 {
-    private string _workspaceSection = "overview";
+    private readonly Dictionary<string, (Border Tile, string Title, string Kind)> _workspaceTargets = new(StringComparer.Ordinal);
+    private Border? _locatedComponent;
 
     private async Task RenderWorkspaceAsync(CancellationToken token)
     {
-        Header(L("工作空间", "Workspace"));
+        Header(L("空间", "Spaces"));
         var document = await Execute("workspace_read", [], token);
         var relay = await Execute("relay_status", [], token);
         _displayedWorkspace = document;
@@ -25,7 +26,6 @@ public sealed partial class ClientView
         if (_requestedSpaceId is null && activeSpaceId != _observedActiveSpaceId && _spaceId != activeSpaceId)
         {
             _spaceId = activeSpaceId;
-            _workspaceSection = "overview";
             _focusedPanelId = null;
             _componentId = null;
             _viewport.Offset = default;
@@ -37,15 +37,10 @@ public sealed partial class ClientView
         _spaceId = selected?.Text("id");
 
         bool paired = relay.Flag("paired");
-        if (DesktopWorkbench)
-        {
-            _sidebarSpaces = spaces.Select(space => (space.Text("id"), space.Text("name"))).ToArray();
-            _sidebarPaired = paired;
-            UpdateSidebarSpaces();
-        }
+        _sidebarPaired = paired;
+        SetSidebarSpaces(document);
         if (selected is null)
         {
-            Header(L("工作空间", "Workspace"));
             var other = paired
                 ? Action(L("从中转拉取", "Pull from relay"), () => SyncAsync("sync_pull"), glyph: "sync")
                 : Action(L("连接中转", "Connect to relay"), () => PairForm(relay));
@@ -54,156 +49,101 @@ public sealed partial class ClientView
             return;
         }
 
-        var sync = paired
-            ? Action(_compact ? "↻" : L("同步", "Sync"), () => SyncAsync("sync_push"), L("同步", "Sync"), "sync")
-            : Action(L("连接", "Connect"), () => PairForm(relay));
-        var more = WorkspaceMenu(selected, paired);
-
         var spaceId = selected.Text("id");
+        var entries = selected.Array("items").OfType<JsonObject>()
+            .Where(item => SupportsWorkspaceComponent(item.Text("kind"))).ToArray();
+        if (_focusedPanelId is { } focused && !entries.Any(item => item.Text("id") == focused)) _focusedPanelId = null;
+        var title = selected.Text("name");
+        var locate = Action(L("定位组件", "Locate component"), ShowWorkspaceLocatorAsync, glyph: "search");
+        locate.IsEnabled = entries.Length > 0;
+        var add = AddComponentMenu(spaceId);
+        var more = WorkspaceMenu(selected, relay);
+        if (_compact)
         {
-            var picker = new ComboBox
-            {
-                HorizontalAlignment = HorizontalAlignment.Stretch,
-                ItemsSource = spaces.Select(space => space.Text("name")).ToArray(),
-                SelectedIndex = Array.IndexOf(spaces, selected),
-                MaxDropDownHeight = 280
-            };
-            picker.Classes.Add("space-picker");
-            Avalonia.Automation.AutomationProperties.SetName(picker, L("切换空间", "Switch space"));
-            picker.SelectionChanged += async (_, _) =>
-            {
-                if (picker.SelectedIndex < 0 || picker.SelectedIndex >= spaces.Length) return;
-                var next = spaces[picker.SelectedIndex].Text("id");
-                if (next != _spaceId) await Act(() => SelectSpaceAsync(next));
-            };
-            if (_compact) Header(picker, sync, more);
-            else
-            {
-                var breadcrumb = Muted(L("工作区", "Workspace") + " /");
-                breadcrumb.VerticalAlignment = VerticalAlignment.Center;
-                picker.MinWidth = 150;
-                picker.MaxWidth = 250;
-                more.Content = IconLabel("plus", L("添加组件", "Add component"));
-                more.Classes.Remove("icon-only");
-                more.Classes.Add("primary");
-                Header(Row(breadcrumb, picker));
-            }
+            Header(title);
+            _contents.Children.Add(new WrapPanel { ItemSpacing = 6, LineSpacing = 5, Children = { locate, add, more } });
         }
-
-        var allEntries = selected.Array("items").OfType<JsonObject>().ToArray();
-        var tasks = allEntries.Where(item => ComponentSection(item.Text("kind")) == "tasks")
-            .SelectMany(item => item.Object("data").Array("tasks").OfType<JsonObject>()).ToArray();
-        var spaceHeading = new StackPanel { Spacing = 4 };
-        var spaceTitle = Heading(selected.Text("name"));
-        spaceTitle.Classes.Add("workbench-heading");
-        spaceHeading.Children.Add(spaceTitle);
-        if (tasks.Length > 0)
-            spaceHeading.Children.Add(Muted(L($"{tasks.Count(task => task.Flag("completed"))} / {tasks.Length} 项待办已完成",
-                $"{tasks.Count(task => task.Flag("completed"))} / {tasks.Length} tasks complete")));
-        _contents.Children.Add(_compact ? spaceHeading : TitleRow(spaceHeading, Row(sync, more)));
-        _contents.Children.Add(WorkspaceSections());
+        else Header(title, locate, add, more);
 
         if (_displayedWorkspaceConflict)
-        {
             _contents.Children.Add(SettingRow(L("同步冲突", "Sync conflict"), WorkspaceConflictActions()));
-        }
 
-        var entries = _workspaceSection == "overview" ? allEntries :
-            allEntries.Where(item => ComponentSection(item.Text("kind")) == _workspaceSection).ToArray();
-        if (_focusedPanelId is { } focused && !entries.Any(item => item.Text("id") == focused)) _focusedPanelId = null;
-        int visibleComponents = 0;
-        if (_workspaceSection == "overview" && !_compact && Has(ClientFeatures.Layout) && entries.Length > 0)
+        if (!_compact && Has(ClientFeatures.Layout) && entries.Length > 0)
         {
             var canvas = new Canvas { HorizontalAlignment = HorizontalAlignment.Left };
             _viewport.HorizontalScrollBarVisibility = ScrollBarVisibility.Auto;
             _contents.Children.Add(canvas);
             foreach (var item in entries)
-            {
-                var tile = Component(spaceId, item, canvas);
-                if (tile is null) continue;
-                canvas.Children.Add(tile);
-                visibleComponents++;
-            }
+                if (Component(spaceId, item, canvas) is { } tile) canvas.Children.Add(tile);
             MeasureCanvas(canvas);
         }
         else
         {
             foreach (var item in entries)
-            {
-                var tile = Component(spaceId, item, null);
-                if (tile is null) continue;
-                _contents.Children.Add(tile);
-                visibleComponents++;
-            }
+                if (Component(spaceId, item, null) is { } tile) _contents.Children.Add(tile);
         }
-        if (visibleComponents == 0)
-        {
-            var message = entries.Length == 0 ? L("暂无组件", "No components")
-                : L("此设备暂无可用组件", "No components available on this device");
-            var (kind, label) = _workspaceSection switch
-            {
-                "board" => ("board", L("画板", "Board")),
-                "terminal" => ("terminal", L("终端", "Terminal")),
-                "tasks" => ("todo", L("待办", "Checklist")),
-                "directory" => ("files", L("目录", "Folder")),
-                _ => ("note", L("便签", "Note"))
-            };
-            _contents.Children.Add(EmptyState("spaces", message,
-                Action(L($"添加{label}", $"Add {label}"), () => ItemForm(spaceId, kind, label), glyph: "plus")));
-        }
-
-        if (_workspaceSection == "overview" && (_compact || !Has(ClientFeatures.Ssh)))
-        {
-            var hosts = document.Array("sshHosts").OfType<JsonObject>().ToArray();
-            if (hosts.Length > 0) _contents.Children.Add(Heading(L("SSH 主机", "SSH hosts")));
-            foreach (var host in hosts) _contents.Children.Add(Section(Body($"{host.Text("name")} · {HostAddress(host)}")));
-        }
+        if (entries.Length == 0)
+            _contents.Children.Add(EmptyState("spaces", selected.Array("items").Count == 0 ? L("暂无组件", "No components")
+                : L("此设备暂无可用组件", "No components available on this device")));
     }
 
-    private Control WorkspaceSections()
+    private bool SupportsWorkspaceComponent(string kind) => kind switch
     {
-        var tabs = Row();
-        foreach (var (id, title, glyph) in new[]
-        {
-            ("overview", L("总览", "Overview"), "spaces"), ("board", L("画板", "Board"), "board"),
-            ("terminal", L("终端", "Terminal"), "terminal"), ("tasks", L("待办", "Tasks"), "tasks"),
-            ("note", L("便签", "Notes"), "note"), ("directory", L("目录", "Folders"), "folder-open")
-        })
-        {
-            if ((id == "terminal" && !Has(ClientFeatures.Terminals)) || (id == "directory" && !Has(ClientFeatures.LocalFiles))) continue;
-            var tab = Action(title, async () =>
-            {
-                if (_workspaceSection == id) return;
-                _workspaceSection = id;
-                _focusedPanelId = null;
-                _viewport.Offset = default;
-                await LoadAsync();
-            }, glyph: glyph);
-            tab.Classes.Add("workbench-tab");
-            tab.Classes.Set("selected", _workspaceSection == id);
-            if (_workspaceSection == id) tab.AttachedToVisualTree += (_, _) =>
-                Avalonia.Threading.Dispatcher.UIThread.Post(() => tab.BringIntoView());
-            tabs.Children.Add(tab);
-        }
-        return new ScrollViewer { Content = tabs, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
-            VerticalScrollBarVisibility = ScrollBarVisibility.Disabled };
-    }
-
-    private static string ComponentSection(string kind) => kind switch
-    {
-        "board" or "whiteboard" => "board", "terminal" or "ssh" or "commands" => "terminal",
-        "todo" or "tasks" => "tasks", "note" or "notes" => "note",
-        "folder" or "files" or "preview" => "directory", _ => "overview"
+        "note" or "notes" or "todo" or "tasks" or "board" or "whiteboard" or "clipboard" or "sharedFiles" => true,
+        "folder" or "files" or "preview" => Has(ClientFeatures.LocalFiles),
+        "terminal" or "ssh" or "commands" => Has(ClientFeatures.Terminals),
+        "service" or "log" => Has(ClientFeatures.Commands),
+        "captures" => Has(ClientFeatures.Capture),
+        _ => false
     };
 
-    private async Task SelectSpaceAsync(string id)
+    private static string ComponentTitle(JsonObject item) =>
+        item.Text("title", item.Object("data").Text("title", item.Text("kind")));
+
+    private string ComponentType(string kind) => kind switch
     {
-        await Execute("space_activate", new() { ["spaceId"] = id });
-        if (_spaceId != id) _focusedPanelId = null;
-        _spaceId = id;
-        _workspaceSection = "overview";
-        _viewport.Offset = default;
-        await LoadAsync();
+        "board" or "whiteboard" => L("画板", "Board"),
+        "note" or "notes" => L("便签", "Note"),
+        "todo" or "tasks" => L("待办", "Checklist"),
+        "terminal" or "ssh" => L("终端", "Terminal"),
+        "folder" or "files" => L("本地目录", "Local folder"),
+        "preview" => L("文件预览", "File preview"),
+        "commands" or "service" => L("命令", "Command"),
+        "log" => L("日志", "Log"),
+        "captures" => L("截图与录屏", "Screen capture"),
+        "clipboard" => L("剪贴板", "Clipboard"),
+        "sharedFiles" => L("共享文件", "Shared files"),
+        _ => kind
+    };
+
+    private Task ShowWorkspaceLocatorAsync()
+    {
+        var panels = _workspaceTargets.OrderBy(item => Canvas.GetTop(item.Value.Tile))
+            .ThenBy(item => Canvas.GetLeft(item.Value.Tile))
+            .Select(item => new PaletteEntry(item.Value.Title, ComponentType(item.Value.Kind), ComponentGlyph(item.Value.Kind), () =>
+            {
+                LocateWorkspaceComponent(item.Key);
+                return Task.CompletedTask;
+            })).ToList();
+        ShowPalette(L("定位组件", "Locate component"), L("搜索当前空间的组件", "Find components in this space"), panels);
+        return Task.CompletedTask;
+    }
+
+    private void LocateWorkspaceComponent(string id)
+    {
+        if (!_workspaceTargets.TryGetValue(id, out var target)) return;
+        if (_focusedPanel is { } focus && !ReferenceEquals(focus.Tile, target.Tile))
+            RestoreFocusedPanel(restoreOffset: false);
+        _locatedComponent?.Classes.Remove("located");
+        _locatedComponent = target.Tile;
+        target.Tile.Classes.Add("located");
+        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            if (!ReferenceEquals(_locatedComponent, target.Tile) || target.Tile.Parent is null) return;
+            target.Tile.Focus();
+            var top = new Rect(0, 0, Math.Min(target.Tile.Bounds.Width, _viewport.Viewport.Width), Math.Min(44, target.Tile.Bounds.Height));
+            target.Tile.BringIntoView(top);
+        }, Avalonia.Threading.DispatcherPriority.Loaded);
     }
 
     private async Task SyncAsync(string command)
@@ -225,36 +165,50 @@ public sealed partial class ClientView
         if (string.IsNullOrWhiteSpace(values.Text("name")))
             throw new InvalidOperationException(L("请输入空间名称。", "Enter a space name."));
         var result = await Execute("space_create", values);
-        if (result.Text("id") is { Length: > 0 } id) await SelectSpaceAsync(id);
+        if (result.Text("id") is { Length: > 0 } id) await OpenPaletteSpaceAsync(id);
         else await LoadAsync();
     }, new Field("name", L("空间名称", "Space name")));
 
-    private Button WorkspaceMenu(JsonObject selected, bool paired)
+    private Button AddComponentMenu(string id)
+    {
+        var actions = new List<(string Label, Func<Task> Action)>
+        {
+            (L("画板", "Board"), () => ItemForm(id, "board", L("画板", "Board"))),
+            (L("待办", "Checklist"), () => ItemForm(id, "todo", L("待办", "Checklist"))),
+            (L("便签", "Note"), () => ItemForm(id, "note", L("便签", "Note")))
+        };
+        if (Has(ClientFeatures.LocalFiles)) actions.Add((L("本地目录", "Local folder"), () => ItemForm(id, "files", L("目录", "Folder"))));
+        if (Has(ClientFeatures.Terminals)) actions.Add((L("终端", "Terminal"), () => ItemForm(id, "terminal", L("终端", "Terminal"))));
+        var label = L("添加组件", "Add component");
+        var menu = Menu(label, actions.ToArray());
+        menu.Content = IconLabel("plus", label);
+        menu.Classes.Add("primary");
+        Avalonia.Automation.AutomationProperties.SetName(menu, label);
+        return menu;
+    }
+
+    private Button WorkspaceMenu(JsonObject selected, JsonNode? relay)
     {
         var id = selected.Text("id");
         var actions = new List<(string Label, Func<Task> Action)>
         {
-            (L("添加便签", "Add note"), () => ItemForm(id, "note", L("便签", "Note"))),
-            (L("添加待办", "Add checklist"), () => ItemForm(id, "todo", L("待办", "Checklist"))),
-            (L("新建空间", "New space"), NewSpaceAsync)
+            (L("重命名空间", "Rename space"), () => Form(L("重命名空间", "Rename space"), values =>
+                Change("space_rename", new() { ["spaceId"] = id, ["name"] = values.Text("name") }),
+                new Field("name", L("名称", "Name"), selected.Text("name")))),
+            (L("删除空间", "Delete space"), () => Confirm(L("删除该空间？", "Delete this space?"), async () =>
+            {
+                _spaceId = null;
+                await Change("space_delete", new() { ["spaceId"] = id });
+            }))
         };
-        if (Has(ClientFeatures.LocalFiles))
-            actions.Add((L("添加目录", "Add folder"), () => ItemForm(id, "files", L("目录", "Folder"))));
-        if (Has(ClientFeatures.Terminals))
-            actions.Add((L("添加终端", "Add terminal"), () => ItemForm(id, "terminal", L("终端", "Terminal"))));
-        actions.Insert(2, (L("添加画板", "Add board"), () => ItemForm(id, "board", L("画板", "Board"))));
-        actions.Add((L("重命名空间", "Rename space"), () => Form(L("重命名空间", "Rename space"), values =>
-            Change("space_rename", new() { ["spaceId"] = id, ["name"] = values.Text("name") }),
-            new Field("name", L("名称", "Name"), selected.Text("name")))));
-        actions.Add((L("删除空间", "Delete space"), () => Confirm(L("删除该空间？", "Delete this space?"), async () =>
+        if (relay.Flag("paired"))
         {
-            _spaceId = null;
-            await Change("space_delete", new() { ["spaceId"] = id });
-        })));
-        if (paired) actions.Add((L("从中转拉取", "Pull from relay"), () => SyncAsync("sync_pull")));
-        var menu = Menu("+", actions.ToArray());
-        menu.Classes.Add("add-component");
-        var label = L("添加与空间操作", "Add and manage space");
+            actions.Add((L("同步", "Sync"), () => SyncAsync("sync_push")));
+            actions.Add((L("从中转拉取", "Pull from relay"), () => SyncAsync("sync_pull")));
+        }
+        else actions.Add((L("连接中转", "Connect to relay"), () => PairForm(relay)));
+        var menu = Menu("⋯", actions.ToArray());
+        var label = L("空间操作", "Space actions");
         ToolTip.SetTip(menu, label);
         Avalonia.Automation.AutomationProperties.SetName(menu, label);
         return menu;
@@ -289,7 +243,7 @@ public sealed partial class ClientView
     {
         string kind = item.Text("kind");
         string id = item.Text("id");
-        var title = item.Text("title", item.Object("data").Text("title", kind));
+        var title = ComponentTitle(item);
         var body = kind switch
         {
             "note" or "notes" => NoteComponent(spaceId, item),
@@ -351,12 +305,13 @@ public sealed partial class ClientView
         headingLine.Classes.Add("tile-heading");
         headingLine.Padding = new Thickness(10, 1, 7, 1);
         body.Margin = new Thickness(10, 7, 10, 10);
+        tile.Focusable = true;
+        _workspaceTargets[id] = (tile, title, kind);
+        tile.PointerPressed += (_, _) => tile.Classes.Remove("located");
         if (id == _componentId)
         {
             _componentId = null;
-            tile.Classes.Add("located");
-            tile.AttachedToVisualTree += (_, _) => Avalonia.Threading.Dispatcher.UIThread.Post(() => tile.BringIntoView());
-            tile.PointerPressed += (_, _) => tile.Classes.Remove("located");
+            tile.AttachedToVisualTree += (_, _) => LocateWorkspaceComponent(id);
         }
         if (canvas is null) return tile;
 

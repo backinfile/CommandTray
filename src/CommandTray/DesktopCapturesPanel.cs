@@ -51,25 +51,33 @@ internal sealed class DesktopCapturesPanel : UserControl
 
     public void SaveScreenshot(bool region)
     {
-        Rectangle? rectangle = null;
+        string? file = null;
         if (region)
         {
-            rectangle = SelectRegion(this);
-            if (rectangle is null) return;
+            SelectRegion(this, (area, bitmap) => file = _desktop.Media.SaveScreenshot(bitmap, area));
+            if (file is null) return;
         }
-        var file = _desktop.Media.Screenshot(rectangle);
+        else file = _desktop.Media.Screenshot();
         using var image = Image.FromFile(file);
         Clipboard.SetImage(image);
         RefreshCaptures();
         _desktop.Notify(Localizer.T("Screenshot saved and copied", "截图已保存并复制"));
     }
 
-    internal static Rectangle? SelectRegion(IWin32Window? owner)
+    internal static Rectangle? SelectRegion(IWin32Window? owner, Action<Rectangle, Bitmap>? save = null)
     {
-        using var selector = new CaptureSelectionForm();
+        var desktop = SystemInformation.VirtualScreen;
+        using var snapshot = DesktopMedia.CapturePixels(desktop);
+        using var selector = new CaptureSelectionForm(desktop, snapshot);
         if (selector.ShowDialog(owner) != DialogResult.OK) return null;
         DwmFlush();
-        return selector.Selection;
+        var area = selector.DesktopSelection;
+        if (save is not null)
+        {
+            using var image = selector.Crop();
+            save(area, image);
+        }
+        return area;
     }
 
     internal static Rectangle ForegroundBounds()
@@ -154,62 +162,6 @@ internal sealed class DesktopCapturesPanel : UserControl
         catch (Exception ex) { Error(this, ex); }
     }
 
-    private sealed class CaptureSelectionForm : Form
-    {
-        private Point _start;
-        private bool _selecting;
-        public CaptureSelectionForm()
-        {
-            StartPosition = FormStartPosition.Manual;
-            FormBorderStyle = FormBorderStyle.None; DoubleBuffered = true;
-            Bounds = SystemInformation.VirtualScreen;
-            ShowInTaskbar = false; TopMost = true; Opacity = .27; BackColor = Color.Black; Cursor = Cursors.Cross; KeyPreview = true;
-            Shown += (_, _) => Activate();
-            KeyDown += (_, e) => { if (e.KeyCode == Keys.Escape) DialogResult = DialogResult.Cancel; };
-        }
-        public Rectangle Selection { get; private set; }
-        protected override void OnMouseDown(MouseEventArgs e)
-        {
-            base.OnMouseDown(e);
-            if (e.Button == MouseButtons.Right) { DialogResult = DialogResult.Cancel; return; }
-            if (e.Button != MouseButtons.Left) return;
-            _start = e.Location; _selecting = true; Capture = true;
-            Selection = Rectangle.Empty;
-        }
-        protected override void OnMouseMove(MouseEventArgs e)
-        {
-            base.OnMouseMove(e);
-            if (!_selecting) return;
-            UpdateSelection(e.Location);
-            Invalidate();
-        }
-        protected override void OnPaint(PaintEventArgs e)
-        {
-            base.OnPaint(e);
-            if (Selection.IsEmpty) return;
-            using var pen = new Pen(Color.White, 2);
-            e.Graphics.DrawRectangle(pen, Selection);
-            TextRenderer.DrawText(e.Graphics, $"{Selection.Width} × {Selection.Height}", Font,
-                new Point(Selection.Left + 4, Selection.Top + 4), Color.White, Color.Black);
-        }
-        protected override void OnMouseUp(MouseEventArgs e)
-        {
-            base.OnMouseUp(e);
-            if (!_selecting || e.Button != MouseButtons.Left) return;
-            UpdateSelection(e.Location);
-            _selecting = false;
-            Capture = false;
-            if (Selection.Width <= 0 || Selection.Height <= 0) { DialogResult = DialogResult.Cancel; return; }
-            Selection = new Rectangle(PointToScreen(Selection.Location), Selection.Size);
-            DialogResult = DialogResult.OK;
-        }
-
-        private void UpdateSelection(Point end)
-        {
-            end = new Point(Math.Clamp(end.X, 0, ClientSize.Width), Math.Clamp(end.Y, 0, ClientSize.Height));
-            Selection = Rectangle.FromLTRB(Math.Min(_start.X, end.X), Math.Min(_start.Y, end.Y), Math.Max(_start.X, end.X), Math.Max(_start.Y, end.Y));
-        }
-    }
 }
 
 internal sealed class DesktopPetForm : Form

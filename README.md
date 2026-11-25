@@ -27,7 +27,7 @@ CommandTray 的 Windows、Linux 桌面与 Android 客户端共用一套 Avalonia
 - 使用当前 Windows 用户的 DPAPI 加密标记为敏感的环境变量。
 - 内置本地 MCP 服务，让受信任的 AI 客户端管理服务。
 
-Windows 捕获页支持区域、活动窗口、显示器、上次区域和延时截图。截图可复制、贴图、标注后另存或识别文字。录屏可选择显示器或区域，并设置帧率、鼠标指针、声音设备以及 MP4 或 MKV 格式。录制时可从托盘结束。录屏使用 PATH 上带有 `gdigrab`、`dshow` 和 `libx264` 的 FFmpeg，声音来源为 Windows 提供的 DirectShow 录音设备。OCR 使用 PATH 上的 Tesseract 和相应语言数据。
+Windows「截图与录屏」页可以直接选择范围、延时和截图后是否复制。拖出选区后，可以移动选框、拖动边缘调整尺寸，按 Enter 确认或按 Esc 取消。历史可以按文件名查找、重命名及复制文件路径。截图可复制、贴图、标注后另存或识别文字。录屏可选择显示器或区域，并设置帧率、鼠标指针、声音设备以及 MP4 或 MKV 格式。录制时可从托盘结束。录屏使用 PATH 上带有 `gdigrab` 和 `libx264` 的 FFmpeg，声音来源为 Windows 提供的 DirectShow 录音设备。OCR 使用 PATH 上的 Tesseract 和相应语言数据。
 
 已配对客户端会提交本地空间变更并接收中转增量。断网时把待提交的修改保存在本机，重连后继续同步，冲突时可保留任一版本。
 

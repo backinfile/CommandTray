@@ -73,7 +73,7 @@ public sealed partial class ClientView
         MeasureCanvas(focus.Canvas);
     }
 
-    private void RestoreFocusedPanel()
+    private void RestoreFocusedPanel(bool restoreOffset = true)
     {
         _focusedPanelId = null;
         if (_focusedPanel is not { } focus) return;
@@ -87,6 +87,7 @@ public sealed partial class ClientView
         SetFocusButton(focus.Toggle, focused: false);
         foreach (var sibling in focus.Canvas.Children) sibling.IsVisible = true;
         MeasureCanvas(focus.Canvas);
+        if (!restoreOffset) return;
         var offset = _focusReturnOffset;
         Dispatcher.UIThread.Post(() =>
         {

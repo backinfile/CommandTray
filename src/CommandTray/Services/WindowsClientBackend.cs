@@ -149,7 +149,9 @@ internal sealed class WindowsClientBackend(
             case "capture_record_state": return Json(desktop.Media.RecordingState);
             case "capture_take": return Json(await _actions.CaptureScreenshot(cancellationToken, CaptureCoordinates(), Text("mode") ?? "desktop",
                 Number("delay", 0), Flag("hideWindow") ?? false, Flag("copy") ?? false));
-            case "capture_select": return Json(await _actions.SelectScreenshotAsync(Flag("hideWindow") ?? false, cancellationToken));
+            case "capture_select": return Json(await _actions.SelectScreenshotAsync(Flag("hideWindow") ?? false, Number("delay", 0),
+                Flag("copy") ?? true, cancellationToken));
+            case "capture_rename": return Json(new { path = desktop.Media.RenameCapture(Required("path"), Required("name")) });
             case "capture_copy": return Json(await _actions.CopyScreenshot(Required("path"), cancellationToken));
             case "capture_reveal": return Json(_actions.RevealCapture(Text("path")));
             case "capture_recycle": return Json(_actions.RecycleCapture(Required("path")));

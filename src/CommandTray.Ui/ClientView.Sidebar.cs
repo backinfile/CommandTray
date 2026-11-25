@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using Avalonia;
 using Avalonia.Automation;
 using Avalonia.Controls;
@@ -39,7 +40,7 @@ public sealed partial class ClientView
 
     private void RenderNavigation()
     {
-        var pages = NavigationPages();
+        var pages = ToolPages();
         _navigation.Children.Clear();
         _sidebarSpaceList = null;
         _sidebarRelayStatus = null;
@@ -47,24 +48,11 @@ public sealed partial class ClientView
         _navFooter.IsVisible = !_compact;
         if (_compact)
         {
-            if (OperatingSystem.IsAndroid() && _english)
-            {
-                // Give the longer Clipboard label room at large system font sizes.
-                var strip = new Grid { ColumnDefinitions = new ColumnDefinitions("*,0.75*,1.25*,*") };
-                foreach (var page in pages)
-                {
-                    var button = NavigationButton(page.Id, page.En);
-                    Grid.SetColumn(button, strip.Children.Count);
-                    strip.Children.Add(button);
-                }
-                _navigation.Children.Add(strip);
-            }
-            else
-            {
-                var strip = new UniformGrid { Columns = pages.Count };
-                foreach (var page in pages) strip.Children.Add(NavigationButton(page.Id, L(page.Zh, page.En)));
-                _navigation.Children.Add(strip);
-            }
+            var strip = new UniformGrid { Columns = 3 };
+            strip.Children.Add(NavigationButton("workspace", L("空间", "Spaces"), ChooseSpaceAsync));
+            strip.Children.Add(NavigationButton("tools", L("工具", "Tools"), ChooseToolAsync));
+            strip.Children.Add(NavigationButton("settings", L("设置", "Settings")));
+            _navigation.Children.Add(strip);
             _navHeader.Content = null;
             _navFooter.Child = null;
             return;
@@ -95,16 +83,13 @@ public sealed partial class ClientView
         }
         _navHeader.Content = heading;
         AutomationProperties.SetName(_navSplitter, L("调整侧栏宽度", "Resize sidebar"));
-        foreach (var page in pages.Where(page => page.Id != "settings"))
-            _navigation.Children.Add(NavigationButton(page.Id, L(page.Zh, page.En)));
         var settings = NavigationButton("settings", L("设置", "Settings"));
-        if (DesktopWorkbench && !_sidebarCollapsed)
+        if (!_sidebarCollapsed)
         {
             _sidebarSpaceList = new StackPanel { Spacing = 4 };
             var group = new Border
             {
-                BorderThickness = new Thickness(0, 1, 0, 0), Margin = new Thickness(0, 12, 0, 0),
-                Padding = new Thickness(0, 8, 0, 0), Child = _sidebarSpaceList
+                Margin = new Thickness(0, 3, 0, 0), Child = _sidebarSpaceList
             };
             group.Classes.Add("nav-group");
             _navigation.Children.Add(group);
@@ -112,8 +97,22 @@ public sealed partial class ClientView
             _sidebarRelayStatus.Classes.Add("nav-status");
             _navFooter.Child = new StackPanel { Spacing = 4, Children = { _sidebarRelayStatus, settings } };
             UpdateSidebarSpaces();
+            var toolLabel = Muted(L("工具", "Tools"));
+            toolLabel.Classes.Add("nav-status");
+            var tools = new Border
+            {
+                BorderThickness = new Thickness(0, 1, 0, 0), Margin = new Thickness(0, 12, 0, 0),
+                Padding = new Thickness(0, 10, 0, 2), Child = toolLabel
+            };
+            tools.Classes.Add("nav-group");
+            _navigation.Children.Add(tools);
         }
-        else _navFooter.Child = settings;
+        else
+        {
+            _navigation.Children.Add(NavigationButton("workspace", L("空间", "Spaces"), ChooseSpaceAsync));
+            _navFooter.Child = settings;
+        }
+        foreach (var page in pages) _navigation.Children.Add(NavigationButton(page.Id, L(page.Zh, page.En)));
     }
 
     private void UpdateSidebarSpaces()
@@ -127,14 +126,10 @@ public sealed partial class ClientView
         group.Children.Clear();
         var label = Muted(L("空间", "Spaces"));
         label.Classes.Add("nav-status");
-        group.Children.Add(label);
+        group.Children.Add(TitleRow(label, IconButton("plus", L("新建空间", "New space"), NewSpaceAsync)));
         foreach (var (id, name) in _sidebarSpaces)
         {
-            var button = Action(name, async () =>
-            {
-                await Execute("space_activate", new() { ["spaceId"] = id });
-                Navigate("workspace", id);
-            }, name);
+            var button = Action(name, () => OpenPaletteSpaceAsync(id), name);
             var text = new TextBlock
             {
                 Text = name, Margin = new Thickness(8, 0, 0, 0),
@@ -152,6 +147,36 @@ public sealed partial class ClientView
             if (_page == "workspace" && id == _spaceId) button.Classes.Add("selected");
             group.Children.Add(button);
         }
+    }
+
+    private async Task RefreshSidebarSpacesAsync(CancellationToken token)
+    {
+        var document = await Execute("workspace_read", [], token);
+        SetSidebarSpaces(document);
+    }
+
+    private void SetSidebarSpaces(JsonNode? document)
+    {
+        _sidebarSpaces = document.Array("spaces").OfType<JsonObject>()
+            .Select(space => (space.Text("id"), space.Text("name"))).ToArray();
+        UpdateSidebarSpaces();
+    }
+
+    private async Task ChooseSpaceAsync()
+    {
+        var entries = new List<PaletteEntry>();
+        var update = ShowPalette(L("切换空间", "Switch space"), L("搜索空间", "Find spaces"), entries);
+        var document = _displayedWorkspace ?? await Execute("workspace_read", []);
+        entries.AddRange(document.Array("spaces").OfType<JsonObject>().Select(space =>
+            new PaletteEntry(space.Text("name"), L("空间", "Space"), "spaces", () => OpenPaletteSpaceAsync(space.Text("id")))));
+        entries.Add(new(L("新建空间", "New space"), L("操作", "Action"), "plus", NewSpaceAsync));
+        update();
+    }
+
+    private Task ChooseToolAsync()
+    {
+        ShowPalette(L("工具", "Tools"), L("搜索工具", "Find tools"), ToolPages().Select(ToolEntry).ToList());
+        return Task.CompletedTask;
     }
 
     private async Task ToggleSidebarAsync()

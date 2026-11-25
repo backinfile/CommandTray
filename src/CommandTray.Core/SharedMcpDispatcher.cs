@@ -62,7 +62,8 @@ public sealed class SharedMcpDispatcher
         Add(Capture, "capture_sources", "List display IDs, the last screenshot region and optional DirectShow audio devices.", "", "includeAudio:boolean");
         Add(Capture, "capture_take", "Capture the desktop, primary display, active window, last region, display ID, or supplied rectangle.", "",
             "x:integer,y:integer,width:integer,height:integer,mode,delay:integer,hideWindow:boolean,copy:boolean");
-        Add(Capture, "capture_select", "Ask the user to select a region for capture.", "", "hideWindow:boolean");
+        Add(Capture, "capture_select", "Ask the user to select a region for capture.", "", "hideWindow:boolean,delay:integer,copy:boolean");
+        Add(Capture, "capture_rename", "Rename a local capture without changing its format.", "path,name");
         Add(Capture, "capture_pin", "Pin a screenshot.", "path");
         Add(Capture, "capture_open", "Open a captured file.", "path");
         Add(Capture, "capture_annotate", "Annotate a captured image.", "path");

@@ -111,7 +111,7 @@ public sealed partial class ClientView
         panel.Children.Add(textInput);
         panel.Children.Add(board);
         panel.Children.Add(footer);
-        board.MinHeight = _workspaceSection == "board" ? (_compact ? 240 : 400) : 118;
+        board.MinHeight = _compact ? 240 : 118;
         board.Updated += RefreshControls;
         board.Failed += error => Report(error.Message);
         RefreshControls();

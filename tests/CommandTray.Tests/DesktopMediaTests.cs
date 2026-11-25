@@ -7,6 +7,29 @@ namespace CommandTray.Tests;
 public sealed class DesktopMediaTests
 {
     [Fact]
+    public void RenameCapturePreservesFormatAndRefusesExistingName()
+    {
+        var folder = Directory.CreateTempSubdirectory("CommandTrayMediaTest-");
+        try
+        {
+            using var media = new DesktopMedia(folder.FullName);
+            var source = Path.Combine(folder.FullName, "old.png");
+            var existing = Path.Combine(folder.FullName, "existing.png");
+            File.WriteAllText(source, "screenshot");
+            File.WriteAllText(existing, "existing screenshot");
+
+            Assert.Throws<ArgumentException>(() => media.RenameCapture(source, "../outside"));
+            Assert.Throws<IOException>(() => media.RenameCapture(source, "existing"));
+            var renamed = media.RenameCapture(source, "new");
+            Assert.Equal(Path.Combine(folder.FullName, "new.png"), renamed);
+            Assert.Equal("screenshot", File.ReadAllText(renamed));
+            Assert.Equal("existing screenshot", File.ReadAllText(existing));
+            Assert.False(File.Exists(source));
+        }
+        finally { folder.Delete(recursive: true); }
+    }
+
+    [Fact]
     public async Task EncoderFailureClearsSessionAndNextRecordingCanBeSaved()
     {
         var folder = Directory.CreateTempSubdirectory("CommandTrayMediaTest-");

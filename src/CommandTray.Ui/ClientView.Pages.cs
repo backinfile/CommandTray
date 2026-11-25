@@ -210,12 +210,6 @@ public sealed partial class ClientView
         if (spaceId.Length == 0) throw new InvalidOperationException(L("请先新建空间。", "Create a space first."));
         var created = await Execute("item_save", new() { ["spaceId"] = spaceId, ["item"] = NewItem("terminal", host.Text("name"), new()
             { ["shell"] = "ssh", ["hostId"] = host.Text("id") }) });
-        _page = "workspace";
-        _spaceId = spaceId;
-        _workspaceSection = "terminal";
-        _focusedPanelId = null;
-        _componentId = created.Text("id");
-        _viewport.Offset = default;
-        await LoadAsync();
+        Navigate("workspace", spaceId, created.Text("id"));
     }
 }

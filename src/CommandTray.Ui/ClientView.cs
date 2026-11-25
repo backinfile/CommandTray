@@ -155,12 +155,11 @@ public sealed partial class ClientView : UserControl
             "clip" or "clipboard" => "clipboard",
             "media" or "captures" or "capture" => Has(ClientFeatures.Capture) ? "capture" : "workspace",
             "settings" => "settings",
-            "ssh" => Has(ClientFeatures.Ssh) ? "ssh" : "workspace",
+            "ssh" => Has(ClientFeatures.Ssh) || OperatingSystem.IsAndroid() ? "ssh" : "workspace",
             _ => "workspace"
         };
         _requestedSpaceId = spaceId;
         if (spaceId is not null) _spaceId = spaceId;
-        _workspaceSection = "overview";
         _focusedPanelId = null;
         _componentId = componentId;
         _viewport.Offset = default;
@@ -201,6 +200,8 @@ public sealed partial class ClientView : UserControl
         _editing = false;
         _displayedWorkspace = null;
         _focusedPanel = null;
+        _workspaceTargets.Clear();
+        _locatedComponent = null;
         _terminals.Clear();
         _drawings.Clear();
         _transferRows = null;
@@ -212,6 +213,11 @@ public sealed partial class ClientView : UserControl
         Report("");
         try
         {
+            if (_page != "workspace" && !_compact)
+            {
+                try { await RefreshSidebarSpacesAsync(source.Token); }
+                catch (Exception error) when (!source.IsCancellationRequested) { Report(error.Message); }
+            }
             switch (_page)
             {
                 case "workspace": await RenderWorkspaceAsync(source.Token); break;
@@ -251,25 +257,23 @@ public sealed partial class ClientView : UserControl
         finally { _refreshingWorkspace = false; }
     }
 
-    private List<(string Id, string Zh, string En)> NavigationPages()
+    private List<(string Id, string Zh, string En)> ToolPages()
     {
         var pages = new List<(string Id, string Zh, string En)>
         {
-            ("workspace", _compact ? "空间" : "工作区", "Workspace"),
-            ("files", _compact ? "文件" : "共享文件", _compact ? "Files" : "Shared files"),
+            ("files", "共享文件", "Shared files"),
             ("clipboard", "剪贴板", "Clipboard")
         };
-        if (!_compact && Has(ClientFeatures.Commands)) pages.Insert(1, ("commands", "命令", "Commands"));
-        if (!_compact && Has(ClientFeatures.Capture)) pages.Add(("capture", "捕获", "Capture"));
-        if (!_compact && Has(ClientFeatures.Ssh)) pages.Add(("ssh", "SSH", "SSH"));
-        pages.Add(("settings", "设置", "Settings"));
+        if (Has(ClientFeatures.Commands)) pages.Insert(0, ("commands", "命令管理", "Commands"));
+        if (Has(ClientFeatures.Capture)) pages.Add(("capture", "截图与录屏", "Screen capture"));
+        if (Has(ClientFeatures.Ssh) || OperatingSystem.IsAndroid()) pages.Add(("ssh", "SSH 主机", "SSH hosts"));
         return pages;
     }
 
-    private Button NavigationButton(string id, string name)
+    private Button NavigationButton(string id, string name, Func<Task>? action = null)
     {
         string glyph = PageGlyph(id);
-        var button = Action(name, () => { Navigate(id); return Task.CompletedTask; }, name, glyph);
+        var button = Action(name, action ?? (() => { Navigate(id); return Task.CompletedTask; }), name, glyph);
         if (_compact)
         {
             var label = IconLabel(glyph, name);
@@ -287,11 +291,14 @@ public sealed partial class ClientView : UserControl
         }
         else if (_sidebarCollapsed) button.Content = TrayGlyph.Icon(glyph, 19);
         button.Classes.Add("navigation");
-        if (_page == id) button.Classes.Add("selected");
+        if (_page == id || id == "tools" && _page is not ("workspace" or "settings")) button.Classes.Add("selected");
         return button;
     }
 
-    private static string PageGlyph(string id) => id switch { "workspace" => "spaces", "commands" => "terminal", _ => id };
+    private static string PageGlyph(string id) => id switch
+    {
+        "workspace" => "spaces", "commands" => "terminal", "tools" => "folder-open", _ => id
+    };
 
     private bool Has(ClientFeatures feature) => (_backend.Features & feature) != 0;
     private string L(string zh, string en) => _english ? en : zh;

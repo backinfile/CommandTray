@@ -313,24 +313,31 @@ internal sealed class DesktopMcpTools(DesktopRuntime desktop)
                 _ => DisplayBounds(mode)
             });
             var path = desktop.Media.Screenshot(area, coordinates is not null);
-            if (copy) CopyScreenshotImage(path);
-            return new { status = "saved", path };
+            return CapturedScreenshot(path, copy);
         }, cancellationToken), cancellationToken);
 
     [McpServerTool(Name = "select_screenshot_region", UseStructuredContent = true)]
     [Description("Open the local desktop area selector and save the selected region.")]
     public Task<object> SelectScreenshot(CancellationToken cancellationToken) =>
-        SelectScreenshotAsync(hide: false, cancellationToken);
+        SelectScreenshotAsync(false, 0, true, cancellationToken);
 
-    internal Task<object> SelectScreenshotAsync(bool hide, CancellationToken cancellationToken) =>
-        desktop.CaptureInteractionAsync(hide, 0, false, () => desktop.OnUiAsync<object>(() =>
+    internal Task<object> SelectScreenshotAsync(bool hide, int delay, bool copy, CancellationToken cancellationToken) =>
+        desktop.CaptureInteractionAsync(hide, delay, false, () => desktop.OnUiAsync<object>(() =>
         {
-            var rectangle = desktop.SelectScreenshotRegion();
-            if (rectangle is null) return new { status = "cancelled", path = (string?)null };
-            var path = desktop.Media.Screenshot(rectangle, rememberRegion: true);
-            CopyScreenshotImage(path);
-            return new { status = "saved", path = (string?)path };
+            var path = desktop.CaptureSelectedRegion();
+            return path is null ? new { status = "cancelled", path } : CapturedScreenshot(path, copy);
         }, cancellationToken), cancellationToken);
+
+    private static object CapturedScreenshot(string path, bool copy)
+    {
+        string? warning = null;
+        try { if (copy) CopyScreenshotImage(path); }
+        catch (System.Runtime.InteropServices.ExternalException)
+        {
+            warning = Localizer.T("Screenshot saved. The clipboard is busy.", "截图已保存，剪贴板正忙。");
+        }
+        return new { status = "saved", path, warning };
+    }
 
     internal static object[] CaptureDisplays() => Screen.AllScreens.Select((screen, index) => (object)new
     {

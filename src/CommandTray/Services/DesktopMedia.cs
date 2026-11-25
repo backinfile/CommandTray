@@ -49,10 +49,30 @@ internal sealed partial class DesktopMedia : IDisposable
 
     public string Screenshot(Rectangle? region = null, bool rememberRegion = false)
     {
-        var rectangle = ValidateArea(region ?? SystemInformation.VirtualScreen);
-        using var bitmap = new Bitmap(rectangle.Width, rectangle.Height);
-        using (var graphics = Graphics.FromImage(bitmap))
+        var rectangle = region ?? SystemInformation.VirtualScreen;
+        using var bitmap = CapturePixels(rectangle);
+        return SaveScreenshot(bitmap, rememberRegion ? rectangle : null);
+    }
+
+    internal static Bitmap CapturePixels(Rectangle area)
+    {
+        var rectangle = ValidateArea(area);
+        var bitmap = new Bitmap(rectangle.Width, rectangle.Height);
+        try
+        {
+            using var graphics = Graphics.FromImage(bitmap);
             graphics.CopyFromScreen(rectangle.Location, Point.Empty, rectangle.Size, CopyPixelOperation.SourceCopy);
+            return bitmap;
+        }
+        catch
+        {
+            bitmap.Dispose();
+            throw;
+        }
+    }
+
+    internal string SaveScreenshot(Bitmap bitmap, Rectangle? rememberedRegion)
+    {
         var file = NewFile(".png");
         var temporary = file + ".partial";
         try
@@ -61,8 +81,8 @@ internal sealed partial class DesktopMedia : IDisposable
             File.Move(temporary, file);
         }
         finally { File.Delete(temporary); }
-        if (rememberRegion)
-            lock (_gate) _lastRegion = rectangle;
+        if (rememberedRegion is not null)
+            lock (_gate) _lastRegion = rememberedRegion;
         return file;
     }
 
@@ -86,6 +106,23 @@ internal sealed partial class DesktopMedia : IDisposable
         if (!IsCapture(candidate) || !File.Exists(candidate))
             throw new FileNotFoundException(Localizer.T("Capture not found.", "找不到捕获文件。"), name);
         return candidate;
+    }
+
+    public string RenameCapture(string capture, string name)
+    {
+        var path = ResolveCapture(capture);
+        var stem = name.Trim();
+        if (stem.Length == 0 || stem.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 || stem.EndsWith('.'))
+            throw new ArgumentException(Localizer.T("Enter a valid file name.", "请输入有效的文件名。"));
+        var extension = Path.GetExtension(path);
+        var target = Path.Combine(_folder, stem.EndsWith(extension, StringComparison.OrdinalIgnoreCase) ? stem : stem + extension);
+        if (target.Equals(path, StringComparison.Ordinal)) return path;
+        try { File.Move(path, target); }
+        catch (IOException) when (File.Exists(target) && !target.Equals(path, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new IOException(Localizer.T("A capture with that name already exists.", "已有同名捕获文件。"));
+        }
+        return target;
     }
 
     public async Task<string[]> AudioDevicesAsync(CancellationToken cancellationToken)

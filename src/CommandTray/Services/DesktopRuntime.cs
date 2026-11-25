@@ -59,8 +59,14 @@ internal sealed class DesktopRuntime : IDisposable
     public string? PromptSecret(string title) =>
         (_shell ?? throw new InvalidOperationException("The Windows application is unavailable.")).PromptSecret(title);
 
-    public Rectangle? SelectScreenshotRegion() =>
-        DesktopCapturesPanel.SelectRegion(null);
+    public Rectangle? SelectScreenshotRegion() => DesktopCapturesPanel.SelectRegion(null);
+
+    public string? CaptureSelectedRegion()
+    {
+        string? path = null;
+        DesktopCapturesPanel.SelectRegion(null, (area, bitmap) => path = Media.SaveScreenshot(bitmap, area));
+        return path;
+    }
 
     public async Task<T> CaptureInteractionAsync<T>(bool hide, int delay, bool stayHidden, Func<Task<T>> capture,
         CancellationToken cancellationToken)

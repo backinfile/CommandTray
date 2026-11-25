@@ -64,12 +64,10 @@ public sealed partial class ClientView
         }
     }
 
-    private async Task OpenPaletteAsync()
+    private Action ShowPalette(string label, string placeholder, List<PaletteEntry> entries)
     {
-        if (_paletteOverlay.IsVisible || _compact) return;
         _focusBeforePalette = TopLevel.GetTopLevel(this)?.FocusManager?.GetFocusedElement();
-        var label = L("快速查找", "Quick find");
-        var query = new TextBox { PlaceholderText = L("搜索空间、组件和操作", "Find spaces, panels and actions") };
+        var query = new TextBox { PlaceholderText = placeholder };
         query.Classes.Add("palette-query");
         Avalonia.Automation.AutomationProperties.SetName(query, label);
         var matches = new ListBox { MaxHeight = 320, SelectionMode = SelectionMode.Single };
@@ -89,7 +87,7 @@ public sealed partial class ClientView
         body.Children.Add(results);
         var panel = new Border
         {
-            Width = Math.Min(560, Bounds.Width - 48),
+            Width = Math.Max(0, Math.Min(560, Bounds.Width - 32)),
             Padding = new Thickness(14),
             Margin = new Thickness(0, 68, 0, 0),
             HorizontalAlignment = HorizontalAlignment.Center,
@@ -101,15 +99,6 @@ public sealed partial class ClientView
         _paletteOverlay.Child = panel;
         _paletteOverlay.IsVisible = true;
         query.Focus();
-
-        var entries = NavigationPages().Select(page => new PaletteEntry(L(page.Zh, page.En), L("页面", "Page"),
-            PageGlyph(page.Id), () =>
-            {
-                Navigate(page.Id);
-                return Task.CompletedTask;
-            })).ToList();
-        entries.Add(new(_sidebarCollapsed ? L("展开侧栏", "Expand sidebar") : L("收起侧栏", "Collapse sidebar"),
-            L("操作", "Action"), _sidebarCollapsed ? "rail-expand" : "rail-collapse", ToggleSidebarAsync));
 
         void UpdateMatches()
         {
@@ -132,7 +121,10 @@ public sealed partial class ClientView
             empty.IsVisible = matches.ItemCount == 0;
         }
 
-        query.TextChanged += (_, _) => UpdateMatches();
+        query.PropertyChanged += (_, args) =>
+        {
+            if (args.Property == TextBox.TextProperty) UpdateMatches();
+        };
         panel.AddHandler(KeyDownEvent, async (_, args) =>
         {
             if (args.Key is Key.Down or Key.Up && matches.ItemCount > 0)
@@ -148,9 +140,18 @@ public sealed partial class ClientView
             }
         }, Avalonia.Interactivity.RoutingStrategies.Tunnel);
         UpdateMatches();
+        return () => { if (ReferenceEquals(_paletteOverlay.Child, panel)) UpdateMatches(); };
+    }
 
+    private async Task OpenPaletteAsync()
+    {
+        if (_paletteOverlay.IsVisible || _compact) return;
+        var entries = ToolPages().Select(ToolEntry).ToList();
+        entries.Add(ToolEntry(("settings", "设置", "Settings")));
+        entries.Add(new(_sidebarCollapsed ? L("展开侧栏", "Expand sidebar") : L("收起侧栏", "Collapse sidebar"),
+            L("操作", "Action"), _sidebarCollapsed ? "rail-expand" : "rail-collapse", ToggleSidebarAsync));
+        var update = ShowPalette(L("快速查找", "Quick find"), L("搜索空间、组件和操作", "Find spaces, panels and actions"), entries);
         var document = _displayedWorkspace ?? await Execute("workspace_read", []);
-        if (!ReferenceEquals(_paletteOverlay.Child, panel)) return;
         foreach (var space in document.Array("spaces").OfType<JsonObject>())
         {
             var id = space.Text("id");
@@ -160,7 +161,8 @@ public sealed partial class ClientView
             {
                 var itemId = component.Text("id");
                 var kind = component.Text("kind");
-                entries.Add(new(component.Text("title", kind), name, ComponentGlyph(kind),
+                if (!SupportsWorkspaceComponent(kind)) continue;
+                entries.Add(new(ComponentTitle(component), $"{name} · {ComponentType(kind)}", ComponentGlyph(kind),
                     () => OpenPaletteSpaceAsync(id, itemId)));
             }
         }
@@ -175,8 +177,15 @@ public sealed partial class ClientView
             void Add(string kind, string title, string componentName) =>
                 entries.Insert(0, new(title, L("操作", "Action"), ComponentGlyph(kind), () => ItemForm(current, kind, componentName)));
         }
-        UpdateMatches();
+        update();
     }
+
+    private PaletteEntry ToolEntry((string Id, string Zh, string En) page) =>
+        new(L(page.Zh, page.En), L("工具", "Tool"), PageGlyph(page.Id), () =>
+        {
+            Navigate(page.Id);
+            return Task.CompletedTask;
+        });
 
     private async Task RunPaletteEntryAsync(PaletteEntry entry)
     {
@@ -196,6 +205,11 @@ public sealed partial class ClientView
 
     private async Task OpenPaletteSpaceAsync(string spaceId, string? componentId = null)
     {
+        if (_page == "workspace" && _spaceId == spaceId && _displayedWorkspace is not null)
+        {
+            if (componentId is not null) LocateWorkspaceComponent(componentId);
+            return;
+        }
         await Execute("space_activate", new() { ["spaceId"] = spaceId });
         Navigate("workspace", spaceId, componentId);
     }

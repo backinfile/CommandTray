@@ -16,10 +16,17 @@ public sealed partial class ClientView
 {
     private string? _captureSelection;
     private int _captureFilter;
+    private string _captureQuery = "";
+    private string _screenshotSource = "region";
+    private int _screenshotDelay;
+    private bool _copyScreenshots = true;
+    private RecordingPreferences _recordingPreferences = new("primary", 24, "mp4", "", 0, true);
+
+    private sealed record RecordingPreferences(string Source, int Fps, string Format, string Audio, int Delay, bool Cursor);
 
     private async Task RenderCaptureAsync(CancellationToken token)
     {
-        Header(L("屏幕捕获", "Screen capture"));
+        Header(L("截图与录屏", "Screen capture"));
         var captures = (await ReadPageContent("capture_list", token) as JsonArray ?? [])
             .Select(entry => TextOf(entry, "path")).Where(path => path.Length > 0).ToArray();
         var sources = await Execute("capture_sources", [], token);
@@ -35,7 +42,25 @@ public sealed partial class ClientView
         recordingError.Classes.Add("form-error");
         recordingError.TextWrapping = TextWrapping.Wrap;
         AutomationProperties.SetLiveSetting(recordingError, AutomationLiveSetting.Assertive);
-        var capture = PrimaryAction(L("区域截图", "Capture region"), () => Capture("capture_select", new() { ["hideWindow"] = true }, token), "capture");
+        var modes = new List<(string Label, string Value)>
+        {
+            (L("选择区域", "Select a region"), "region"),
+            (L("活动窗口", "Active window"), "window"),
+            (L("主显示器", "Primary display"), "primary"),
+            (L("全部显示器", "All displays"), "desktop")
+        };
+        if (displays.Length > 1) modes.AddRange(displays);
+        if (sources.Flag("lastRegion")) modes.Add((L("上次区域", "Last region"), "last"));
+        modes.Add((L("输入坐标…", "Enter coordinates…"), "coordinates"));
+        var scope = CaptureChoice(L("范围", "Source"), modes.Select(mode => mode.Label), Math.Max(0, modes.FindIndex(mode => mode.Value == _screenshotSource)));
+        var delays = new[] { 0, 3, 5, 10 };
+        var wait = CaptureChoice(L("延时", "Delay"), delays.Select(delay => delay == 0 ? L("立即", "Now") : L($"{delay} 秒", $"{delay} seconds")),
+            Array.IndexOf(delays, _screenshotDelay));
+        var copy = new CheckBox { Content = L("截图后复制", "Copy after capture"), IsChecked = _copyScreenshots };
+        scope.SelectionChanged += (_, _) => { if (scope.SelectedIndex >= 0) _screenshotSource = modes[scope.SelectedIndex].Value; };
+        wait.SelectionChanged += (_, _) => { if (wait.SelectedIndex >= 0) _screenshotDelay = delays[wait.SelectedIndex]; };
+        copy.IsCheckedChanged += (_, _) => _copyScreenshots = copy.IsChecked == true;
+        var capture = PrimaryAction(L("截图", "Take screenshot"), StartScreenshotAsync, "capture");
         var record = Action("", async () =>
         {
             if (recording.Flag("recording")) await Capture("capture_record_stop", [], token);
@@ -43,23 +68,14 @@ public sealed partial class ClientView
         });
         var discard = Action(L("放弃录屏", "Discard recording"), () => Confirm(L("放弃当前录屏？", "Discard this recording?"),
             () => Capture("capture_record_discard", [], token)));
-        var screenshotActions = new List<(string Label, Func<Task> Action)>
+        Header(L("截图与录屏", "Screen capture"), record);
+        var controls = new WrapPanel { ItemSpacing = 9, LineSpacing = 7, Children =
         {
-            (L("活动窗口截图", "Capture active window"), () => Take("window")),
-            (L("主显示器截图", "Capture primary display"), () => Take("primary")),
-            (L("全屏截图", "Capture all displays"), () => Take("desktop")),
-            (L("延时截图…", "Delayed screenshot…"), DelayedScreenshot),
-            (L("输入区域坐标…", "Enter region coordinates…"), CoordinateScreenshot),
-            (L("打开捕获目录", "Open capture folder"), async () => await Execute("capture_reveal", [], token))
-        };
-        if (sources.Flag("lastRegion"))
-            screenshotActions.Insert(1, (L("上次区域截图", "Capture last region"), () => Take("last")));
-        var more = Menu("⋯", screenshotActions.ToArray());
-        var controls = new WrapPanel { ItemSpacing = 7, LineSpacing = 6, Children = { capture, record, more } };
-        var heading = PageHeading(L("屏幕捕获", "Screen capture"), summary, _compact ? null : controls);
-        _contents.Children.Add(heading);
-        if (_compact) _contents.Children.Add(controls);
-        _contents.Children.Add(new WrapPanel { ItemSpacing = 10, LineSpacing = 6, Children = { recordingFile, discard } });
+            CaptureField(L("范围", "Source"), scope), CaptureField(L("延时", "Delay"), wait), copy, capture
+        }};
+        _contents.Children.Add(controls);
+        var recordingStatus = new WrapPanel { ItemSpacing = 10, LineSpacing = 6, Children = { summary, recordingFile, discard } };
+        _contents.Children.Add(recordingStatus);
         _contents.Children.Add(recordingError);
         UpdateRecording();
 
@@ -85,31 +101,41 @@ public sealed partial class ClientView
             catch (Exception error) when (!token.IsCancellationRequested) { Report(error.Message); }
             finally { polling = false; }
         };
-        heading.AttachedToVisualTree += (_, _) => timer.Start();
-        heading.DetachedFromVisualTree += (_, _) => timer.Stop();
-        if (TopLevel.GetTopLevel(heading) is not null) timer.Start();
+        controls.AttachedToVisualTree += (_, _) => timer.Start();
+        controls.DetachedFromVisualTree += (_, _) => timer.Stop();
+        if (TopLevel.GetTopLevel(controls) is not null) timer.Start();
 
         var filter = CaptureChoice(L("捕获类型", "Capture type"), new[] { L("全部", "All"), L("截图", "Screenshots"), L("录屏", "Recordings") });
         filter.SelectedIndex = _captureFilter;
+        var search = new TextBox { Text = _captureQuery, PlaceholderText = L("搜索文件名", "Search file names"), Margin = new Thickness(9, 8) };
+        AutomationProperties.SetName(search, L("搜索捕获历史", "Search captures"));
+        var folder = IconButton("folder-open", L("打开捕获目录", "Open capture folder"), async () => await Execute("capture_reveal", [], token));
         var list = new StackPanel();
         var detail = new ContentControl { HorizontalContentAlignment = HorizontalAlignment.Stretch };
-        var history = WorkbenchPanel(L("捕获历史", "Capture history"), "history", list, filter);
+        var history = WorkbenchPanel(L("捕获历史", "Capture history"), "history", new StackPanel { Children = { search, list } }, Row(filter, folder));
         if (_compact) { _contents.Children.Add(history); _contents.Children.Add(detail); }
         else _contents.Children.Add(WorkbenchSplit(history, detail, "1*,1.55*"));
         filter.SelectionChanged += (_, _) => { _captureFilter = filter.SelectedIndex; DrawList(); };
+        search.PropertyChanged += (_, args) =>
+        {
+            if (args.Property != TextBox.TextProperty) return;
+            _captureQuery = search.Text ?? "";
+            DrawList();
+        };
         DrawList();
 
         void UpdateRecording()
         {
             string state = recording.Text("state");
             var active = recording.Flag("recording");
+            recordingStatus.IsVisible = active;
             string elapsed = TimeSpan.FromSeconds(recording.Integer("elapsedSeconds")).ToString(@"hh\:mm\:ss", CultureInfo.InvariantCulture);
             summary.Text = state switch
             {
                 "starting" => L("正在启动录屏…", "Starting recording…"),
                 "saving" => L("正在结束录屏…", "Finishing recording…"),
                 "recording" => L($"正在录制 · {elapsed}", $"Recording · {elapsed}"),
-                _ => L($"{captures.Length} 项", $"{captures.Length} captures")
+                _ => ""
             };
             string label = active ? L("结束录屏", "Stop recording") : L("开始录屏", "Record screen");
             if (AutomationProperties.GetName(record) != label)
@@ -125,28 +151,22 @@ public sealed partial class ClientView
             recordingError.IsVisible = recordingError.Text.Length > 0;
         }
 
-        Task Take(string mode, int delay = 0) => Capture("capture_take",
-            new() { ["mode"] = mode, ["delay"] = delay, ["hideWindow"] = true, ["copy"] = true }, token);
-
-        Task DelayedScreenshot()
+        Task StartScreenshotAsync()
         {
-            var choices = new[] { (L("活动窗口", "Active window"), "window"), (L("所有显示器", "All displays"), "desktop") }
-                .Concat(displays).ToArray();
-            var target = CaptureChoice(L("范围", "Source"), choices.Select(item => item.Item1));
-            var wait = CaptureChoice(L("延时", "Delay"), new[] { L("3 秒", "3 seconds"), L("5 秒", "5 seconds"), L("10 秒", "10 seconds") });
-            return ShowForm(L("延时截图", "Delayed screenshot"), L("截图", "Capture"), L("正在等待…", "Waiting…"),
-                (_, ct) => Capture("capture_take", new() { ["mode"] = choices[target.SelectedIndex].Item2,
-                    ["delay"] = new[] { 3, 5, 10 }[wait.SelectedIndex], ["hideWindow"] = true, ["copy"] = true }, ct),
-                [], new StackPanel { Spacing = 8, Children = { Muted(L("范围", "Source")), target, Muted(L("延时", "Delay")), wait } },
-                cancellable: true, initialFocus: target);
+            var mode = modes[scope.SelectedIndex].Value;
+            if (mode == "coordinates") return CoordinateScreenshot();
+            return Capture(mode == "region" ? "capture_select" : "capture_take", ScreenshotArguments(mode), token);
         }
+
+        JsonObject ScreenshotArguments(string mode) =>
+            new() { ["mode"] = mode, ["delay"] = _screenshotDelay, ["hideWindow"] = true, ["copy"] = _copyScreenshots };
 
         Task CoordinateScreenshot()
         {
             Field[] coordinates = [new("x", "X"), new("y", "Y"), new("width", L("宽", "Width")), new("height", L("高", "Height"))];
             return Form(L("区域截图", "Region capture"), L("截图", "Capture"), L("正在截图…", "Capturing…"), (values, ct) =>
             {
-                var area = new JsonObject { ["hideWindow"] = true, ["copy"] = true };
+                var area = ScreenshotArguments("desktop");
                 foreach (var field in coordinates)
                 {
                     if (!int.TryParse(values.Text(field.Key), NumberStyles.Integer, CultureInfo.InvariantCulture, out int value))
@@ -162,11 +182,14 @@ public sealed partial class ClientView
         void DrawList()
         {
             list.Children.Clear();
-            var paths = captures.Where(path => _captureFilter == 0 || IsScreenshot(path) == (_captureFilter == 1)).ToArray();
+            var query = _captureQuery.Trim();
+            var paths = captures.Where(path => (_captureFilter == 0 || IsScreenshot(path) == (_captureFilter == 1)) &&
+                Path.GetFileName(path).Contains(query, StringComparison.CurrentCultureIgnoreCase)).ToArray();
+            var previous = _captureSelection;
             _captureSelection = paths.Contains(_captureSelection) ? _captureSelection : paths.FirstOrDefault();
             if (_captureSelection is null)
             {
-                list.Children.Add(EmptyState("capture", L("暂无捕获", "No captures")));
+                list.Children.Add(EmptyState("capture", query.Length > 0 ? L("没有匹配的捕获", "No matching captures") : L("暂无捕获", "No captures")));
                 detail.Content = null;
                 return;
             }
@@ -187,7 +210,7 @@ public sealed partial class ClientView
                 rows.Add((row, path));
                 list.Children.Add(row);
             }
-            DrawDetail(_captureSelection);
+            if (detail.Content is null || previous != _captureSelection) DrawDetail(_captureSelection);
         }
 
         void DrawDetail(string selected)
@@ -199,7 +222,15 @@ public sealed partial class ClientView
             {
                 Action(picture ? L("打开", "Open") : L("播放", "Play"), async () => await Execute("capture_open", args, token)),
                 Action(L("另存为…", "Save as…"), () => ExportCaptureAsync(selected)),
-                Menu("⋯", (L("在资源管理器中显示", "Show in File Explorer"), async () => await Execute("capture_reveal", args, token)),
+                Menu("⋯", (L("重命名…", "Rename…"), () => Form(L("重命名", "Rename"), values =>
+                        Capture("capture_rename", new() { ["path"] = selected, ["name"] = values.RequireText("name") }, token),
+                        new Field("name", L("文件名", "File name"), Path.GetFileNameWithoutExtension(selected)))),
+                    (L("复制文件路径", "Copy file path"), async () =>
+                    {
+                        await Execute("clipboard_local_write", new() { ["text"] = selected }, token);
+                        Report(L("路径已复制", "Path copied"));
+                    }),
+                    (L("在资源管理器中显示", "Show in File Explorer"), async () => await Execute("capture_reveal", args, token)),
                     (L("移到回收站", "Move to Recycle Bin"), () => Confirm(L("移到回收站？", "Move to Recycle Bin?"),
                         () => Capture("capture_recycle", args, token))))
             }};
@@ -237,18 +268,28 @@ public sealed partial class ClientView
         }
     }
 
+    private Control CaptureField(string label, Control control)
+    {
+        var text = Muted(label);
+        text.VerticalAlignment = VerticalAlignment.Center;
+        return Row(text, control);
+    }
+
     private async Task RecordingOptionsAsync((string Label, string Value)[] displays, CancellationToken token)
     {
         var sources = new[] { (L("主显示器", "Primary display"), "primary"), (L("所有显示器", "All displays"), "desktop"),
             (L("选择区域", "Select a region"), "region") }.Concat(displays).ToArray();
-        var source = CaptureChoice(L("范围", "Source"), sources.Select(item => item.Item1));
+        var preferences = _recordingPreferences;
+        var source = CaptureChoice(L("范围", "Source"), sources.Select(item => item.Item1),
+            Math.Max(0, Array.FindIndex(sources, option => option.Item2 == preferences.Source)));
         var rates = new[] { 15, 24, 30, 60 };
-        var fps = CaptureChoice(L("帧率", "Frame rate"), rates.Select(rate => $"{rate} fps"), 1);
+        var fps = CaptureChoice(L("帧率", "Frame rate"), rates.Select(rate => $"{rate} fps"), Array.IndexOf(rates, preferences.Fps));
         var formats = new[] { "MP4", "MKV" };
-        var format = CaptureChoice(L("格式", "Format"), formats);
+        var format = CaptureChoice(L("格式", "Format"), formats, Array.IndexOf(formats, preferences.Format.ToUpperInvariant()));
         var delays = new[] { 0, 3, 5, 10 };
-        var delay = CaptureChoice(L("倒计时", "Countdown"), delays.Select(value => value == 0 ? L("立即", "None") : L($"{value} 秒", $"{value} seconds")));
-        var cursor = new CheckBox { Content = L("录制鼠标指针", "Record cursor"), IsChecked = true };
+        var delay = CaptureChoice(L("倒计时", "Countdown"), delays.Select(value => value == 0 ? L("立即", "None") : L($"{value} 秒", $"{value} seconds")),
+            Array.IndexOf(delays, preferences.Delay));
+        var cursor = new CheckBox { Content = L("录制鼠标指针", "Record cursor"), IsChecked = preferences.Cursor };
         var audio = CaptureChoice(L("声音设备", "Audio device"), new[] { L("无声音", "No audio") });
         var devices = new List<string> { "" };
         var audioStatus = Muted(L("正在读取声音设备…", "Loading audio devices…"));
@@ -258,12 +299,18 @@ public sealed partial class ClientView
             Muted(L("声音设备", "Audio device")), audio, audioStatus, Muted(L("倒计时", "Countdown")), delay, cursor
         }};
         await ShowForm(L("录屏设置", "Recording options"), L("开始录屏", "Start recording"), L("正在启动录屏…", "Starting recording…"),
-            (_, ct) => Capture("capture_record_start", new()
+            (_, ct) =>
             {
-                ["mode"] = sources[source.SelectedIndex].Item2, ["frameRate"] = rates[fps.SelectedIndex],
-                ["format"] = formats[format.SelectedIndex].ToLowerInvariant(), ["audio"] = devices[audio.SelectedIndex],
-                ["delay"] = delays[delay.SelectedIndex], ["cursor"] = cursor.IsChecked == true, ["hideWindow"] = true
-            }, ct), [], fields, cancellable: true, initialFocus: source);
+                var chosen = new RecordingPreferences(sources[source.SelectedIndex].Item2, rates[fps.SelectedIndex],
+                    formats[format.SelectedIndex].ToLowerInvariant(), devices[Math.Max(0, audio.SelectedIndex)],
+                    delays[delay.SelectedIndex], cursor.IsChecked == true);
+                _recordingPreferences = chosen;
+                return Capture("capture_record_start", new()
+                {
+                    ["mode"] = chosen.Source, ["frameRate"] = chosen.Fps, ["format"] = chosen.Format, ["audio"] = chosen.Audio,
+                    ["delay"] = chosen.Delay, ["cursor"] = chosen.Cursor, ["hideWindow"] = true
+                }, ct);
+            }, [], fields, cancellable: true, initialFocus: source);
         var dialogToken = CurrentActionCancellation;
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(token, dialogToken);
         try
@@ -271,7 +318,7 @@ public sealed partial class ClientView
             var result = await Execute("capture_sources", new() { ["includeAudio"] = true }, linked.Token);
             devices.AddRange(result.Array("audio").Select(node => TextOf(node)).Where(name => name.Length > 0));
             audio.ItemsSource = devices.Select(name => name.Length == 0 ? L("无声音", "No audio") : name).ToArray();
-            audio.SelectedIndex = 0;
+            audio.SelectedIndex = Math.Max(0, devices.IndexOf(preferences.Audio));
             audioStatus.IsVisible = false;
         }
         catch (OperationCanceledException) when (linked.IsCancellationRequested) { }
@@ -286,8 +333,13 @@ public sealed partial class ClientView
         {
             _captureSelection = path;
             _captureFilter = 0;
+            _captureQuery = "";
         }
-        if (_page == "capture") await LoadAsync();
+        if (_page == "capture")
+        {
+            await LoadAsync();
+            if (result.Text("warning") is { Length: > 0 } warning) Report(warning);
+        }
     }
 
     private ComboBox CaptureChoice(string label, IEnumerable<string> choices, int selected = 0)

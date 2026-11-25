@@ -131,25 +131,6 @@ public sealed partial class ClientView
     {
         var contents = new StackPanel { Spacing = 4 };
         string path = item.Object("data").Text("path");
-        var previewPane = _workspaceSection == "directory" && !_compact ? new ContentControl
-        {
-            HorizontalContentAlignment = HorizontalAlignment.Stretch,
-            Content = WorkbenchPanel(L("文件预览", "File preview"), "file", Muted(L("选择文件", "Select a file")))
-        } : null;
-        int previewRequest = 0;
-
-        async Task OpenPreview(string file)
-        {
-            if (previewPane is null) { await PreviewAsync(file); return; }
-            int ticket = ++previewRequest;
-            var preview = new StackPanel { Spacing = 7, Margin = new Thickness(13), Children = { Muted(L("正在加载…", "Loading…")) } };
-            previewPane.Content = WorkbenchPanel(Path.GetFileName(file), "file", preview);
-            var token = _loading?.Token ?? CancellationToken.None;
-            var result = await Execute("local_preview", new() { ["path"] = file }, token);
-            if (ticket != previewRequest) return;
-            preview.Children.Clear();
-            preview.Children.Add(new ScrollViewer { Content = Body(TextOf(result)), MaxHeight = 450 });
-        }
 
         async Task Show(string folder)
         {
@@ -208,7 +189,7 @@ public sealed partial class ClientView
                 var name = entry.Text("name");
                 bool directory = entry.Flag("isDirectory");
                 var link = Action(name, directory
-                    ? () => SaveTilePath(spaceId, item, leaf) : () => OpenPreview(leaf), glyph: directory ? "files" : "file");
+                    ? () => SaveTilePath(spaceId, item, leaf) : () => PreviewAsync(leaf), glyph: directory ? "files" : "file");
                 if (directory) link.Classes.Add("folder-entry");
                 link.Classes.Add("file-entry");
                 var menu = Menu("⋯", (L("复制到…", "Copy to…"), () => Form(name, values => Change("local_copy",
@@ -230,8 +211,7 @@ public sealed partial class ClientView
                     values => SaveTilePath(spaceId, item, values.RequireText("path")), new Field("path", L("路径", "Path"), path))));
             }
         };
-        var browser = new ScrollViewer { Content = contents, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
-        return previewPane is null ? browser : WorkbenchSplit(browser, previewPane);
+        return new ScrollViewer { Content = contents, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
     }
 
     private Task SaveTilePath(string spaceId, JsonObject item, string path)
@@ -243,15 +223,17 @@ public sealed partial class ClientView
 
     private async Task PreviewAsync(string path)
     {
-        var cancellation = _loading?.Token ?? CancellationToken.None;
-        _editing = true;
-        _workspaceGrid.IsVisible = false;
-        _contents.Children.Clear();
-        Header(Path.GetFileName(path), Action(L("返回", "Back"), LoadAsync));
-        _contents.Children.Add(Muted(L("正在加载…", "Loading…")));
-        var preview = await Execute("local_preview", new() { ["path"] = path }, cancellation);
-        _contents.Children.Clear();
-        _contents.Children.Add(Body(TextOf(preview)));
+        var content = new ContentControl { Content = Muted(L("正在加载…", "Loading…")) };
+        var close = CloseActionButton(L("关闭", "Close"));
+        OpenActionDialog(Path.GetFileName(path), content, Row(close), close);
+        var cancellation = CurrentActionCancellation;
+        try
+        {
+            var preview = await Execute("local_preview", new() { ["path"] = path }, cancellation);
+            content.Content = Body(TextOf(preview));
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
+        catch (Exception error) { content.Content = Muted(error.Message); }
     }
 
     private Control TerminalComponent(JsonObject item)
