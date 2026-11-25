@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#0f151e">
   <meta name="commandtray-version" content="__SUITE_VERSION__">
   <title>CommandTray Suite</title>
   <link rel="stylesheet" href="/commandtray.css">
@@ -11,13 +12,15 @@
   <script src="/commandtray.js" defer></script>
 </head>
 <body>
+  <a class="skip-link" href="#content">跳到内容</a>
   <div class="shell" id="shell">
     <header class="brand"><span class="mark" aria-hidden="true">▦</span><strong>CommandTray <small>Suite</small></strong></header>
     <header class="top" id="top"></header>
     <nav class="sidebar" id="sidebar" aria-label="主导航"></nav>
-    <main id="content" aria-label="工作区内容"></main>
+    <main id="content" aria-label="内容" tabindex="-1"></main>
   </div>
   <div class="status" id="status" role="status" hidden></div>
+  <div id="action-menu" class="action-menu" role="menu" hidden></div>
   <dialog id="dialog" aria-labelledby="dialog-title">
     <header class="dialog-head"><h2 id="dialog-title"></h2><button id="dialog-close" aria-label="关闭">×</button></header>
     <div class="dialog-content" id="dialog-content"></div>

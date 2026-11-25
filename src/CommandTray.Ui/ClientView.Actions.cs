@@ -104,12 +104,13 @@ public sealed partial class ClientView
         Func<JsonObject, CancellationToken, Task> save, params Field[] fields) =>
         ShowForm(title, submitLabel, pendingLabel, save, fields, cancellable: true);
 
-    private Task Confirm(string title, Func<Task> save) =>
-        Form(title, L("确认", "Confirm"), _ => save());
+    private Task Confirm(string title, Func<Task> save, string? destructiveLabel = null) =>
+        ShowForm(title, destructiveLabel ?? L("确认", "Confirm"), L("正在处理…", "Working…"),
+            (_, _) => save(), [], destructive: destructiveLabel is not null);
 
     private Task ShowForm(string title, string submitLabel, string pendingLabel,
         Func<JsonObject, CancellationToken, Task> save, Field[] fields, Control? extra = null, bool cancellable = false,
-        Control? initialFocus = null)
+        Control? initialFocus = null, bool destructive = false)
     {
         var body = new StackPanel { Spacing = 8 };
         var error = new TextBlock
@@ -181,6 +182,11 @@ public sealed partial class ClientView
                 progress.IsVisible = false;
             }
         });
+        if (destructive)
+        {
+            submit.Classes.Remove("primary");
+            submit.Classes.Add("danger");
+        }
         dialog = OpenActionDialog(title, body, new WrapPanel { ItemSpacing = 8, Children = { cancel, submit, progress } },
             initialFocus ?? firstInput ?? cancel);
         return Task.CompletedTask;

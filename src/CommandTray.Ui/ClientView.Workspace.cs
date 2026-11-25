@@ -54,16 +54,19 @@ public sealed partial class ClientView
             .Where(item => SupportsWorkspaceComponent(item.Text("kind"))).ToArray();
         if (_focusedPanelId is { } focused && !entries.Any(item => item.Text("id") == focused)) _focusedPanelId = null;
         var title = selected.Text("name");
-        var locate = Action(L("定位组件", "Locate component"), ShowWorkspaceLocatorAsync, glyph: "search");
+        var locate = SecondaryAction(L("定位组件", "Locate component"), ShowWorkspaceLocatorAsync, "search");
         locate.IsEnabled = entries.Length > 0;
         var add = AddComponentMenu(spaceId);
         var more = WorkspaceMenu(selected, relay);
+        var sync = paired
+            ? Action(L("同步", "Sync"), () => SyncAsync("sync_push"), glyph: "sync")
+            : Action(L("配对中转", "Pair relay"), () => PairForm(relay), glyph: "sync");
         if (_compact)
         {
             Header(title);
-            _contents.Children.Add(new WrapPanel { ItemSpacing = 6, LineSpacing = 5, Children = { locate, add, more } });
+            _contents.Children.Add(ActionBar(add, locate, sync, more));
         }
-        else Header(title, locate, add, more);
+        else Header(title, add, locate, sync, more);
 
         if (_displayedWorkspaceConflict)
             _contents.Children.Add(SettingRow(L("同步冲突", "Sync conflict"), WorkspaceConflictActions()));
@@ -194,24 +197,18 @@ public sealed partial class ClientView
         {
             (L("重命名空间", "Rename space"), () => Form(L("重命名空间", "Rename space"), values =>
                 Change("space_rename", new() { ["spaceId"] = id, ["name"] = values.Text("name") }),
-                new Field("name", L("名称", "Name"), selected.Text("name")))),
-            (L("删除空间", "Delete space"), () => Confirm(L("删除该空间？", "Delete this space?"), async () =>
-            {
-                _spaceId = null;
-                await Change("space_delete", new() { ["spaceId"] = id });
-            }))
+                new Field("name", L("名称", "Name"), selected.Text("name"))))
         };
         if (relay.Flag("paired"))
         {
-            actions.Add((L("同步", "Sync"), () => SyncAsync("sync_push")));
             actions.Add((L("从中转拉取", "Pull from relay"), () => SyncAsync("sync_pull")));
         }
-        else actions.Add((L("连接中转", "Connect to relay"), () => PairForm(relay)));
-        var menu = Menu("⋯", actions.ToArray());
-        var label = L("空间操作", "Space actions");
-        ToolTip.SetTip(menu, label);
-        Avalonia.Automation.AutomationProperties.SetName(menu, label);
-        return menu;
+        actions.Add((L("删除空间", "Delete space"), () => Confirm(L("删除该空间？", "Delete this space?"), async () =>
+        {
+            _spaceId = null;
+            await Change("space_delete", new() { ["spaceId"] = id });
+        }, L("删除空间", "Delete space"))));
+        return MoreActions(L("空间操作", "Space actions"), actions.ToArray());
     }
 
     private Task ItemForm(string spaceId, string kind, string name)
@@ -246,7 +243,7 @@ public sealed partial class ClientView
         var title = ComponentTitle(item);
         var body = kind switch
         {
-            "note" or "notes" => NoteComponent(spaceId, item),
+            "note" or "notes" => NoteComponent(item),
             "todo" or "tasks" => ChecklistComponent(spaceId, item),
             "board" or "whiteboard" => BoardComponent(spaceId, item),
             "folder" or "files" when Has(ClientFeatures.LocalFiles) => FilesComponent(spaceId, item),
@@ -266,7 +263,7 @@ public sealed partial class ClientView
         {
             (L("重命名", "Rename"), rename),
             (L("移除", "Remove"), () => Confirm(L("移除该组件？", "Remove component?"), () =>
-                Change("item_remove", new() { ["spaceId"] = spaceId, ["itemId"] = id })))
+                Change("item_remove", new() { ["spaceId"] = spaceId, ["itemId"] = id }), L("移除组件", "Remove component")))
         };
         if (kind is "note" or "notes")
         {
@@ -277,7 +274,6 @@ public sealed partial class ClientView
                     await Execute("clipboard_local_write", new() { ["text"] = note });
                     Report(L("已复制到本机剪贴板", "Copied to this device"));
                 }));
-            operations.Insert(0, (L("编辑", "Edit"), () => EditNote(spaceId, item)));
         }
         var handle = IconLabel(ComponentGlyph(kind), title, prominent: true);
         var iconTone = kind switch
@@ -290,8 +286,10 @@ public sealed partial class ClientView
         handle.Children[0].Classes.Add(iconTone);
         var content = new Grid { RowDefinitions = new RowDefinitions("Auto,*") };
         var actions = Row();
+        if (kind is "note" or "notes")
+            actions.Children.Add(IconButton("edit", L("编辑便签", "Edit note"), () => EditNote(spaceId, item)));
         if (!OperatingSystem.IsAndroid() || kind is "note" or "notes" or "todo" or "tasks" or "board" or "whiteboard")
-            actions.Children.Add(Menu("⋯", operations.ToArray()));
+            actions.Children.Add(MoreActions(L("组件操作", "Component actions"), operations.ToArray()));
         var heading = TitleRow(handle, actions);
         var headingLine = new Border { Child = heading };
         content.Children.Add(headingLine);
@@ -448,11 +446,11 @@ public sealed partial class ClientView
     private Task SaveItem(string spaceId, JsonObject item, bool preserveViewport = false) =>
         Change("item_save", new() { ["spaceId"] = spaceId, ["item"] = item }, preserveViewport);
 
-    private Control NoteComponent(string spaceId, JsonObject item)
+    private Control NoteComponent(JsonObject item)
     {
         var note = item.Object("data").Text("text");
         if (note.Length > 0) return Body(note);
-        return Action(L("写便签", "Write note"), () => EditNote(spaceId, item));
+        return Muted(L("暂无内容", "No content"));
     }
 
     private Task EditNote(string spaceId, JsonObject item) =>
@@ -487,12 +485,11 @@ public sealed partial class ClientView
             };
             check.Classes.Add("checklist-item");
             check.Click += async (_, _) => await Act(() => UpdateTask(spaceId, item, id, null, check.IsChecked));
-            var menu = Menu("⋯",
-                (L("编辑", "Edit"), () => EditTask(spaceId, item, task)),
+            var edit = IconButton("edit", L("编辑待办", "Edit task"), () => EditTask(spaceId, item, task));
+            var menu = MoreActions(L("待办操作", "Task actions"),
                 (L("删除", "Delete"), () => Confirm(L("删除该待办？", "Delete task?"),
-                    () => UpdateTask(spaceId, item, id, null, null))));
-            menu.VerticalAlignment = VerticalAlignment.Center;
-            tasks.Children.Add(TitleRow(check, menu));
+                    () => UpdateTask(spaceId, item, id, null, null), L("删除待办", "Delete task"))));
+            tasks.Children.Add(TitleRow(check, Row(edit, menu)));
         }
         var input = new TextBox { PlaceholderText = L("待办内容", "Task"), MaxLength = 500 };
         Avalonia.Automation.AutomationProperties.SetName(input, L("待办内容", "Task"));

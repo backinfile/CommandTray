@@ -27,12 +27,12 @@ public sealed partial class ClientView
             {
                 await Execute("update_install", [], cancellation);
             });
-        var check = Action(L("检查更新", "Check for updates"), async () =>
+        var check = PrimaryAction(L("检查更新", "Check for updates"), async () =>
         {
             state.Text = L("正在检查…", "Checking…");
             await Execute("update_check", []);
         }, glyph: "sync");
-        var cancel = Action(L("取消下载", "Cancel download"),
+        var cancel = SecondaryAction(L("取消下载", "Cancel download"),
             async () => await Execute("update_cancel", [], cancellation));
         var actions = new WrapPanel { ItemSpacing = 5, LineSpacing = 4, Margin = new Avalonia.Thickness(13, 9),
             Children = { check, cancel, apply } };
@@ -43,9 +43,8 @@ public sealed partial class ClientView
             Children =
             {
                 SettingRow(L("已安装版本", "Installed version"), version), SettingRow(label, automatic),
-                SettingRow(L("更新状态", "Update status"), state), progress,
-                SettingRow(L("更新源", "Update source"), source, "GitHub · ghfast.top · gh-proxy.com"),
-                actions
+                SettingRow(L("更新状态", "Update status"), state), progress, actions,
+                SettingRow(L("更新源", "Update source"), source, "GitHub · ghfast.top · gh-proxy.com")
             }
         };
         var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(400) };
@@ -68,6 +67,13 @@ public sealed partial class ClientView
         {
             string available = value.Text("availableVersion");
             string current = value.Text("state");
+            SetStatusTone(state, current switch
+            {
+                "ready" or "current" => "success",
+                "unreachable" => "warning",
+                "downloadFailed" or "failed" => "error",
+                _ => ""
+            });
             apply.IsVisible = current == "ready";
             check.IsVisible = current is not ("ready" or "downloading");
             check.IsEnabled = current != "checking";

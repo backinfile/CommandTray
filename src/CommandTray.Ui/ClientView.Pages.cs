@@ -182,8 +182,21 @@ public sealed partial class ClientView
         if (_actionOverlay.IsVisible) return;
         var list = new StackPanel();
         var back = CloseActionButton(L("返回", "Back"));
+        var import = PrimaryAction(L("导入密钥", "Import key"), () => Form(L("导入加密 SSH 密钥", "Import encrypted SSH key"), values =>
+            UpdateKeysAsync("ssh_import", values),
+            new Field("path", L("私钥路径", "Private key path")),
+            new Field("name", L("名称", "Name")),
+            new Field("passphrase", L("同步口令", "Sync passphrase"), Secret: true)));
         DrawKeys(initial);
-        OpenActionDialog(L("SSH 密钥", "SSH keys"), list, Row(back), back);
+        OpenActionDialog(L("SSH 密钥", "SSH keys"), list, ActionBar(back, import), import);
+
+        async Task UpdateKeysAsync(string operation, JsonObject arguments)
+        {
+            var cancellation = CurrentActionCancellation;
+            await Execute(operation, arguments, cancellation);
+            var current = await Execute("ssh_keys", [], cancellation) as JsonArray ?? [];
+            DrawKeys(current);
+        }
 
         void DrawKeys(JsonArray keys)
         {
@@ -192,12 +205,8 @@ public sealed partial class ClientView
             {
                 var id = key.Text("id");
                 list.Children.Add(Section(TitleRow(Heading(key.Text("name", id)),
-                    Action(L("删除", "Delete"), () => Confirm(L("删除密钥？", "Delete key?"), async () =>
-                    {
-                        await Change("ssh_key_delete", new() { ["id"] = id });
-                        var current = await Execute("ssh_keys", [], CurrentActionCancellation) as JsonArray ?? [];
-                        DrawKeys(current);
-                    })))));
+                    MoreActions(L("密钥操作", "Key actions"), (L("删除", "Delete"), () => Confirm(L("删除密钥？", "Delete key?"),
+                        () => UpdateKeysAsync("ssh_key_delete", new() { ["id"] = id }), L("删除密钥", "Delete key")))))));
             }
             if (list.Children.Count == 0) list.Children.Add(Muted(L("暂无密钥", "No keys")));
         }

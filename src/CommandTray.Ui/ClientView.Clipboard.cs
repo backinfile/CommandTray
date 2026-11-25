@@ -27,12 +27,11 @@ public sealed partial class ClientView
         var preferences = await Execute("clipboard_preferences", new() { ["includeEntries"] = true }, token);
         bool paired = relay.Flag("paired");
 
-        var actions = Row(
-            IconButton("sync", L("刷新", "Refresh"), LoadAsync),
-            Action(L("同步设置", "Sync settings"), () => OpenSettingsAsync("clip"), glyph: "settings"));
+        var actions = new List<Control>();
+        var more = new List<(string Label, Func<Task> Action)> { (L("刷新历史", "Refresh history"), LoadAsync) };
         if (paired)
         {
-            actions.Children.Add(PrimaryAction(_compact ? "+" : L("发送文本", "Send text"), () =>
+            actions.Add(PrimaryAction(L("发送文本", "Send text"), () =>
                 Form(L("发送文本", "Send text"), L("发送", "Send"), L("正在发送…", "Sending…"),
                     async (values, cancellation) =>
                     {
@@ -40,7 +39,7 @@ public sealed partial class ClientView
                         await LoadAsync();
                         Report(L("已发送", "Sent"));
                     }, new Field("text", L("文本", "Text"), Multiline: true)), "send"));
-            actions.Children.Add(IconButton("clipboard", L("发送本机剪贴板", "Send local clipboard"), async () =>
+            more.Insert(0, (L("发送本机剪贴板", "Send local clipboard"), async () =>
             {
                 var local = TextOf(await Execute("clipboard_local_read", [], token));
                 if (local.Length == 0) throw new InvalidOperationException(L("剪贴板没有文本。", "The clipboard has no text."));
@@ -48,10 +47,13 @@ public sealed partial class ClientView
                 Report(L("已发送", "Sent"));
             }));
         }
+        actions.Add(SecondaryAction(L("同步设置", "Sync settings"), () => OpenSettingsAsync("clip"), "settings"));
+        actions.Add(MoreActions(L("剪贴板历史操作", "Clipboard history actions"), more.ToArray()));
         Header(L("剪贴板", "Clipboard"));
-        _contents.Children.Add(PageHeading(L("剪贴板", "Clipboard"),
-            Muted(settings.Flag("clipboardAutoSync") ? ClipboardDirectionLabel(preferences.Text("direction", "both")) :
-                L("手动同步", "Manual sync")), actions));
+        var syncMode = Muted(settings.Flag("clipboardAutoSync") ? ClipboardDirectionLabel(preferences.Text("direction", "both")) :
+            L("手动同步", "Manual sync"));
+        SetStatusTone(syncMode, settings.Flag("clipboardAutoSync") ? paired ? "success" : "warning" : "");
+        _contents.Children.Add(PageActions(syncMode, actions.ToArray()));
 
         var entries = new List<ClipEntry>();
         if (paired)
@@ -207,16 +209,16 @@ public sealed partial class ClientView
             var input = new Border { Child = new ScrollViewer { Content = text, MaxHeight = 300 }, Padding = new Thickness(10),
                 MinHeight = 140 };
             input.Classes.Add("detail-text");
-            inspector.Children.Add(TitleRow(Muted(ClipSource(entry, false)),
-                Action(pinned ? L("取消置顶", "Unpin") : L("置顶", "Pin"), () =>
-                    SetPreference(entry, new() { ["pin"] = !pinned }), glyph: "pin")));
+            inspector.Children.Add(Muted(ClipSource(entry, pinned)));
             inspector.Children.Add(input);
-            inspector.Children.Add(TitleRow(PrimaryAction(L("复制", "Copy"), async () =>
+            inspector.Children.Add(ActionBar(SecondaryAction(L("复制", "Copy"), async () =>
             {
                 await Execute("clipboard_local_write", new() { ["text"] = entry.Text }, token);
                 Report(L("已复制到本机剪贴板", "Copied to this device"));
-            }, "copy"), Action(L("在本机隐藏", "Hide on this device"), () =>
-                SetPreference(entry, new() { ["hide"] = true }))));
+            }, "copy"), Action(pinned ? L("取消置顶", "Unpin") : L("置顶", "Pin"), () =>
+                SetPreference(entry, new() { ["pin"] = !pinned }), glyph: "pin"),
+                MoreActions(L("记录操作", "Entry actions"), (L("在本机隐藏", "Hide on this device"), () =>
+                    SetPreference(entry, new() { ["hide"] = true })))));
         }
 
         async Task SetPreference(ClipEntry entry, JsonObject change)

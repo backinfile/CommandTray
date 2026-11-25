@@ -2,17 +2,26 @@
 :root {
   color-scheme: dark;
   font: 14px/1.55 "Segoe UI","Microsoft YaHei UI",system-ui,sans-serif;
-  --canvas: #10161e;
-  --sidebar: #161e27;
-  --surface: #171f29;
-  --hover: #25313f;
-  --line: #293645;
-  --text: #ecf1f5;
-  --muted: #a3b0bf;
-  --accent: #c1ed8b;
-  --accent-text: #172117;
-  --selected: #26372d;
-  --error: #ffbdad;
+  --canvas: #0f151e;
+  --sidebar: #141d29;
+  --surface: #182230;
+  --raised: #202d40;
+  --hover: #27364a;
+  --line: #34445a;
+  --control-line: #667d9b;
+  --text: #edf2f9;
+  --muted: #aab9cc;
+  --accent: #8db8ff;
+  --accent-text: #111f32;
+  --accent-hover: #a9c9ff;
+  --selected: #263d5b;
+  --success: #78d8ae;
+  --warning: #f2c879;
+  --error: #ffadb0;
+  --danger-text: #39151c;
+  --danger-hover: #ffc5c7;
+  --shadow: #0006;
+  --scrim: #080c13c0;
 }
 body { margin: 0; background: var(--canvas); color: var(--text) }
 [hidden] { display: none !important }
@@ -22,15 +31,23 @@ h2 { font-size: 15px; font-weight: 650 }
 h3 { font-size: 15px; font-weight: 640 }
 small,.muted { color: var(--muted) }
 button,input,textarea,select { font: inherit }
-button { cursor: pointer; color: inherit }
+button { cursor: pointer; color: inherit; touch-action:manipulation }
 button:disabled { cursor: wait; opacity: .6 }
-button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible {
+button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible,a:focus-visible {
   outline: 2px solid var(--accent); outline-offset: 3px;
 }
-button { min-height: 37px; border-radius: 7px; padding: 0 11px; border: 1px solid var(--line); background: var(--surface) }
+button { min-height: 37px; border-radius: 7px; padding: 0 11px; border: 1px solid transparent; background: transparent }
 button:hover { background: var(--hover) }
 .primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 670 }
-.primary:hover { background: #a9d978 }
+.primary:hover { background: var(--accent-hover) }
+.secondary { background:var(--raised); border-color:var(--control-line) }
+.danger { background:var(--error); color:var(--danger-text); font-weight:650 }
+.danger:hover { background:var(--danger-hover) }
+.status-success { color:var(--success) }
+.status-warning { color:var(--warning) }
+.status-error { color:var(--error) }
+.skip-link { position:fixed; z-index:10; top:8px; left:8px; padding:8px 12px; color:var(--accent-text); background:var(--accent); transform:translateY(-150%) }
+.skip-link:focus { transform:none }
 .shell { min-height: 100dvh; display: grid; grid-template: 60px 1fr / 244px minmax(0,1fr) }
 .shell.collapsed { grid-template-columns: 64px minmax(0,1fr) }
 .shell.collapsed .brand strong,.shell.collapsed .sidebar .nav-button span,.shell.collapsed .group small,.shell.collapsed .paired { display:none }
@@ -48,8 +65,7 @@ button:hover { background: var(--hover) }
 .rail-toggle svg,.search-trigger svg,.board-button svg { width:16px; height:16px; flex:none }
 .search-trigger { display:flex; align-items:center; gap:7px; color:var(--muted); white-space:nowrap }
 kbd { color:var(--muted); font-size:11px; border:1px solid var(--line); border-radius:4px; padding:0 4px; margin-left:5px }
-.top strong { overflow: hidden; text-overflow: ellipsis }
-.workspace-title { font-size:21px; overflow:hidden; text-overflow:ellipsis }
+.page-title { font-size:21px; overflow:hidden; text-overflow:ellipsis }
 .sidebar { grid-row: 2; grid-column: 1; position:sticky; top:60px; height:calc(100dvh - 60px); overflow:auto; display: flex;
   flex-direction: column; gap: 6px; padding: 16px 13px; border-right: 1px solid var(--line); background: var(--sidebar) }
 .nav-button { width: 100%; display: flex; align-items: center; gap: 10px; text-align: left; min-height: 41px; background: transparent; border-color: transparent; color: var(--muted); font-weight: 580; white-space: nowrap }
@@ -66,10 +82,12 @@ kbd { color:var(--muted); font-size:11px; border:1px solid var(--line); border-r
 .shell.collapsed .sidebar .choose-space { display:flex }
 .nav-footer { margin-top: auto; padding-top: 14px }
 .paired { display: block; padding: 0 11px 7px }
-.paired:before { content: ""; display: inline-block; margin-right: 7px; width: 7px; height: 7px; border-radius: 50%; background: #56bd87; vertical-align: 1px }
+.paired:before { content: ""; display: inline-block; margin-right: 7px; width: 7px; height: 7px; border-radius: 50%; background: var(--success); vertical-align: 1px }
 main { grid-row: 2; grid-column: 2; min-width: 0; padding: 29px 28px 65px }
-.heading { display: flex; justify-content: space-between; align-items: end; gap: 14px; margin-bottom: 20px }
-.page-caption { margin-top:6px; color:var(--muted); font-size:13px }
+#content { scroll-margin-top:65px }
+.page-actions { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:8px; margin-bottom:13px }
+.page-actions .actions { margin-left:auto }
+.page-caption { color:var(--muted); font-size:13px; font-variant-numeric:tabular-nums }
 .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 7px }
 .toolbar { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-bottom:13px }
 .toolbar input { width:min(100%,240px) }
@@ -79,12 +97,13 @@ main { grid-row: 2; grid-column: 2; min-width: 0; padding: 29px 28px 65px }
 .workspace-actions { position:sticky; top:60px; padding:7px 0; z-index:1; background:var(--canvas) }
 .workbench [data-component-id] { scroll-margin-top:116px }
 .workbench .component-located { outline:2px solid var(--accent); outline-offset:2px }
-.conflict { justify-content:space-between; color:#e6bd77 }
+.conflict { justify-content:space-between; color:var(--warning) }
 .conflict-versions { margin-bottom:14px }
 .version-space+.version-space { margin-top:10px }
 .surface { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; min-width: 0 }
 .bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 50px; padding: 9px 14px; border-bottom: 1px solid var(--line) }
-.bar h3 { overflow-wrap: anywhere }
+.bar h2 { min-width:0; overflow-wrap:anywhere }
+.bar .actions { justify-content:flex-end }
 .body { padding: 14px }
 .note { white-space: pre-wrap; overflow-wrap: anywhere }
 .task { display: flex; align-items: start; gap: 8px; padding: 7px 0; cursor: pointer }
@@ -93,18 +112,17 @@ main { grid-row: 2; grid-column: 2; min-width: 0; padding: 29px 28px 65px }
 .task-row button { min-height:30px }
 .task-progress { padding:10px 13px }
 progress { display:block; width:100%; height:6px; accent-color:var(--accent) }
-.board-tools,.board-footer { display:flex; align-items:center; gap:4px; padding:5px 8px; background:#141d27 }
+.board-tools,.board-footer { display:flex; align-items:center; gap:4px; padding:5px 8px; background:var(--sidebar) }
 .board-tools { overflow:auto; scrollbar-width:thin; border-bottom:1px solid var(--line) }
 .board-footer { justify-content:space-between; border-top:1px solid var(--line) }
 .board-button { min-height:30px; width:31px; border-color:transparent; background:none }
-.board-button[aria-pressed=true] { color:var(--accent); background:#222f3b; border-color:var(--line) }
+.board-button[aria-pressed=true] { color:var(--accent); background:var(--selected); border-color:var(--line) }
 .board-divider { flex:none; width:1px; height:19px; background:var(--line) }
 .board-tools .board-ink { width:29px; padding:3px; height:29px; flex:none; cursor:pointer }
 .board-tools .board-width { margin-left:2px; padding:4px; flex:none; font-size:12px }
 .task input { accent-color: var(--accent); margin-top: 4px }
 .task input:checked + span { color: var(--muted); text-decoration: line-through }
-.board { width: 100%; display: block; background: #101923; height: 270px; touch-action:none }
-.single .board { height:clamp(280px,55dvh,600px) }
+.board { width: 100%; display: block; background:#111a27; height: 270px; touch-action:none }
 .board.drawing { cursor:crosshair }
 .table-wrap { overflow: auto }
 table { width: 100%; border-collapse: collapse; text-align: left }
@@ -116,11 +134,11 @@ td .actions { min-width: max-content }
 tbody tr:last-child td { border-bottom: 0 }
 .clip-row { display:block; text-align:left; width:100%; border:0; border-radius:0; background:none; padding:9px 13px; border-bottom:1px solid var(--line) }
 .clip-row:last-child { border-bottom:0 }
-.clip-row[aria-pressed=true] { background:#223135; box-shadow:inset 1px 0 var(--accent) }
+.clip-row[aria-pressed=true] { background:var(--selected); box-shadow:inset 1px 0 var(--accent) }
 .clip-meta { display:flex; justify-content:space-between; gap:8px; margin-bottom:4px }
 .clip-text { font:13px/1.55 "Cascadia Code",Consolas,monospace; white-space:pre-wrap; overflow-wrap:anywhere; min-height:140px;
   max-height:330px; overflow:auto; background:var(--canvas); border:1px solid var(--line); border-radius:7px; padding:11px }
-.clip-actions { justify-content:space-between; margin:12px 0 0 }
+.clip-actions { margin:12px 0 0 }
 .clip-inspector { scroll-margin-top:65px }
 .setting-row { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:12px 14px; border-bottom:1px solid var(--line) }
 .setting-row:last-child { border-bottom:0 }
@@ -136,15 +154,24 @@ tbody tr:last-child td { border-bottom: 0 }
 .login h1 { margin: 0 0 20px }
 .login form { padding: 20px }
 label.field { display: grid; gap: 5px; margin-bottom: 12px }
-input:not([type=checkbox]),textarea,select { background: var(--canvas); color: var(--text); border: 1px solid var(--line); border-radius: 7px; padding: 8px; max-width: 100%; min-width: 0 }
+input:not([type=checkbox]),textarea,select { background: var(--canvas); color: var(--text); border: 1px solid var(--control-line); border-radius: 7px; padding: 8px; max-width: 100%; min-width: 0 }
+input::placeholder,textarea::placeholder { color:var(--muted); opacity:1 }
 textarea { min-height: 100px; resize: vertical }
 .error { color: var(--error) }
 .form-status { min-height: 21px; margin-top: 9px; overflow-wrap: anywhere }
-.status { position: fixed; bottom: 16px; right: 18px; margin-left: 18px; padding: 9px 14px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 4px 20px #0005; z-index: 2 }
+.status { position: fixed; bottom: 16px; right: 18px; margin-left: 18px; padding: 9px 14px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 4px 20px var(--shadow); z-index: 2 }
 dialog { width: min(560px,calc(100vw - 28px)); padding: 0; color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: 11px; max-height: 88dvh }
-dialog::backdrop { background: #080c13c0 }
+dialog,.action-menu { overscroll-behavior:contain }
+dialog::backdrop { background: var(--scrim) }
 .dialog-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 13px 16px; border-bottom: 1px solid var(--line) }
 .dialog-content { padding: 16px }
+.more-actions { display:inline-grid; place-items:center; width:36px; padding:0; font-size:17px; line-height:1 }
+.more-actions[aria-expanded=true] { background:var(--selected); color:var(--accent) }
+.action-menu { position:fixed; z-index:7; width:max-content; min-width:min(165px,calc(100vw - 16px)); max-width:min(280px,calc(100vw - 16px));
+  overflow:auto; padding:4px; border:1px solid var(--control-line); border-radius:8px; background:var(--surface); box-shadow:0 8px 24px var(--shadow) }
+.action-menu button { display:block; width:100%; padding:5px 9px; text-align:left; overflow-wrap:anywhere }
+.action-menu button:focus-visible { outline-offset:-2px }
+.action-menu button[data-danger] { color:var(--error) }
 @media(max-width: 984px) {
   .shell { grid-template-columns: 190px minmax(0,1fr) }
   .workbench { grid-template-columns:minmax(0,1fr) }
@@ -167,7 +194,7 @@ dialog::backdrop { background: #080c13c0 }
   .paired,.group { display:none }
   main { grid-row:2; grid-column:1; padding:17px 12px 75px }
   .workbench,.split { grid-template-columns:1fr }
-  .heading { align-items:start; flex-wrap:wrap; gap:8px; margin-bottom:12px }
+  .action-menu button,.task-row button,.more-actions { min-height:44px }
   .board { height:210px }
   .file-meta { display:none }
   th,td { padding:7px 10px }

@@ -34,7 +34,8 @@ public sealed partial class ClientView
         var active = commands.FirstOrDefault(command => CommandId(command) == _commandSelection) ?? commands.FirstOrDefault();
         _commandSelection = active is null ? null : CommandId(active);
         var summary = Muted("");
-        var heading = PageHeading(L("命令", "Commands"), summary, Row(IconButton("sync", L("刷新", "Refresh"), LoadAsync), create));
+        var heading = PageActions(summary, create,
+            MoreActions(L("命令列表操作", "Command list actions"), (L("刷新列表", "Refresh list"), LoadAsync)));
         var rows = new Dictionary<string, TextBlock>(StringComparer.Ordinal);
         Action? refreshDetails = null;
         var snapshots = commands.ToDictionary(CommandId, StringComparer.Ordinal);
@@ -57,7 +58,7 @@ public sealed partial class ClientView
                         command["state"] = entry["state"]?.DeepClone();
                         command["processId"] = entry["processId"]?.DeepClone();
                         if (rows.TryGetValue(id, out var state))
-                            state.Text = ServiceStateLabel(command.Text("state"));
+                            PaintServiceState(state, command.Text("state"));
                     }
                     UpdateSummary();
                     refreshDetails?.Invoke();
@@ -134,7 +135,8 @@ public sealed partial class ClientView
                     FontFamily = new FontFamily("monospace")
                 };
                 line.Classes.Add("muted");
-                var state = Muted(ServiceStateLabel(command.Text("state")));
+                var state = Muted("");
+                PaintServiceState(state, command.Text("state"));
                 rows[id] = state;
                 row.Content = new StackPanel { Spacing = 4, Children =
                 {
@@ -162,6 +164,18 @@ public sealed partial class ClientView
         "faulted" or "failed" => L("异常", "Failed"), _ => state
     };
 
+    private void PaintServiceState(TextBlock label, string state)
+    {
+        label.Text = ServiceStateLabel(state);
+        SetStatusTone(label, state.ToLowerInvariant() switch
+        {
+            "running" => "success",
+            "starting" or "stopping" => "warning",
+            "failed" or "faulted" => "error",
+            _ => ""
+        });
+    }
+
     private (Border Panel, Action RefreshStatus) CommandDetails(JsonObject command, CancellationToken pageCancellation)
     {
         var arguments = new JsonObject { ["id"] = CommandId(command) };
@@ -176,20 +190,21 @@ public sealed partial class ClientView
         var choices = new List<(string Label, Func<Task> Action)>
         {
             (L("重启", "Restart"), () => RunCommandAsync("command_restart")),
-            (L("编辑", "Edit"), () => CommandForm(command)),
-            (L("删除", "Delete"), () => Confirm(L("删除命令？", "Delete command?"), () => Change("command_delete", arguments)))
+            (L("删除", "Delete"), () => Confirm(L("删除命令？", "Delete command?"), () => Change("command_delete", arguments), L("删除命令", "Delete command")))
         };
         if (Uri.TryCreate(command.Text("openUrl"), UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https")
             choices.Insert(0, (L("打开网页", "Open service URL"), async () => await RequireTopLevel().Launcher.LaunchUriAsync(uri)));
-        var menu = Menu("⋯", choices.ToArray());
+        var menu = MoreActions(L("命令操作", "Command actions"), choices.ToArray());
         actions.Children.Add(lifecycle);
+        actions.Children.Add(Action(L("编辑", "Edit"), () => CommandForm(command), glyph: "edit"));
         actions.Children.Add(menu);
         var details = new StackPanel
         {
             Children =
             {
-                SettingRow(L("工作目录", "Working directory"), state, command.Text("workingDirectory", "—")),
-                SettingRow(L("进程 ID", "Process ID"), processId)
+                SettingRow(L("运行状态", "Run status"), state),
+                SettingRow(L("进程 ID", "Process ID"), processId),
+                SettingRow(L("工作目录", "Working directory"), new Border(), command.Text("workingDirectory", "—"))
             }
         };
         var search = new TextBox { Text = _logQuery, PlaceholderText = L("搜索日志", "Search logs"), MinWidth = 138 };
@@ -236,7 +251,7 @@ public sealed partial class ClientView
         {
             if (changingState) return;
             var serviceState = command.Text("state").ToLowerInvariant();
-            state.Text = ServiceStateLabel(serviceState);
+            PaintServiceState(state, serviceState);
             processId.Text = command["processId"]?.ToString() ?? "—";
             bool running = serviceState == "running";
             string label = running ? L("停止", "Stop") : L("启动", "Start");
@@ -252,6 +267,7 @@ public sealed partial class ClientView
         {
             changingState = true;
             actions.IsEnabled = false;
+            SetStatusTone(state, "warning");
             state.Text = operation switch
             {
                 "command_stop" => L("停止中…", "Stopping…"), "command_restart" => L("重启中…", "Restarting…"),
@@ -263,7 +279,7 @@ public sealed partial class ClientView
                 changingState = false;
                 if (attached)
                 {
-                    state.Text = ServiceStateLabel(command.Text("state"));
+                    PaintServiceState(state, command.Text("state"));
                     actions.IsEnabled = true;
                 }
             }

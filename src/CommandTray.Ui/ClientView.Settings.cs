@@ -23,7 +23,6 @@ public sealed partial class ClientView
     private async Task RenderSettingsAsync(CancellationToken token)
     {
         Header(L("设置", "Settings"));
-        _contents.Children.Add(PageHeading(L("设置", "Settings")));
         var settings = await Execute("settings_read", [], token);
         var sections = new List<(string Id, string Label, string Glyph)>
         {
@@ -37,6 +36,7 @@ public sealed partial class ClientView
         if (sections.All(item => item.Id != _settingsSection)) _settingsSection = "devices";
 
         var navigation = new StackPanel { Orientation = _compact ? Orientation.Horizontal : Orientation.Vertical, Spacing = 3 };
+        AutomationProperties.SetName(navigation, L("设置分类", "Settings categories"));
         foreach (var section in sections)
         {
             var tab = Action(section.Label, () => OpenSettingsAsync(section.Id), glyph: section.Glyph);
@@ -89,8 +89,9 @@ public sealed partial class ClientView
                 break;
             case "data":
                 pane.Children.Add(SettingRow(L("服务配置", "Service configuration"), Row(
-                    Action(L("导出", "Export"), ExportConfigurationAsync),
-                    PrimaryAction(L("导入", "Import"), ImportConfigurationAsync))));
+                    SecondaryAction(L("导出", "Export"), ExportConfigurationAsync, "download"),
+                    MoreActions(L("服务配置操作", "Service configuration actions"),
+                        (L("导入服务配置…", "Import service configuration…"), ImportConfigurationAsync)))));
                 break;
             case "app":
                 pane.Children.Add(SettingRow(L("语言", "Language"), Menu(_english ? "English" : "简体中文",
@@ -102,12 +103,6 @@ public sealed partial class ClientView
                     pane.Children.Add(SettingRow(L("桌宠", "Desktop pet"), Row(
                         Action(L("显示", "Show"), async () => await Execute("pet_set", new() { ["visible"] = true })),
                         Action(L("隐藏", "Hide"), async () => await Execute("pet_set", new() { ["visible"] = false })))));
-                if (_compact && Has(ClientFeatures.Commands))
-                    pane.Children.Add(Action(L("命令管理", "Commands"), () => { Navigate("commands"); return Task.CompletedTask; }));
-                if (_compact && Has(ClientFeatures.Capture))
-                    pane.Children.Add(Action(L("屏幕捕获", "Capture"), () => { Navigate("capture"); return Task.CompletedTask; }));
-                if (_compact && Has(ClientFeatures.Ssh))
-                    pane.Children.Add(Action(L("SSH 主机", "SSH hosts"), () => { Navigate("ssh"); return Task.CompletedTask; }));
                 break;
         }
     }
@@ -123,13 +118,15 @@ public sealed partial class ClientView
         }
 
         pane.Children.Add(SettingRow(L("中转服务器", "Relay server"), paired
-            ? Action(L("编辑连接", "Edit connection"), () => PairForm(relay))
+            ? SecondaryAction(L("编辑连接", "Edit connection"), () => PairForm(relay))
             : PrimaryAction(L("配对", "Pair"), () => PairForm(relay)),
             paired ? relay.Text("server") : L("未配对", "Not paired")));
         if (!paired) return;
         pane.Children.Add(SettingRow(L("本机", "This device"),
-            Action(L("解除配对", "Unpair"), () => Confirm(L("解除本机配对？", "Unpair this device?"),
-                () => Change("relay_unpair", []))), relay.Text("deviceName")));
+            MoreActions(L("本机设备操作", "This device actions"),
+                (L("解除配对", "Unpair"), () => Confirm(L("解除本机配对？", "Unpair this device?"),
+                    () => Change("relay_unpair", []), L("解除配对", "Unpair")))),
+            relay.Text("deviceName")));
         if (HasWorkspaceConflict(relay))
             pane.Children.Add(SettingRow(L("同步冲突", "Sync conflict"),
                 WorkspaceConflictActions()));
@@ -184,9 +181,11 @@ public sealed partial class ClientView
         pane.Children.Add(SettingRow(L("自动同步剪贴板", "Sync clipboard automatically"), SettingSwitch("clipboardAutoSync",
             L("自动同步剪贴板", "Sync clipboard automatically"), enabled), L("本机设置", "This device")));
         pane.Children.Add(SettingRow(L("同步方向", "Sync direction"), direction));
-        pane.Children.Add(SettingRow(L("同步状态", "Sync status"), Muted(!enabled ? L("手动收发", "Manual") :
+        var state = Muted(!enabled ? L("手动收发", "Manual") :
             !relay.Flag("paired") ? L("等待配对", "Waiting for pairing") : OperatingSystem.IsAndroid()
-                ? L("仅在应用前台同步", "Syncs while the app is in the foreground") : L("自动同步已开启", "Automatic sync is on"))));
+                ? L("仅在应用前台同步", "Syncs while the app is in the foreground") : L("自动同步已开启", "Automatic sync is on"));
+        SetStatusTone(state, enabled ? relay.Flag("paired") ? "success" : "warning" : "");
+        pane.Children.Add(SettingRow(L("同步状态", "Sync status"), state));
     }
 
     private ToggleSwitch SettingSwitch(string key, string label, bool enabled)

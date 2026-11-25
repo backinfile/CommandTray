@@ -1,6 +1,7 @@
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using Avalonia;
+using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
@@ -57,10 +58,10 @@ public sealed partial class ClientView
             }
             body.Children.Add(list);
             if (log) body.Children.Add(Action(L("刷新日志", "Refresh log"), () => Update("command_log")));
-            else body.Children.Add(Row(
+            else body.Children.Add(ActionBar(
                 Action(L("启动", "Start"), () => Update("command_start")),
                 Action(L("停止", "Stop"), () => Update("command_stop")),
-                Action(L("重启", "Restart"), () => Update("command_restart"))));
+                MoreActions(L("服务操作", "Service actions"), (L("重启", "Restart"), () => Update("command_restart")))));
             body.Children.Add(detail);
             if (log) await Update("command_log");
             list.SelectionChanged += async (_, _) => await Act(async () =>
@@ -139,12 +140,6 @@ public sealed partial class ClientView
             path = result.Text("path", folder);
             var options = new List<(string Label, Func<Task> Action)>
             {
-                (L("选择目录", "Choose folder"), async () =>
-                {
-                    var folders = await RequireTopLevel().StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions());
-                    if (folders.FirstOrDefault()?.TryGetLocalPath() is string selected)
-                        await SaveTilePath(spaceId, item, selected);
-                }),
                 (L("输入路径", "Enter path"), () => Form(L("目录", "Folder"), values =>
                     SaveTilePath(spaceId, item, values.RequireText("path")), new Field("path", L("路径", "Path"), path))),
                 (L("新建目录", "New folder"), () => Form(L("新建目录", "New folder"), async values =>
@@ -180,7 +175,13 @@ public sealed partial class ClientView
             Grid.SetColumn(current, 2);
             location.Children.Add(current);
             ToolTip.SetTip(location, path);
-            var pathBar = new Border { Child = TitleRow(location, Menu("⋯", options.ToArray())) };
+            var choose = IconButton("folder-open", L("选择目录", "Choose folder"), async () =>
+            {
+                var folders = await RequireTopLevel().StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions());
+                if (folders.FirstOrDefault()?.TryGetLocalPath() is string selected)
+                    await SaveTilePath(spaceId, item, selected);
+            });
+            var pathBar = new Border { Child = TitleRow(location, Row(choose, MoreActions(L("目录操作", "Folder actions"), options.ToArray()))) };
             pathBar.Classes.Add("file-path");
             contents.Children.Add(pathBar);
             foreach (var entry in result.Array("entries").OfType<JsonObject>())
@@ -192,11 +193,11 @@ public sealed partial class ClientView
                     ? () => SaveTilePath(spaceId, item, leaf) : () => PreviewAsync(leaf), glyph: directory ? "files" : "file");
                 if (directory) link.Classes.Add("folder-entry");
                 link.Classes.Add("file-entry");
-                var menu = Menu("⋯", (L("复制到…", "Copy to…"), () => Form(name, values => Change("local_copy",
+                var copy = IconButton("copy", L("复制到…", "Copy to…"), () => Form(name, values => Change("local_copy",
                     new() { ["source"] = leaf, ["destination"] = values.RequireText("path") }),
-                    new Field("path", L("目标路径", "Destination")))));
-                menu.Classes.Add("file-entry-menu");
-                contents.Children.Add(TitleRow(link, menu));
+                    new Field("path", L("目标路径", "Destination"))));
+                copy.Classes.Add("file-entry-menu");
+                contents.Children.Add(TitleRow(link, copy));
             }
         }
 
@@ -281,20 +282,29 @@ public sealed partial class ClientView
             input.Clear();
         }
 
-        var controls = Row(
-            Action(L("打开", "Open"), () => data.Text("hostId").Length == 0 ? Start()
-                : Form(L("SSH 连接", "SSH connection"), async values =>
-                {
-                    await Start(values.Text("passphrase"));
-                    await LoadAsync();
-                }, new Field("passphrase", L("私钥口令（可选）", "Key passphrase (optional)"), Secret: true))),
-            Action(L("关闭", "Close"), async () =>
+        bool local = data.Text("hostId").Length == 0;
+        var lifecycle = SecondaryAction("", async () =>
+        {
+            if (terminal.Running)
             {
                 await Execute("terminal_close", new() { ["itemId"] = id });
                 terminal.Running = false;
-            }));
-        if (data.Text("hostId").Length == 0) controls.Children.Add(Action(L("中断", "Interrupt"), async () =>
-            await Execute("terminal_write", new() { ["itemId"] = id, ["text"] = "\u0003" })));
+            }
+            else if (local) await Start();
+            else await Form(L("SSH 连接", "SSH connection"), values => Start(values.Text("passphrase")),
+                new Field("passphrase", L("私钥口令（可选）", "Key passphrase (optional)"), Secret: true));
+        });
+        var interrupt = Action(L("中断", "Interrupt"), async () =>
+            await Execute("terminal_write", new() { ["itemId"] = id, ["text"] = "\u0003" }));
+        var controls = ActionBar(lifecycle, interrupt);
+        terminal.StateChanged = () =>
+        {
+            var label = terminal.Running ? L("关闭会话", "Close session") : local ? L("打开终端", "Open terminal") : L("连接 SSH", "Connect SSH");
+            lifecycle.Content = IconLabel(terminal.Running ? "stop" : "play", label);
+            AutomationProperties.SetName(lifecycle, label);
+            interrupt.IsVisible = terminal.Running && local;
+        };
+        terminal.StateChanged();
 
         input.KeyDown += async (_, e) =>
         {
@@ -319,11 +329,22 @@ public sealed partial class ClientView
 
     private sealed class TerminalTile(string id, TextBox output)
     {
+        private bool _running;
         public string Id { get; } = id;
         public TextBox Output { get; } = output;
-        public bool Running { get; set; }
+        public bool Running
+        {
+            get => _running;
+            set
+            {
+                if (_running == value) return;
+                _running = value;
+                StateChanged?.Invoke();
+            }
+        }
+        public Action? StateChanged { get; set; }
         public bool Reading { get; set; }
-        public bool Checked { get; set; }
+        public DateTimeOffset NextIdleCheck { get; set; }
         public (int Columns, int Rows) Size { get; set; }
     }
 
@@ -335,7 +356,7 @@ public sealed partial class ClientView
     {
         foreach (var terminal in _terminals.ToArray())
         {
-            if (terminal.Reading || terminal.Checked && !terminal.Running) continue;
+            if (terminal.Reading || !terminal.Running && DateTimeOffset.UtcNow < terminal.NextIdleCheck) continue;
             terminal.Reading = true;
             try
             {
@@ -350,7 +371,11 @@ public sealed partial class ClientView
                 if (value is JsonObject state && state.ContainsKey("active")) terminal.Running = state.Flag("active");
             }
             catch { }
-            finally { terminal.Reading = false; terminal.Checked = true; }
+            finally
+            {
+                terminal.Reading = false;
+                terminal.NextIdleCheck = DateTimeOffset.UtcNow.AddSeconds(3);
+            }
         }
     }
 

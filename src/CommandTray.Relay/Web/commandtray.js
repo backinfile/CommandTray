@@ -19,10 +19,13 @@ const escape = text => String(text ?? "").replace(/[&<>"']/g, char => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
 })[char]);
 const svg = path => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${path}"/></svg>`;
-const button = (label, action, primary = false) =>
-  `<button type="button" data-action="${escape(action)}"${primary ? ' class="primary"' : ""}>${escape(label)}</button>`;
-const heading = (label, actions = "", caption = "") =>
-  `<header class="heading"><div><h1>${escape(label)}</h1>${caption ? `<p class="page-caption">${escape(caption)}</p>` : ""}</div><div class="actions">${actions}</div></header>`;
+const button = (label, action, appearance = "") =>
+  `<button type="button" data-action="${escape(action)}"${appearance ? ` class="${appearance === true ? "primary" : appearance}"` : ""}>${escape(label)}</button>`;
+const moreActions = (label, actions) =>
+  `<button type="button" class="more-actions" aria-label="${escape(label)}" title="${escape(label)}" aria-haspopup="menu"
+    aria-controls="action-menu" aria-expanded="false" data-menu="${escape(JSON.stringify(actions))}"><span aria-hidden="true">⋯</span></button>`;
+const pageActions = (actions, caption = "") =>
+  `<div class="page-actions">${caption ? `<p class="page-caption">${escape(caption)}</p>` : ""}<div class="actions">${actions}</div></div>`;
 const surface = (label, actions, body, kind = "", componentId = null) =>
   `<section class="surface ${kind}"${componentId === null ? "" : ` data-component-id="${escape(componentId)}" tabindex="-1" aria-label="${escape(label)}"`}><header class="bar"><h2>${escape(label)}</h2><div class="actions">${actions}</div></header>${body}</section>`;
 const empty = message => `<p class="empty muted">${escape(message)}</p>`;
@@ -46,6 +49,38 @@ let activeTransfer = null;
 let pendingWrite = Promise.resolve();
 let clientDatabase;
 let conflictPersisted = false;
+let menuTrigger = null;
+
+function closeActionMenu(restoreFocus = false) {
+  if (!menuTrigger) return;
+  const trigger = menuTrigger;
+  menuTrigger = null;
+  trigger.setAttribute("aria-expanded", "false");
+  el("action-menu").hidden = true;
+  if (restoreFocus && trigger.isConnected) trigger.focus({preventScroll:true});
+}
+
+function showActionMenu(trigger, last = false) {
+  if (trigger === menuTrigger) { closeActionMenu(true); return; }
+  closeActionMenu();
+  menuTrigger = trigger;
+  trigger.setAttribute("aria-expanded", "true");
+  const menu = el("action-menu");
+  menu.setAttribute("aria-label", trigger.getAttribute("aria-label"));
+  menu.innerHTML = JSON.parse(trigger.dataset.menu).map(([label, action, danger]) =>
+    `<button type="button" role="menuitem" tabindex="-1" data-action="${escape(action)}"${danger ? " data-danger" : ""}>${escape(label)}</button>`).join("");
+  menu.style.maxHeight = "none";
+  menu.hidden = false;
+  const anchor = trigger.getBoundingClientRect();
+  const { width, height } = menu.getBoundingClientRect();
+  const below = innerHeight - anchor.bottom - 12, above = anchor.top - 12;
+  const opensDown = height <= below || below >= above;
+  const maximum = Math.max(28, opensDown ? below : above);
+  menu.style.maxHeight = maximum + "px";
+  menu.style.left = Math.max(8, Math.min(anchor.right - width, innerWidth - width - 8)) + "px";
+  menu.style.top = (opensDown ? anchor.bottom + 4 : Math.max(8, anchor.top - Math.min(height, maximum) - 4)) + "px";
+  (last ? menu.lastElementChild : menu.firstElementChild)?.focus({preventScroll:true});
+}
 
 function clientStorage(mode, operation) {
   clientDatabase ??= new Promise((resolve, reject) => {
@@ -175,6 +210,7 @@ const spacesOptions = () => (workspace?.document?.spaces ?? []).map(space => ({l
 const toolOptions = () => toolPages.map(id => ({label:pages[id][0], page:id, scope:"工具"}));
 
 function render() {
+  closeActionMenu();
   unmountWorkspaceBoards();
   el("shell").classList.toggle("unpaired", !device);
   el("shell").classList.toggle("collapsed", collapsed);
@@ -191,8 +227,7 @@ function render() {
   }
   el("top").innerHTML = `<div class="crumb"><button class="rail-toggle" type="button" data-action="sidebar" aria-label="${
     collapsed ? "展开侧栏" : "收起侧栏"}" title="${collapsed ? "展开侧栏" : "收起侧栏"}">${svg("M3 4h18v16H3z M9 4v16")}</button>${
-    page === "workspace" ? `<h1 class="workspace-title">${escape(selectedSpace()?.name ?? "空间")}</h1>` :
-      `<strong>${escape(pages[page][0])}</strong>`}</div><button class="search-trigger" type="button" data-action="search">${
+    `<h1 class="page-title">${escape(page === "workspace" ? selectedSpace()?.name ?? "空间" : pages[page][0])}</h1>`}</div><button class="search-trigger" type="button" data-action="search">${
     svg("M16 10a6 6 0 1 1-12 0 6 6 0 0 1 12 0m-2 4 6 6")}快速查找 <kbd>Ctrl K</kbd></button>`;
   const spaces = (workspace?.document?.spaces ?? []).map(space => `<button type="button" class="nav-button" data-space="${
     escape(space.id)}"${space.id === selected && page === "workspace" ? ' aria-current="page"' : ""} aria-label="${escape(space.name)}" title="${escape(space.name)}">${
@@ -203,7 +238,7 @@ function render() {
     '<div class="tool-group group"><small>工具</small>' + toolPages.map(navLink).join("") + "</div>" +
     chooser("工具", pages.files[1], "choose-tool", toolPages.includes(page)) +
     '<div class="nav-footer"><small class="paired">已配对</small>' + navLink("settings") + "</div>";
-  el("content").innerHTML = loading ? (page === "workspace" ? "" : heading(pages[page][0])) + '<p class="muted" role="status">正在加载…</p>' :
+  el("content").innerHTML = loading ? '<p class="muted" role="status">正在加载…</p>' :
     ({ workspace: renderWorkspace, files: renderFiles, clipboard: renderClipboard, settings: renderSettings }[page])();
   if (!loading && page === "workspace") mountWorkspaceBoards();
 }
@@ -300,25 +335,26 @@ function componentLabel(item) {
 }
 
 function renderWorkspace() {
-  if (!workspace) return heading("工作区", button("刷新", "refresh"));
+  if (!workspace) return pageActions(button("刷新", "refresh"));
   const space = selectedSpace();
   const notice = conflict ? `<div class="toolbar conflict"><span>同步冲突</span>${button("比较版本", "compare-conflict", true)}</div>` : "";
   if (!space) return notice + empty("暂无空间");
   const items = visibleComponents(space);
-  const tools = (items.length ? button("定位组件", "locate") : "") + button("添加组件", "add-item", true) +
-    button("同步", "refresh") + button("重命名空间", "rename-space");
+  const tools = button("添加组件", "add-item", true) + (items.length ? button("定位组件", "locate", "secondary") : "") +
+    button("同步", "refresh") + moreActions("空间操作", [["重命名空间", "rename-space"]]);
   const tiles = items.map(item => {
     const data = item.data ?? {};
     const kind = category(item.kind);
     const name = item.title || componentLabel(item);
-    const remove = button("移除", "remove-item:" + item.id);
+    const remove = moreActions("组件操作", [["移除组件", "remove-item:" + item.id, true]]);
     if (kind === "note")
       return surface(name, button("编辑", "edit:" + item.id) + remove, `<div class="body note">${escape(data.text || "暂无内容")}</div>`, "tile-note", item.id);
     if (kind === "todo") {
       const entries = data.tasks ?? [];
       const rows = entries.map(task => `<div class="task-row"><label class="task"><input type="checkbox" data-item="${escape(item.id)}"
         data-task="${escape(task.id)}"${task.completed ? " checked" : ""}><span>${escape(task.text)}</span></label>
-        ${button("编辑", "edit-task:" + item.id + "/" + task.id)}</div>`).join("");
+        <div class="actions">${button("编辑", "edit-task:" + item.id + "/" + task.id)}
+        ${moreActions("待办操作", [["删除待办", "delete-task:" + item.id + "/" + task.id, true]])}</div></div>`).join("");
       const done = entries.filter(task=>task.completed).length;
       const progress = entries.length ? `<div class="task-progress"><small>${done} / ${entries.length} 已完成</small><progress aria-label="待办完成率" value="${done}" max="${entries.length}"></progress></div>` : "";
       return surface(name, button("新增待办", "add-task:" + item.id) + remove, progress + (rows || empty("暂无待办")), "tile-todo", item.id);
@@ -397,7 +433,7 @@ function fileRows() {
   if (!visible.length) return empty(files.length ? "没有符合条件的文件" : "暂无共享文件");
   const rows = visible.map(file => `<tr><td><strong>${escape(file.name)}</strong><small>${escape(file.folder || "根目录")}</small></td>
     <td class="file-meta">${sizeText(file.size)}</td><td class="file-meta">${escape(file.deviceName || "")}<small>${escape(localTime(file.modifiedAt))}</small></td>
-    <td><div class="actions">${button("下载", "download:" + file.id)}${button("删除", "remove-file:" + file.id)}</div></td></tr>`).join("");
+    <td><div class="actions">${button("下载", "download:" + file.id)}${moreActions("文件操作", [["删除文件", "remove-file:" + file.id, true]])}</div></td></tr>`).join("");
   return `<div class="surface table-wrap"><table><thead><tr><th>名称</th><th class="file-meta">大小</th><th class="file-meta">来源 / 时间</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 function renderFiles() {
@@ -405,7 +441,8 @@ function renderFiles() {
   const filters = `<div class="toolbar"><input id="file-query" type="search" aria-label="搜索文件" placeholder="搜索文件" value="${escape(fileQuery)}">
     <select id="file-folder" aria-label="目录"><option value="">所有目录</option>${folders.map(folder => `<option value="${
     escape(folder)}"${folder===fileFolder?" selected":""}>${escape(folder==="/"?"根目录":folder)}</option>`).join("")}</select></div>`;
-  return heading("共享文件", button("刷新", "refresh") + button("上传文件", "upload", true), `${files.length} 个文件`) +
+  return pageActions(button("上传文件", "upload", true) +
+    moreActions("共享文件列表操作", [["刷新列表", "refresh"]]), `${files.length} 个文件`) +
     '<div id="transfer-queue">' + transferMarkup() + '</div>' + filters + '<div id="file-rows">' + fileRows() + '</div>';
 }
 
@@ -482,9 +519,9 @@ function clipPanels() {
   let detail = empty("请选择记录");
   if (selectedEntry) {
     const {entry,pinned}=selectedEntry, key=clipKey(entry);
-    detail = `<div class="body"><div class="toolbar"><small>${escape(entry.deviceName || "未知设备")} · ${escape(localTime(entry.updatedAt))}</small>${
-      button(pinned?"取消置顶":"置顶","clip-pin:"+key)}</div><div class="clip-text">${escape(entry.text)}</div>
-      <div class="toolbar clip-actions">${button("复制","copy:"+key,true)}${button("在本机隐藏","clip-hide:"+key)}</div></div>`;
+    detail = `<div class="body"><div class="toolbar"><small>${pinned ? "置顶 · " : ""}${escape(entry.deviceName || "未知设备")} · ${escape(localTime(entry.updatedAt))}</small></div>
+      <div class="clip-text">${escape(entry.text)}</div><div class="toolbar clip-actions">${button("复制","copy:"+key,"secondary")}${
+      button(pinned?"取消置顶":"置顶","clip-pin:"+key)}${moreActions("记录操作",[["在本机隐藏","clip-hide:"+key]])}</div></div>`;
   }
   return surface("历史", "", list) + surface("内容", "", detail, "clip-inspector");
 }
@@ -493,7 +530,8 @@ function renderClipboard() {
   const sources = [...new Set(clipboardEntries().map(entry=>entry.deviceName).filter(Boolean))];
   if (clipSource && clipSource!=="$pinned" && !sources.includes(clipSource)) clipSource = "";
   const options = [["","所有记录"],["$pinned","已置顶"],...sources.map(name=>[name,name])];
-  return heading("剪贴板", button("刷新", "refresh") + button("发送文本", "send-clipboard", true), `${history.length} 条同步记录`) +
+  return pageActions(button("发送文本", "send-clipboard", true) +
+    moreActions("剪贴板历史操作", [["刷新历史", "refresh"]]), `${history.length} 条同步记录`) +
     `<div class="toolbar"><input id="clip-query" type="search" aria-label="搜索剪贴板" placeholder="搜索剪贴板" value="${escape(clipQuery)}">
       <select id="clip-source" aria-label="按设备筛选">${options.map(([id,label])=>`<option value="${escape(id)}"${
       clipSource===id?" selected":""}>${escape(label)}</option>`).join("")}</select></div><div class="split" id="clip-panels">${clipPanels()}</div>`;
@@ -501,8 +539,8 @@ function renderClipboard() {
 function renderSettings() {
   const rows = devices.map(entry=>`<div class="setting-row"><div><strong>${escape(entry.name)}</strong><small>${
     escape(localTime(entry.pairedAt))}</small></div>${entry.id === device.id ? "<span>此浏览器</span>" : ""}</div>`).join("");
-  return heading("设置") + surface("中转与设备", button("刷新", "refresh"),
-    `<div class="setting-row"><div><strong>中转服务器</strong><small>${escape(location.host)}</small></div>${button("断开配对", "disconnect")}</div>${
+  return surface("中转与设备", button("刷新设备", "refresh"),
+    `<div class="setting-row"><div><strong>中转服务器</strong><small>${escape(location.host)}</small></div>${moreActions("本机配对操作",[["断开配对", "disconnect", true]])}</div>${
     rows}`);
 }
 
@@ -523,9 +561,9 @@ function showDialog(title, content, mode = "action") {
 const dialogPending = () => el("dialog").querySelector("form[data-pending]") !== null;
 function closeUserDialog() { if (!dialogPending()) el("dialog").close(); }
 
-function modal(title, description, fields, submit, action) {
+function modal(title, description, fields, submit, action, danger = false) {
   showDialog(title, `<form>${description ? `<p class="dialog-description">${escape(description)}</p>` : ""}${fields}
-    <div class="actions">${button("取消", "close-dialog")}<button type="submit" class="primary">${escape(submit)}</button></div><p class="form-status" role="status"></p></form>`);
+    <div class="actions">${button("取消", "close-dialog")}<button type="submit" class="${danger ? "danger" : "primary"}">${escape(submit)}</button></div><p class="form-status" role="status"></p></form>`);
   const form = el("dialog-content").querySelector("form");
   form.addEventListener("submit", async event => {
     event.preventDefault();
@@ -589,13 +627,14 @@ function transferMarkup() {
     const retryable = job.state === "cancelled" || job.state === "failed";
     const dismiss = button("关闭", "transfer-dismiss:" + job.id);
     const actions = job.state === "running" || job.state === "queued" ? button("取消", "transfer-cancel:" + job.id) :
-      retryable ? button("重试", "transfer-retry:" + job.id) + dismiss : job.state === "done" ? dismiss : "";
+      retryable ? button("重试", "transfer-retry:" + job.id, "secondary") + dismiss : job.state === "done" ? dismiss : "";
     const labels = {queued:"排队中",running:job.upload?"正在上传…":"正在下载…",verifying:"正在校验…",
       done:job.upload?"上传完成":"已交给浏览器下载",cancelled:"已取消",failed:job.error};
     const percent = transferPercent(job);
     const progress = !busy ? "" : `<progress aria-label="传输进度" max="100"${percent === null ? "" : ` value="${percent}"`}></progress>`;
+    const tone = {done:"status-success",verifying:"status-warning",failed:"status-error"}[job.state] ?? "";
     return `<div class="setting-row transfer-job" id="transfer-${job.id}"><div class="transfer-body"><strong>${escape(job.name)}</strong>
-      <small>${escape(labels[job.state])}<span class="transfer-percent">${busy && percent !== null ? " " + percent + "%" : ""}</span></small>
+      <small class="${tone}">${escape(labels[job.state])}<span class="transfer-percent">${busy && percent !== null ? " " + percent + "%" : ""}</span></small>
       ${progress}</div><div class="actions">${actions}</div></div>`;
   });
   return surface("传输队列", "", rows.join(""), "transfer");
@@ -768,8 +807,8 @@ async function perform(operation, argument) {
             data:kind==="note"?{text:""}:kind==="todo"?{tasks:[]}:{strokes:[]} });
         }));
     }
-    case "remove-item": return modal("移除组件", itemWithId(argument)?.title, "", "移除", () =>
-      writeWorkspace((_,space)=>{space.items=space.items.filter(item=>item.id!==argument);}));
+    case "remove-item": return modal("移除组件", itemWithId(argument)?.title, "", "移除组件", () =>
+      writeWorkspace((_,space)=>{space.items=space.items.filter(item=>item.id!==argument);}), true);
     case "edit": return modal("编辑便签", "", textarea("正文",itemWithId(argument).data?.text,false), "保存", values =>
       writeWorkspace((_, space) => { (space.items.find(item => item.id === argument).data ??= {}).text = values.get("text"); }));
     case "add-task": return modal("新增待办", "", input("内容", "", 500), "添加", values => {
@@ -779,21 +818,22 @@ async function perform(operation, argument) {
         ((item.data ??= {}).tasks ??= []).push({ id:uuid(),text,completed:false });
       });
     });
-    case "edit-task": {
+    case "edit-task":
+    case "delete-task": {
       const [itemId, taskId] = argument.split("/");
       const task = itemWithId(itemId)?.data?.tasks?.find(entry=>entry.id===taskId);
       if (!task) return;
-      return modal("编辑待办", "", input("内容", task.text, 500, false) +
-        field("操作", '<select name="mode"><option value="save">保存</option><option value="remove">删除此任务</option></select>'),
-        "确认", values => {
-          const remove = values.get("mode") === "remove";
-          const text = remove ? null : taskText(values);
-          return writeWorkspace((_,space) => {
-            const data=space.items.find(item=>item.id===itemId).data;
-            if (remove) data.tasks=data.tasks.filter(entry=>entry.id!==taskId);
-            else data.tasks.find(entry=>entry.id===taskId).text=text;
-          });
+      if (operation === "delete-task") return modal("删除待办？", task.text, "", "删除待办", () =>
+        writeWorkspace((_,space) => {
+          const data=space.items.find(item=>item.id===itemId).data;
+          data.tasks=data.tasks.filter(entry=>entry.id!==taskId);
+        }), true);
+      return modal("编辑待办", "", input("内容", task.text, 500), "保存", values => {
+        const text = taskText(values);
+        return writeWorkspace((_,space) => {
+          space.items.find(item=>item.id===itemId).data.tasks.find(entry=>entry.id===taskId).text=text;
         });
+      });
     }
     case "board-export": exportWorkspaceBoard(argument); return;
     case "compare-conflict": compareConflict(); return;
@@ -853,10 +893,10 @@ async function perform(operation, argument) {
       }
       return;
     }
-    case "remove-file": return modal("删除共享文件", files.find(file => file.id === argument)?.name, "", "删除", async () => {
+    case "remove-file": return modal("删除共享文件", files.find(file => file.id === argument)?.name, "", "删除文件", async () => {
       await request("files/" + encodeURIComponent(argument), { method:"DELETE" });
       await open("files");
-    });
+    }, true);
     case "send-clipboard": return modal("发送文本", "", textarea("文本"), "发送", async values => {
       await request("clipboard", { method:"PUT", body:{text:values.get("text")} });
       await open("clipboard");
@@ -880,7 +920,7 @@ async function perform(operation, argument) {
     case "disconnect": return modal("断开此浏览器配对？", "", "", "断开配对", async () => {
       await request("devices/" + encodeURIComponent(device.id), { method:"DELETE" });
       dropDevice();
-    });
+    }, true);
   }
 }
 
@@ -888,6 +928,8 @@ el("dialog-close").addEventListener("click", closeUserDialog);
 el("dialog").addEventListener("cancel", event => { if (dialogPending()) event.preventDefault(); });
 document.body.addEventListener("click", async event => {
   const control = event.target.closest("button");
+  if (control?.dataset.menu && !control.disabled) { showActionMenu(control); return; }
+  closeActionMenu(!!control && el("action-menu").contains(control));
   if (!control || control.disabled) return;
   if (control.dataset.palette) el("dialog").close();
   try {
@@ -936,14 +978,39 @@ document.body.addEventListener("change", async event => {
 });
 document.addEventListener("keydown",event=>{
   if (!device) return;
+  const menu = el("action-menu");
+  if (menuTrigger) {
+    if (event.key === "Escape" || event.key === "Tab") {
+      closeActionMenu(true);
+      if (event.key === "Escape") event.preventDefault();
+      return;
+    }
+    if (menu.contains(event.target) && ["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
+      const items = [...menu.children], current = items.indexOf(event.target);
+      const next = event.key === "Home" ? 0 : event.key === "End" ? items.length - 1 :
+        (current + (event.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
+      items[next].focus({preventScroll:true});
+      items[next].scrollIntoView({block:"nearest"});
+      event.preventDefault();
+      return;
+    }
+  } else if (event.target?.dataset?.menu && ["ArrowDown", "ArrowUp"].includes(event.key)) {
+    showActionMenu(event.target, event.key === "ArrowUp");
+    event.preventDefault();
+    return;
+  }
   if (!(event.ctrlKey || event.metaKey)) return;
   if (event.key.toLowerCase()==="k") {
     event.preventDefault();
     if (el("dialog").open) {
       if (el("dialog").dataset.mode === "search") closeUserDialog();
     }
-    else search();
+    else { closeActionMenu(true); search(); }
   }
 });
+window.addEventListener("resize", () => closeActionMenu(true));
+document.addEventListener("scroll", event => {
+  if (event.target !== el("action-menu")) closeActionMenu(true);
+}, true);
 if (device?.token && device?.id) restoreWorkspace();
 else { setDevice(null); render(); }

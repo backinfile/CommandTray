@@ -13,6 +13,7 @@ internal sealed class CaptureSelectionForm : Form
     }
 
     private const int HandleSize = 8;
+    private static readonly Color Accent = Color.FromArgb(141, 184, 255);
     private readonly Bitmap _snapshot;
     private readonly Rectangle _desktop;
     private readonly FlowLayoutPanel _actions;
@@ -35,7 +36,7 @@ internal sealed class CaptureSelectionForm : Form
         TopMost = true;
         Cursor = Cursors.Cross;
         Text = Localizer.T("Select a region", "选择区域");
-        var confirm = new Button { AutoSize = true, Text = Localizer.T("Confirm", "确认"), ForeColor = Color.Black, BackColor = Color.FromArgb(193, 237, 139) };
+        var confirm = new Button { AutoSize = true, Text = Localizer.T("Confirm", "确认"), ForeColor = Color.FromArgb(17, 31, 50), BackColor = Accent };
         var cancel = new Button { AutoSize = true, Text = Localizer.T("Cancel", "取消"), ForeColor = Color.White, BackColor = Color.FromArgb(39, 53, 67) };
         confirm.Click += (_, _) => ConfirmRegion();
         cancel.Click += (_, _) => DialogResult = DialogResult.Cancel;
@@ -204,7 +205,7 @@ internal sealed class CaptureSelectionForm : Form
         using (var shade = new SolidBrush(Color.FromArgb(152, 0, 0, 0))) e.Graphics.FillRectangle(shade, ClientRectangle);
         e.Graphics.Restore(state);
         if (_selection.IsEmpty) return;
-        using var pen = new Pen(Color.FromArgb(193, 237, 139), 2);
+        using var pen = new Pen(Accent, 2);
         e.Graphics.DrawRectangle(pen, _selection);
         foreach (var x in new[] { _selection.Left, _selection.Right })
             foreach (var y in new[] { _selection.Top, _selection.Bottom })

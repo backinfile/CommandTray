@@ -389,6 +389,27 @@ public sealed partial class ClientView : UserControl
         return button;
     }
 
+    private Button SecondaryAction(string label, Func<Task> action, string? glyph = null)
+    {
+        var button = Action(label, action, glyph: glyph);
+        button.Classes.Add("secondary");
+        return button;
+    }
+
+    private static WrapPanel ActionBar(params Control[] actions)
+    {
+        var panel = new WrapPanel { ItemSpacing = 7, LineSpacing = 5 };
+        foreach (var action in actions) panel.Children.Add(action);
+        return panel;
+    }
+
+    private static void SetStatusTone(TextBlock label, string tone)
+    {
+        label.Classes.Set("status-success", tone == "success");
+        label.Classes.Set("status-warning", tone == "warning");
+        label.Classes.Set("status-error", tone == "error");
+    }
+
     private Border EmptyState(string glyph, string title, params Control[] actions)
     {
         var content = new StackPanel { Spacing = 10 };
@@ -428,6 +449,14 @@ public sealed partial class ClientView : UserControl
             ToolTip.SetTip(button, name);
             Avalonia.Automation.AutomationProperties.SetName(button, name);
         }
+        return button;
+    }
+
+    private Button MoreActions(string label, params (string Label, Func<Task> Action)[] actions)
+    {
+        var button = Menu("⋯", actions);
+        ToolTip.SetTip(button, label);
+        Avalonia.Automation.AutomationProperties.SetName(button, label);
         return button;
     }
 

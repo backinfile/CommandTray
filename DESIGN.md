@@ -2,13 +2,13 @@
 name: CommandTray
 description: Shared desktop and mobile workspace
 colors:
-  chrome: "#151C25"
-  shell-accent: "#C1ED8B"
-  dark-canvas: "#10151C"
-  dark-panel: "#19222D"
-  light-canvas: "#E8EFF9"
-  light-panel: "#F9FCFF"
-  terminal: "#080F1E"
+  chrome: "#141D29"
+  shell-accent: "#8DB8FF"
+  dark-canvas: "#0F151E"
+  dark-panel: "#182230"
+  light-canvas: "#EAF0F8"
+  light-panel: "#F8FAFE"
+  terminal: "#111A27"
 ---
 
 # CommandTray 界面设计
@@ -25,9 +25,26 @@ colors:
 
 ## 视觉和移动端
 
-原生客户端和 Web 使用深色工作台，浅绿色标记选中项、焦点和主要操作。面板以边线和间距分隔，终端使用独立的输出区和等宽字体。
+原生客户端和 Web 使用石墨蓝工作台。亮蓝强调主要操作、焦点和选中项。绿色标记运行、连接或完成，琥珀色表示等待处理，玫瑰红表示失败和需要确认的移除操作。状态同时显示文字。终端使用独立的输出区和等宽字体。[Fluent 2 色彩规范](https://fluent2.microsoft.design/color) · [WCAG 2.2](https://www.w3.org/TR/WCAG22/)
 
 窄屏底栏提供「空间」「工具」「设置」。空间和工具入口打开可搜索的列表。便签、待办和画板在同一条滚动流中。共享文件保留文件名、目录和行内下载操作，剪贴板历史显示文本、来源设备和发送时间。
+
+## 操作布局
+
+页面主按钮负责当前最常见的任务。选中对象的操作放在对象标题、详情或列表行内。搜索、筛选、取消和重试保持可见。低频操作使用带对象名称的「⋯」菜单，删除、断开和替换配置保留明确确认。窄屏上操作栏换行，表单和菜单支持键盘操作。[Windows 命令栏](https://learn.microsoft.com/en-us/windows/apps/develop/ui/controls/command-bar) · [Apple 工具栏指南](https://developer.apple.com/design/human-interface-guidelines/toolbars) · [Carbon 行级操作](https://www.carbondesignsystem.com/building-blocks/core/components/data-table/guidelines)
+
+| 页面或组件 | 直接显示 | 菜单或下一层 |
+| --- | --- | --- |
+| 空间 | 添加组件、定位、同步或配对 | 重命名空间、从中转拉取、删除空间 |
+| 便签与待办 | 编辑便签、勾选、编辑待办、新增待办 | 复制便签、重命名和移除组件、删除待办 |
+| 画板 | 绘制工具、撤销、重做、缩放、网格、导出 PNG | 原生端的笔色和线宽、组件管理 |
+| 目录与终端 | 选择目录、打开或预览、复制到指定位置、打开或关闭终端、运行时中断、发送 | 输入目录路径、新建目录、在此目录添加终端 |
+| 命令管理 | 新建、当前命令启停和编辑、日志搜索和复制 | 刷新列表、重启、打开服务网页、删除 |
+| 共享文件 | 上传、搜索和筛选、行内下载、传输取消和重试 | 刷新列表、删除文件 |
+| 剪贴板 | 发送文本、原生同步设置、搜索和筛选、当前记录复制和置顶 | 刷新历史、发送本机剪贴板、在本机隐藏 |
+| 截图与录屏 | 范围、延时、截图、开始或结束录屏、历史搜索、复制图片、标注、播放和另存 | 放弃录屏、打开原图、贴图、识别文字、重命名、复制路径、定位文件和回收 |
+| SSH 主机 | 添加主机、连接、编辑、密钥入口 | 删除主机，在密钥面板内导入或删除密钥 |
+| 设置 | 配对、编辑连接、刷新设备、同步与应用开关、复制 MCP 配置、更新状态对应的操作、导出配置 | 解除配对、导入服务配置 |
 
 ## 参考
 

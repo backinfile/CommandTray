@@ -61,18 +61,16 @@ public sealed partial class ClientView
         wait.SelectionChanged += (_, _) => { if (wait.SelectedIndex >= 0) _screenshotDelay = delays[wait.SelectedIndex]; };
         copy.IsCheckedChanged += (_, _) => _copyScreenshots = copy.IsChecked == true;
         var capture = PrimaryAction(L("截图", "Take screenshot"), StartScreenshotAsync, "capture");
-        var record = Action("", async () =>
+        var record = SecondaryAction("", async () =>
         {
             if (recording.Flag("recording")) await Capture("capture_record_stop", [], token);
             else await RecordingOptionsAsync(displays, token);
         });
-        var discard = Action(L("放弃录屏", "Discard recording"), () => Confirm(L("放弃当前录屏？", "Discard this recording?"),
-            () => Capture("capture_record_discard", [], token)));
-        Header(L("截图与录屏", "Screen capture"), record);
-        var controls = new WrapPanel { ItemSpacing = 9, LineSpacing = 7, Children =
-        {
-            CaptureField(L("范围", "Source"), scope), CaptureField(L("延时", "Delay"), wait), copy, capture
-        }};
+        var discard = MoreActions(L("录屏操作", "Recording actions"),
+            (L("放弃录屏", "Discard recording"), () => Confirm(L("放弃当前录屏？", "Discard this recording?"),
+                () => Capture("capture_record_discard", [], token), L("放弃录屏", "Discard recording"))));
+        Header(L("截图与录屏", "Screen capture"));
+        var controls = ActionBar(CaptureField(L("范围", "Source"), scope), CaptureField(L("延时", "Delay"), wait), copy, capture, record);
         _contents.Children.Add(controls);
         var recordingStatus = new WrapPanel { ItemSpacing = 10, LineSpacing = 6, Children = { summary, recordingFile, discard } };
         _contents.Children.Add(recordingStatus);
@@ -129,6 +127,10 @@ public sealed partial class ClientView
             string state = recording.Text("state");
             var active = recording.Flag("recording");
             recordingStatus.IsVisible = active;
+            SetStatusTone(summary, state == "recording" ? "success" : active ? "warning" : "");
+            record.Classes.Set("primary", active);
+            record.Classes.Set("secondary", !active);
+            capture.Classes.Set("primary", !active);
             string elapsed = TimeSpan.FromSeconds(recording.Integer("elapsedSeconds")).ToString(@"hh\:mm\:ss", CultureInfo.InvariantCulture);
             summary.Text = state switch
             {
@@ -218,11 +220,10 @@ public sealed partial class ClientView
             var args = new JsonObject { ["path"] = selected };
             var picture = IsScreenshot(selected);
             var body = new StackPanel { Spacing = 9, Margin = new Thickness(13) };
-            var actions = new WrapPanel { ItemSpacing = 6, LineSpacing = 4, Children =
+            var actions = ActionBar();
+            var choices = new List<(string Label, Func<Task> Action)>
             {
-                Action(picture ? L("打开", "Open") : L("播放", "Play"), async () => await Execute("capture_open", args, token)),
-                Action(L("另存为…", "Save as…"), () => ExportCaptureAsync(selected)),
-                Menu("⋯", (L("重命名…", "Rename…"), () => Form(L("重命名", "Rename"), values =>
+                (L("重命名…", "Rename…"), () => Form(L("重命名", "Rename"), values =>
                         Capture("capture_rename", new() { ["path"] = selected, ["name"] = values.RequireText("name") }, token),
                         new Field("name", L("文件名", "File name"), Path.GetFileNameWithoutExtension(selected)))),
                     (L("复制文件路径", "Copy file path"), async () =>
@@ -232,19 +233,26 @@ public sealed partial class ClientView
                     }),
                     (L("在资源管理器中显示", "Show in File Explorer"), async () => await Execute("capture_reveal", args, token)),
                     (L("移到回收站", "Move to Recycle Bin"), () => Confirm(L("移到回收站？", "Move to Recycle Bin?"),
-                        () => Capture("capture_recycle", args, token))))
-            }};
+                        () => Capture("capture_recycle", args, token), L("移到回收站", "Move to Recycle Bin")))
+            };
             if (picture)
             {
-                actions.Children.Insert(1, Action(L("复制图片", "Copy image"), async () =>
+                actions.Children.Add(SecondaryAction(L("复制图片", "Copy image"), async () =>
                 {
                     await Execute("capture_copy", args, token);
                     Report(L("图片已复制", "Image copied"));
-                }));
-                actions.Children.Insert(2, Action(L("标注", "Annotate"), () => Capture("capture_annotate", args, token)));
-                actions.Children.Insert(3, Action(L("贴图", "Pin"), async () => await Execute("capture_pin", args, token)));
-                actions.Children.Insert(4, Action(L("识别文字", "OCR"), () => ScreenshotOcr(selected)));
+                }, "copy"));
+                actions.Children.Add(Action(L("标注", "Annotate"), () => Capture("capture_annotate", args, token)));
+                choices.InsertRange(0, new (string, Func<Task>)[]
+                {
+                    (L("打开原图", "Open original"), async () => await Execute("capture_open", args, token)),
+                    (L("贴图", "Pin"), async () => await Execute("capture_pin", args, token)),
+                    (L("识别文字", "OCR"), () => ScreenshotOcr(selected))
+                });
             }
+            else actions.Children.Add(SecondaryAction(L("播放", "Play"), async () => await Execute("capture_open", args, token), "play"));
+            actions.Children.Add(Action(L("另存为…", "Save as…"), () => ExportCaptureAsync(selected)));
+            actions.Children.Add(MoreActions(L("捕获文件操作", "Capture file actions"), choices.ToArray()));
             body.Children.Add(actions);
             try
             {

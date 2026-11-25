@@ -17,7 +17,7 @@ function boardMarkup(id, name) {
     boardControl(label,icon,key)).join("")}<span class="board-divider"></span>
     ${boardControl("撤销","M8 5l-5 5 5 5m-4-5h11a5 5 0 0 1 5 5v3","undo")}
     ${boardControl("重做","m16 5 5 5-5 5m4-5H9a5 5 0 0 0-5 5v3","redo")}
-    <input class="board-ink" type="color" value="#c1ed8b" aria-label="画笔颜色" title="画笔颜色">
+    <input class="board-ink" type="color" value="#8db8ff" aria-label="画笔颜色" title="画笔颜色">
     <select class="board-width" aria-label="线宽"><option value="2">细线</option><option value="5">粗线</option></select>
     </div><canvas class="board" data-board="${escape(id)}" aria-label="${escape(name)}" tabindex="0"></canvas>
     <footer class="board-footer"><small class="board-count"></small><div class="actions">
@@ -42,7 +42,7 @@ function mountBoard(canvas, item) {
   const stored = Array.isArray(item.data?.strokes) ? item.data.strokes : [];
   const id = canvas.dataset.board;
   const key = (device?.id ?? "") + "/" + selected + "/" + id;
-  const state = boardStates.get(key) ?? { tool:"select", zoom:1, grid:true, ink:"#c1ed8b", width:2, undo:[], redo:[], current:stored };
+  const state = boardStates.get(key) ?? { tool:"select", zoom:1, grid:true, ink:"#8db8ff", width:2, undo:[], redo:[], current:stored };
   boardStates.set(key,state);
   if (!state.busy && !same(state.current,stored)) {
     state.current=stored;
@@ -302,7 +302,7 @@ function paintStroke(ctx,stroke,points,selected) {
   if(selected) {
     const bounds=box(points);
     ctx.setLineDash([4,4]);
-    ctx.strokeStyle="#c1ed8b";
+    ctx.strokeStyle="#8db8ff";
     ctx.lineWidth=1;
     ctx.strokeRect(bounds.left-4,bounds.top-4,stroke.text?ctx.measureText(stroke.text).width+8:bounds.right-bounds.left+8,
       stroke.text?24:bounds.bottom-bounds.top+8);

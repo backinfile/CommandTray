@@ -5,38 +5,52 @@
     <ResourceDictionary>
       <ResourceDictionary.ThemeDictionaries>
         <ResourceDictionary x:Key="Light">
-          <SolidColorBrush x:Key="TrayCanvas">#E8EFF9</SolidColorBrush>
-          <SolidColorBrush x:Key="TrayPaper">#F9FCFF</SolidColorBrush>
-          <SolidColorBrush x:Key="TrayChrome">#EDF3FB</SolidColorBrush>
-          <SolidColorBrush x:Key="TrayInk">#12233D</SolidColorBrush>
-          <SolidColorBrush x:Key="TraySecondary">#4D617D</SolidColorBrush>
-          <SolidColorBrush x:Key="TrayLine">#CEDAEA</SolidColorBrush>
-          <SolidColorBrush x:Key="TrayAccent">#086477</SolidColorBrush>
-          <SolidColorBrush x:Key="TrayAccentOn">#F8FFFF</SolidColorBrush>
-          <SolidColorBrush x:Key="TrayError">#A12D25</SolidColorBrush>
-          <SolidColorBrush x:Key="TraySelection">#D4ECF3</SolidColorBrush>
-          <SolidColorBrush x:Key="TrayHover">#E1EBFA</SolidColorBrush>
-          <SolidColorBrush x:Key="TrayMutedFill">#E7EFFB</SolidColorBrush>
-          <SolidColorBrush x:Key="FolderMark">#0C647F</SolidColorBrush>
-          <SolidColorBrush x:Key="TerminalMark">#6348A3</SolidColorBrush>
-          <SolidColorBrush x:Key="NoteMark">#906018</SolidColorBrush>
+          <SolidColorBrush x:Key="TrayCanvas">#EAF0F8</SolidColorBrush>
+          <SolidColorBrush x:Key="TrayPaper">#F8FAFE</SolidColorBrush>
+          <SolidColorBrush x:Key="TrayChrome">#E2EAF5</SolidColorBrush>
+          <SolidColorBrush x:Key="TrayInk">#17263A</SolidColorBrush>
+          <SolidColorBrush x:Key="TraySecondary">#4A5C75</SolidColorBrush>
+          <SolidColorBrush x:Key="TrayLine">#CAD6E7</SolidColorBrush>
+          <SolidColorBrush x:Key="TrayAccent">#2259A8</SolidColorBrush>
+          <SolidColorBrush x:Key="TrayAccentOn">#FFFFFF</SolidColorBrush>
+          <SolidColorBrush x:Key="TrayError">#982B37</SolidColorBrush>
+          <SolidColorBrush x:Key="TraySelection">#DCE9FF</SolidColorBrush>
+          <SolidColorBrush x:Key="TrayHover">#E7EDF7</SolidColorBrush>
+          <SolidColorBrush x:Key="TrayMutedFill">#E9F0FA</SolidColorBrush>
+          <SolidColorBrush x:Key="FolderMark">#186480</SolidColorBrush>
+          <SolidColorBrush x:Key="TerminalMark">#62499E</SolidColorBrush>
+          <SolidColorBrush x:Key="NoteMark">#805018</SolidColorBrush>
+          <SolidColorBrush x:Key="TrayControlLine">#62799C</SolidColorBrush>
+          <SolidColorBrush x:Key="TrayAccentHover">#1A4B92</SolidColorBrush>
+          <SolidColorBrush x:Key="TraySuccess">#176042</SolidColorBrush>
+          <SolidColorBrush x:Key="TrayWarning">#754707</SolidColorBrush>
+          <SolidColorBrush x:Key="TrayDangerFill">#982B37</SolidColorBrush>
+          <SolidColorBrush x:Key="TrayDangerOn">#FFFFFF</SolidColorBrush>
+          <SolidColorBrush x:Key="TrayDangerHover">#81212B</SolidColorBrush>
         </ResourceDictionary>
         <ResourceDictionary x:Key="Dark">
-          <SolidColorBrush x:Key="TrayCanvas">#10161E</SolidColorBrush>
-          <SolidColorBrush x:Key="TrayPaper">#171F29</SolidColorBrush>
-          <SolidColorBrush x:Key="TrayChrome">#1C2733</SolidColorBrush>
-          <SolidColorBrush x:Key="TrayInk">#ECF1F5</SolidColorBrush>
-          <SolidColorBrush x:Key="TraySecondary">#A3B0BF</SolidColorBrush>
-          <SolidColorBrush x:Key="TrayLine">#2C3948</SolidColorBrush>
-          <SolidColorBrush x:Key="TrayAccent">#C1ED8B</SolidColorBrush>
-          <SolidColorBrush x:Key="TrayAccentOn">#172117</SolidColorBrush>
-          <SolidColorBrush x:Key="TrayError">#FFB4AB</SolidColorBrush>
-          <SolidColorBrush x:Key="TraySelection">#26372D</SolidColorBrush>
-          <SolidColorBrush x:Key="TrayHover">#25313F</SolidColorBrush>
-          <SolidColorBrush x:Key="TrayMutedFill">#202C38</SolidColorBrush>
-          <SolidColorBrush x:Key="FolderMark">#69D5F6</SolidColorBrush>
-          <SolidColorBrush x:Key="TerminalMark">#BCACFD</SolidColorBrush>
-          <SolidColorBrush x:Key="NoteMark">#F7CC81</SolidColorBrush>
+          <SolidColorBrush x:Key="TrayCanvas">#0F151E</SolidColorBrush>
+          <SolidColorBrush x:Key="TrayPaper">#182230</SolidColorBrush>
+          <SolidColorBrush x:Key="TrayChrome">#202C3C</SolidColorBrush>
+          <SolidColorBrush x:Key="TrayInk">#EDF2F9</SolidColorBrush>
+          <SolidColorBrush x:Key="TraySecondary">#AAB9CC</SolidColorBrush>
+          <SolidColorBrush x:Key="TrayLine">#34445A</SolidColorBrush>
+          <SolidColorBrush x:Key="TrayAccent">#8DB8FF</SolidColorBrush>
+          <SolidColorBrush x:Key="TrayAccentOn">#111F32</SolidColorBrush>
+          <SolidColorBrush x:Key="TrayError">#FFADB0</SolidColorBrush>
+          <SolidColorBrush x:Key="TraySelection">#263D5B</SolidColorBrush>
+          <SolidColorBrush x:Key="TrayHover">#27364A</SolidColorBrush>
+          <SolidColorBrush x:Key="TrayMutedFill">#202D40</SolidColorBrush>
+          <SolidColorBrush x:Key="FolderMark">#80C8DC</SolidColorBrush>
+          <SolidColorBrush x:Key="TerminalMark">#C4B5FD</SolidColorBrush>
+          <SolidColorBrush x:Key="NoteMark">#EBC383</SolidColorBrush>
+          <SolidColorBrush x:Key="TrayControlLine">#667D9B</SolidColorBrush>
+          <SolidColorBrush x:Key="TrayAccentHover">#A9C9FF</SolidColorBrush>
+          <SolidColorBrush x:Key="TraySuccess">#78D8AE</SolidColorBrush>
+          <SolidColorBrush x:Key="TrayWarning">#F2C879</SolidColorBrush>
+          <SolidColorBrush x:Key="TrayDangerFill">#FFADB0</SolidColorBrush>
+          <SolidColorBrush x:Key="TrayDangerOn">#39151C</SolidColorBrush>
+          <SolidColorBrush x:Key="TrayDangerHover">#FFC5C7</SolidColorBrush>
         </ResourceDictionary>
       </ResourceDictionary.ThemeDictionaries>
       <x:Double x:Key="TrayFontSmall">11</x:Double>
@@ -47,16 +61,13 @@
       <x:Double x:Key="TrayFontLarge">16</x:Double>
       <x:Double x:Key="TrayFontTitle">17</x:Double>
       <x:Double x:Key="TrayReadingLineHeight">22</x:Double>
-      <SolidColorBrush x:Key="ShellPaper">#161E27</SolidColorBrush>
-      <SolidColorBrush x:Key="ShellInk">#ECF1F5</SolidColorBrush>
-      <SolidColorBrush x:Key="ShellMuted">#A3B0BF</SolidColorBrush>
-      <SolidColorBrush x:Key="ShellLine">#2C3948</SolidColorBrush>
-      <SolidColorBrush x:Key="ShellSelection">#2B3B2C</SolidColorBrush>
-      <SolidColorBrush x:Key="ShellAccent">#C1ED8B</SolidColorBrush>
-      <LinearGradientBrush x:Key="BrandFill" StartPoint="0%,0%" EndPoint="100%,100%">
-        <GradientStop Color="#C1ED8B" Offset="0" />
-        <GradientStop Color="#A9D978" Offset="1" />
-      </LinearGradientBrush>
+      <x:Double x:Key="TextControlPlaceholderOpacity">1</x:Double>
+      <SolidColorBrush x:Key="ShellPaper">#141D29</SolidColorBrush>
+      <SolidColorBrush x:Key="ShellInk">#EDF2F9</SolidColorBrush>
+      <SolidColorBrush x:Key="ShellMuted">#AAB9CC</SolidColorBrush>
+      <SolidColorBrush x:Key="ShellLine">#34445A</SolidColorBrush>
+      <SolidColorBrush x:Key="ShellSelection">#263D5B</SolidColorBrush>
+      <SolidColorBrush x:Key="ShellAccent">#8DB8FF</SolidColorBrush>
       <DrawingBrush x:Key="TrayDotGrid" TileMode="Tile" Stretch="None"
                     SourceRect="0,0,24,24" DestinationRect="0,0,24,24">
         <DrawingBrush.Drawing>
@@ -70,16 +81,16 @@
           </DrawingGroup>
         </DrawingBrush.Drawing>
       </DrawingBrush>
-      <SolidColorBrush x:Key="TerminalInk">#D5E8FF</SolidColorBrush>
-      <SolidColorBrush x:Key="TerminalPaper">#101820</SolidColorBrush>
-      <SolidColorBrush x:Key="TerminalLine">#273956</SolidColorBrush>
+      <SolidColorBrush x:Key="TerminalInk">#D7E6FA</SolidColorBrush>
+      <SolidColorBrush x:Key="TerminalPaper">#111A27</SolidColorBrush>
+      <SolidColorBrush x:Key="TerminalLine">#34445A</SolidColorBrush>
     </ResourceDictionary>
   </Application.Resources>
   <Application.Styles>
     <FluentTheme>
       <FluentTheme.Palettes>
-        <ColorPaletteResources x:Key="Light" Accent="#086477" />
-        <ColorPaletteResources x:Key="Dark" Accent="#C1ED8B" />
+        <ColorPaletteResources x:Key="Light" Accent="#2259A8" />
+        <ColorPaletteResources x:Key="Dark" Accent="#8DB8FF" />
       </FluentTheme.Palettes>
     </FluentTheme>
     <Style Selector="UserControl.tray-root">
@@ -95,7 +106,7 @@
       <Setter Property="BorderBrush" Value="{StaticResource ShellLine}" />
     </Style>
     <Style Selector="Border.mark">
-      <Setter Property="Background" Value="{StaticResource BrandFill}" />
+      <Setter Property="Background" Value="{StaticResource ShellAccent}" />
       <Setter Property="CornerRadius" Value="7" />
     </Style>
     <Style Selector="Path.glyph">
@@ -105,7 +116,7 @@
       <Setter Property="StrokeJoin" Value="Round" />
     </Style>
     <Style Selector="Path.glyph.mark">
-      <Setter Property="Stroke" Value="#082333" />
+      <Setter Property="Stroke" Value="#111F32" />
     </Style>
     <Style Selector="Button.primary Path.glyph">
       <Setter Property="Stroke" Value="{DynamicResource TrayAccentOn}" />
@@ -176,9 +187,31 @@
       <Setter Property="FontWeight" Value="SemiBold" />
     </Style>
     <Style Selector="Button.action.primary:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-      <Setter Property="Background" Value="{DynamicResource TrayAccent}" />
+      <Setter Property="Background" Value="{DynamicResource TrayAccentHover}" />
       <Setter Property="Foreground" Value="{DynamicResource TrayAccentOn}" />
-      <Setter Property="Opacity" Value="0.88" />
+    </Style>
+    <Style Selector="Button.action.secondary">
+      <Setter Property="Foreground" Value="{DynamicResource TrayInk}" />
+      <Setter Property="Background" Value="{DynamicResource TrayMutedFill}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource TrayControlLine}" />
+      <Setter Property="BorderThickness" Value="1" />
+    </Style>
+    <Style Selector="Button.action.danger">
+      <Setter Property="Foreground" Value="{DynamicResource TrayDangerOn}" />
+      <Setter Property="Background" Value="{DynamicResource TrayDangerFill}" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+    <Style Selector="Button.action.danger:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Foreground" Value="{DynamicResource TrayDangerOn}" />
+      <Setter Property="Background" Value="{DynamicResource TrayDangerHover}" />
+    </Style>
+    <Style Selector="Button.action:focus-visible /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="BorderBrush" Value="{DynamicResource TrayAccent}" />
+      <Setter Property="BorderThickness" Value="2" />
+    </Style>
+    <Style Selector="MenuFlyoutPresenter">
+      <Setter Property="Background" Value="{DynamicResource TrayPaper}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource TrayControlLine}" />
     </Style>
     <Style Selector="Button.action.navigation">
       <Setter Property="HorizontalAlignment" Value="Stretch" />
@@ -232,6 +265,15 @@
     <Style Selector="TextBlock.form-error">
       <Setter Property="Foreground" Value="{DynamicResource TrayError}" />
       <Setter Property="FontSize" Value="{DynamicResource TrayFontDetail}" />
+    </Style>
+    <Style Selector="TextBlock.status-success">
+      <Setter Property="Foreground" Value="{DynamicResource TraySuccess}" />
+    </Style>
+    <Style Selector="TextBlock.status-warning">
+      <Setter Property="Foreground" Value="{DynamicResource TrayWarning}" />
+    </Style>
+    <Style Selector="TextBlock.status-error">
+      <Setter Property="Foreground" Value="{DynamicResource TrayError}" />
     </Style>
     <Style Selector="TextBlock.section">
       <Setter Property="FontWeight" Value="SemiBold" />
@@ -333,7 +375,14 @@
     <Style Selector="TextBox.entry">
       <Setter Property="Background" Value="{DynamicResource TrayPaper}" />
       <Setter Property="Foreground" Value="{DynamicResource TrayInk}" />
-      <Setter Property="BorderBrush" Value="{DynamicResource TrayLine}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource TrayControlLine}" />
+    </Style>
+    <Style Selector="ComboBox, TextBox:not(.terminal)">
+      <Setter Property="Foreground" Value="{DynamicResource TrayInk}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource TrayControlLine}" />
+    </Style>
+    <Style Selector="TextBox:not(.terminal)">
+      <Setter Property="PlaceholderForeground" Value="{DynamicResource TraySecondary}" />
     </Style>
     <Style Selector="TextBox.terminal">
       <Setter Property="Background" Value="{DynamicResource TerminalPaper}" />
@@ -358,6 +407,19 @@
     <Style Selector="Border.chrome Button.action:pointerover /template/ ContentPresenter#PART_ContentPresenter">
       <Setter Property="Background" Value="{StaticResource ShellSelection}" />
       <Setter Property="Foreground" Value="{StaticResource ShellInk}" />
+    </Style>
+    <Style Selector="Border.chrome Button.action.secondary">
+      <Setter Property="Foreground" Value="{DynamicResource TrayInk}" />
+    </Style>
+    <Style Selector="Border.chrome Button.action.primary">
+      <Setter Property="Foreground" Value="{DynamicResource TrayAccentOn}" />
+    </Style>
+    <Style Selector="Border.chrome Button.action.primary Path.glyph">
+      <Setter Property="Stroke" Value="{DynamicResource TrayAccentOn}" />
+    </Style>
+    <Style Selector="Border.chrome Button.action.primary:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource TrayAccentHover}" />
+      <Setter Property="Foreground" Value="{DynamicResource TrayAccentOn}" />
     </Style>
     <Style Selector="Border.chrome Button.action.selected">
       <Setter Property="Background" Value="{StaticResource ShellSelection}" />

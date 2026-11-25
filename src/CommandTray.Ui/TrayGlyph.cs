@@ -42,6 +42,7 @@ internal static class TrayGlyph
                 "download" => "M12,3 V15 M6,9 L12,15 L18,9 M4,17 V21 H20 V17",
                 "send" => "M3,10 L21,3 L15,21 L11,13 Z M11,13 L21,3",
                 "copy" => "M8,8 H20 V20 H8 Z M15,4 H4 V15",
+                "edit" => "M4,20 L5,15 L16,4 L20,8 L9,19 Z M14,6 L18,10",
                 "note" => "M4,4 H20 V14 L14,20 H4 Z M14,20 V14 H20 M8,9 H16",
                 "tasks" => "M3,7 L5,9 L8,5 M12,7 H21 M3,16 L5,18 L8,14 M12,16 H21",
                 "board" => "M3,4 H21 V20 H3 Z M5,16 L9,9 L13,15 L18,9",

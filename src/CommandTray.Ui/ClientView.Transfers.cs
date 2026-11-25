@@ -49,11 +49,10 @@ public sealed partial class ClientView
             return;
         }
 
-        var upload = PrimaryAction(_compact ? "+" : L("上传文件", "Upload files"), ChooseUploadAsync, "plus");
-        AutomationProperties.SetName(upload, L("上传文件", "Upload files"));
+        var upload = PrimaryAction(L("上传文件", "Upload files"), ChooseUploadAsync, "plus");
         var count = Muted("");
-        _contents.Children.Add(PageHeading(L("共享文件", "Shared files"), count,
-            Row(IconButton("sync", L("刷新", "Refresh"), LoadAsync), upload)));
+        _contents.Children.Add(PageActions(count, upload,
+            MoreActions(L("共享文件列表操作", "Shared file list actions"), (L("刷新列表", "Refresh list"), LoadAsync))));
         _contents.Children.Add(transferPanel);
         DrawTransfers();
 
@@ -92,9 +91,9 @@ public sealed partial class ClientView
                 var metadata = new[] { file.Text("folder"), FileSize(file["size"]), file.Text("deviceName"),
                     DateTimeOffset.TryParse(file.Text("modifiedAt"), out var modified) ? modified.ToLocalTime().ToString("g") : "" };
                 var actions = Row(
-                    IconButton("download", L("下载", "Download"), () => QueueDownloadAsync(file, relay.Text("deviceId"))),
-                    Menu("⋯", (L("删除", "Delete"), () => Confirm(L("删除共享文件？", "Delete shared file?"),
-                        () => Change("file_delete", new() { ["id"] = id })))));
+                    Action(L("下载", "Download"), () => QueueDownloadAsync(file, relay.Text("deviceId")), glyph: "download"),
+                    MoreActions(L("文件操作", "File actions"), (L("删除", "Delete"), () => Confirm(L("删除共享文件？", "Delete shared file?"),
+                        () => Change("file_delete", new() { ["id"] = id }), L("删除文件", "Delete file")))));
                 rows.Children.Add(SettingRow(name, actions, string.Join(" · ", metadata.Where(field => field.Length > 0))));
             }
             if (rows.Children.Count == 0)
@@ -243,7 +242,7 @@ public sealed partial class ClientView
                     else { job.State = TransferState.Cancelled; DrawTransfers(); }
                     return Task.CompletedTask;
                 }),
-                TransferState.Cancelled or TransferState.Failed => Action(L("重试", "Retry"), () =>
+                TransferState.Cancelled or TransferState.Failed => SecondaryAction(L("重试", "Retry"), () =>
                 {
                     job.State = TransferState.Queued;
                     DrawTransfers();
@@ -278,6 +277,10 @@ public sealed partial class ClientView
             TransferState.Failed => job.Error,
             _ => L("等待传输", "Queued")
         };
+        SetStatusTone(label, job.State switch
+        {
+            TransferState.Complete => "success", TransferState.Saving => "warning", TransferState.Failed => "error", _ => ""
+        });
         progress.IsVisible = job.State == TransferState.Running;
         progress.IsIndeterminate = job.Total is not > 0;
         if (job.Total is > 0 and var total)

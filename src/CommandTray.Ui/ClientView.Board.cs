@@ -72,12 +72,10 @@ public sealed partial class ClientView
         }
         var undo = IconButton("undo", L("撤销", "Undo"), () => board.TravelAsync(true));
         var redo = IconButton("redo", L("重做", "Redo"), () => board.TravelAsync(false));
-        var palette = Menu("⋯",
-            (L("浅绿", "Green"), () => SetInk("#C1ED8B")), (L("蓝灰", "Blue"), () => SetInk("#A7C8DE")),
+        var palette = MoreActions(L("画笔样式", "Stroke style"),
+            (L("蓝色", "Blue"), () => SetInk("#8DB8FF")), (L("浅绿", "Green"), () => SetInk("#C1ED8B")),
             (L("琥珀", "Amber"), () => SetInk("#E6BD77")), (L("玫瑰", "Rose"), () => SetInk("#EA9E9E")),
-            (L("细线", "Thin stroke"), () => SetWidth(2)), (L("粗线", "Thick stroke"), () => SetWidth(5)),
-            (L("导出 PNG", "Export PNG"), () => ExportBoardAsync(board, item.Text("title"))));
-        AutomationProperties.SetName(palette, L("画笔样式与导出", "Stroke style and export"));
+            (L("细线", "Thin stroke"), () => SetWidth(2)), (L("粗线", "Thick stroke"), () => SetWidth(5)));
         tools.Children.Add(undo);
         tools.Children.Add(redo);
         tools.Children.Add(palette);
@@ -93,7 +91,8 @@ public sealed partial class ClientView
             board.Redraw();
             return Task.CompletedTask;
         });
-        var footer = new Border { Child = TitleRow(count, Row(minus, zoom, plus, grid)) };
+        var export = IconButton("download", L("导出 PNG", "Export PNG"), () => ExportBoardAsync(board, item.Text("title")));
+        var footer = new Border { Child = TitleRow(count, Row(minus, zoom, plus, grid, export)) };
         footer.Classes.Add("board-chrome");
         var panel = new Grid { RowDefinitions = new RowDefinitions("Auto,Auto,*,Auto") };
         var bar = new Border { Child = new ScrollViewer
@@ -171,7 +170,7 @@ public sealed partial class ClientView
     {
         private static readonly IBrush Paper = new SolidColorBrush(Color.Parse("#101923"));
         private static readonly IBrush Dots = new SolidColorBrush(Color.Parse("#2D3D4F"));
-        private static readonly IBrush Selection = new SolidColorBrush(Color.Parse("#C1ED8B"));
+        private static readonly IBrush Selection = new SolidColorBrush(Color.Parse("#8DB8FF"));
         private static readonly Pen Outline = new(Selection, 1, DashStyle.Dash);
         private IPointer? _pointer;
         private Point _anchor;
@@ -182,7 +181,7 @@ public sealed partial class ClientView
         private (double Scale, double Left, double Top) _sheet;
 
         public BoardTool Tool { get; private set; }
-        public string Ink { get; set; } = "#C1ED8B";
+        public string Ink { get; set; } = "#8DB8FF";
         public double StrokeWidth { get; set; } = 2;
         public string LabelText { get; set; } = "";
         public bool GridVisible { get; set; } = true;

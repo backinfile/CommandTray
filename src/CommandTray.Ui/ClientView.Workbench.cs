@@ -10,14 +10,11 @@ namespace CommandTray.Ui;
 
 public sealed partial class ClientView
 {
-    private static Control PageHeading(string title, Control? caption = null, Control? actions = null)
+    private Control PageActions(Control? status, params Control[] actions)
     {
-        var heading = Heading(title);
-        heading.Classes.Add("workbench-heading");
-        var copy = new StackPanel { Spacing = 3, Children = { heading } };
-        if (caption is not null) copy.Children.Add(caption);
-        if (actions is null) return copy;
-        return TitleRow(copy, actions);
+        var bar = ActionBar(actions);
+        if (status is null) return bar;
+        return _compact ? new StackPanel { Spacing = 6, Children = { status, bar } } : TitleRow(status, bar);
     }
 
     private static Border WorkbenchPanel(string title, string glyph, Control content, Control? actions = null)
@@ -58,7 +55,9 @@ public sealed partial class ClientView
         _contents.Children.Clear();
         Header(L("同步冲突", "Sync conflict"), Action(L("返回", "Back"), LoadAsync));
         _viewport.Offset = default;
-        _contents.Children.Add(PageHeading(L("比较版本", "Compare versions")));
+        var heading = Heading(L("比较版本", "Compare versions"));
+        heading.Classes.Add("workbench-heading");
+        _contents.Children.Add(heading);
         var localView = VersionPanel(L("本机", "This device"), local);
         var remoteView = VersionPanel(L("中转", "Relay"), remote);
         if (_compact)
@@ -168,6 +167,6 @@ public sealed partial class ClientView
         {
             await Change("configuration_import", arguments);
             Report(L("服务配置已导入", "Service configuration imported"));
-        }, [], commands);
+        }, [], commands, destructive: true);
     }
 }
