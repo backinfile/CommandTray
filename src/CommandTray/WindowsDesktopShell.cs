@@ -43,6 +43,18 @@ internal sealed class WindowsDesktopShell(WindowsClientBackend backend, System.D
 
     public IWin32Window Owner => new WindowOwner(RequireWindow().TryGetPlatformHandle()!.Handle);
 
+    public bool HideForCapture()
+    {
+        if (_window is not { IsVisible: true, WindowState: not WindowState.Minimized }) return false;
+        _window.Hide();
+        return true;
+    }
+
+    public void RestoreAfterCapture()
+    {
+        if (!_closing && _window is { IsVisible: false }) _window.Show();
+    }
+
     public void Close()
     {
         _closing = true;

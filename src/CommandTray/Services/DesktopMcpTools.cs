@@ -298,21 +298,86 @@ internal sealed class DesktopMcpTools(DesktopRuntime desktop)
         if (x is not null || y is not null || width is not null || height is not null)
             region = new Rectangle(x ?? throw new ArgumentException("Specify x."), y ?? throw new ArgumentException("Specify y."),
                 width ?? throw new ArgumentException("Specify width."), height ?? throw new ArgumentException("Specify height."));
-        return desktop.OnUiAsync<object>(() => new { path = desktop.Media.Screenshot(region) }, cancellationToken);
+        return CaptureScreenshot(cancellationToken, region);
     }
+
+    internal Task<object> CaptureScreenshot(CancellationToken cancellationToken, Rectangle? coordinates = null,
+        string mode = "desktop", int delay = 0, bool hide = false, bool copy = false) =>
+        desktop.CaptureInteractionAsync(hide, delay, false, () => desktop.OnUiAsync<object>(() =>
+        {
+            var area = coordinates ?? (mode switch
+            {
+                "desktop" => SystemInformation.VirtualScreen,
+                "last" => desktop.Media.LastRegion ?? throw new InvalidOperationException(Localizer.T("Capture a region first.", "请先截取一个区域。")),
+                "window" => DesktopCapturesPanel.ForegroundBounds(),
+                _ => DisplayBounds(mode)
+            });
+            var path = desktop.Media.Screenshot(area, coordinates is not null);
+            if (copy) CopyScreenshotImage(path);
+            return new { status = "saved", path };
+        }, cancellationToken), cancellationToken);
 
     [McpServerTool(Name = "select_screenshot_region", UseStructuredContent = true)]
     [Description("Open the local desktop area selector and save the selected region.")]
     public Task<object> SelectScreenshot(CancellationToken cancellationToken) =>
-        desktop.OnUiAsync<object>(() =>
+        SelectScreenshotAsync(hide: false, cancellationToken);
+
+    internal Task<object> SelectScreenshotAsync(bool hide, CancellationToken cancellationToken) =>
+        desktop.CaptureInteractionAsync(hide, 0, false, () => desktop.OnUiAsync<object>(() =>
         {
             var rectangle = desktop.SelectScreenshotRegion();
             if (rectangle is null) return new { status = "cancelled", path = (string?)null };
-            var path = desktop.Media.Screenshot(rectangle);
-            using var image = Image.FromFile(path);
-            Clipboard.SetImage(image);
+            var path = desktop.Media.Screenshot(rectangle, rememberRegion: true);
+            CopyScreenshotImage(path);
             return new { status = "saved", path = (string?)path };
-        }, cancellationToken);
+        }, cancellationToken), cancellationToken);
+
+    internal static object[] CaptureDisplays() => Screen.AllScreens.Select((screen, index) => (object)new
+    {
+        id = screen.DeviceName,
+        index = index + 1,
+        primary = screen.Primary,
+        width = screen.Bounds.Width,
+        height = screen.Bounds.Height
+    }).ToArray();
+
+    private static Rectangle DisplayBounds(string mode) => mode switch
+    {
+        "desktop" => SystemInformation.VirtualScreen,
+        "primary" => Screen.PrimaryScreen?.Bounds ?? SystemInformation.VirtualScreen,
+        _ => Screen.AllScreens.FirstOrDefault(screen => screen.DeviceName == mode)?.Bounds
+            ?? throw new ArgumentException(Localizer.T("The selected display is unavailable.", "选中的显示器已不可用。"))
+    };
+
+    private static void CopyScreenshotImage(string path)
+    {
+        using var image = Image.FromFile(path);
+        Clipboard.SetImage(image);
+    }
+
+    internal Task<OperationResult> CopyScreenshot(string capture, CancellationToken cancellationToken) => desktop.OnUiAsync(() =>
+    {
+        var path = desktop.Media.ResolveCapture(capture);
+        if (!path.EndsWith(".png", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Select a screenshot.");
+        CopyScreenshotImage(path);
+        return Ok();
+    }, cancellationToken);
+
+    internal OperationResult RevealCapture(string? capture)
+    {
+        var info = new ProcessStartInfo("explorer.exe") { UseShellExecute = false };
+        if (capture is null) info.ArgumentList.Add(desktop.Media.Folder);
+        else info.Arguments = $"/select,\"{desktop.Media.ResolveCapture(capture)}\"";
+        using var process = Process.Start(info);
+        return Ok();
+    }
+
+    internal OperationResult RecycleCapture(string capture)
+    {
+        Microsoft.VisualBasic.FileIO.FileSystem.DeleteFile(desktop.Media.ResolveCapture(capture),
+            Microsoft.VisualBasic.FileIO.UIOption.OnlyErrorDialogs, Microsoft.VisualBasic.FileIO.RecycleOption.SendToRecycleBin);
+        return Ok();
+    }
 
     [McpServerTool(Name = "pin_screenshot", UseStructuredContent = true)]
     [Description("Show a saved screenshot in a local topmost window.")]
@@ -340,6 +405,23 @@ internal sealed class DesktopMcpTools(DesktopRuntime desktop)
     [Description("Begin recording the main Windows screen with FFmpeg.")]
     public async Task<object> StartRecording(CancellationToken cancellationToken, int frameRate = 24) =>
         new { path = await desktop.Media.StartRecordingAsync(frameRate, cancellationToken) };
+
+    internal async Task<object> StartRecordingAsync(int frameRate, string mode, bool cursor, string? audio, string format,
+        int delay, bool hide, Rectangle? coordinates, CancellationToken cancellationToken)
+    {
+        var path = await desktop.CaptureInteractionAsync(hide, 0, hide, async () =>
+        {
+            Rectangle? area = coordinates ?? (mode == "region"
+                ? await desktop.OnUiAsync(desktop.SelectScreenshotRegion, cancellationToken)
+                : DisplayBounds(mode));
+            if (area is null) return "";
+            if (delay is < 0 or > 10)
+                throw new ArgumentOutOfRangeException(nameof(delay), Localizer.T("Choose a delay from 0 to 10 seconds.", "延时须在 0 到 10 秒之间。"));
+            if (delay > 0 || mode == "region") await Task.Delay(delay * 1000 + 120, cancellationToken);
+            return await desktop.Media.StartRecordingAsync(frameRate, area, cursor, audio, format, cancellationToken);
+        }, cancellationToken);
+        return new { status = path.Length == 0 ? "cancelled" : "recording", path };
+    }
 
     [McpServerTool(Name = "stop_screen_recording", UseStructuredContent = true)]
     [Description("Finish the current screen recording and return the saved MP4 path.")]

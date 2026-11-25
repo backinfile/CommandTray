@@ -59,13 +59,18 @@ public sealed class SharedMcpDispatcher
         Add(Terminals, "terminal_resize", "Update a terminal's character grid.", "itemId,columns:integer,rows:integer");
         Add(Terminals, "terminal_close", "Close a running terminal.", "itemId");
         Add(Capture, "capture_list", "List local captures.");
-        Add(Capture, "capture_take", "Capture the full screen or supplied display rectangle.", "", "x:integer,y:integer,width:integer,height:integer");
-        Add(Capture, "capture_select", "Ask the user to select a region for capture.");
+        Add(Capture, "capture_sources", "List display IDs, the last screenshot region and optional DirectShow audio devices.", "", "includeAudio:boolean");
+        Add(Capture, "capture_take", "Capture the desktop, primary display, active window, last region, display ID, or supplied rectangle.", "",
+            "x:integer,y:integer,width:integer,height:integer,mode,delay:integer,hideWindow:boolean,copy:boolean");
+        Add(Capture, "capture_select", "Ask the user to select a region for capture.", "", "hideWindow:boolean");
         Add(Capture, "capture_pin", "Pin a screenshot.", "path");
         Add(Capture, "capture_open", "Open a captured file.", "path");
         Add(Capture, "capture_annotate", "Annotate a captured image.", "path");
-        Add(Capture, "capture_record_start", "Start the local screen recorder.", "", "frameRate:integer");
+        Add(Capture, "capture_record_state", "Read the current recording state, elapsed time and last result.");
+        Add(Capture, "capture_record_start", "Start recording the primary display, desktop, a display ID, or a region.", "",
+            "frameRate:integer,mode,x:integer,y:integer,width:integer,height:integer,cursor:boolean,audio,format,delay:integer,hideWindow:boolean");
         Add(Capture, "capture_record_stop", "Stop the local screen recorder.");
+        Add(Capture, "capture_record_discard", "Stop and discard the active recording.");
         Add(Capture, "capture_ocr", "Read text from a screenshot.", "path", "language");
         Add(Pet, "pet_set", "Show or hide the desktop pet.", "visible:boolean");
         Add(Pet, "notify", "Show a desktop notification linked to a component.", "message", "spaceId,itemId");

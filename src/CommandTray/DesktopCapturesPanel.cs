@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Drawing.Drawing2D;
+using System.Runtime.InteropServices;
 using CommandTray.Services;
 using static CommandTray.DesktopWorkspacePanel;
 
@@ -66,8 +67,31 @@ internal sealed class DesktopCapturesPanel : UserControl
     internal static Rectangle? SelectRegion(IWin32Window? owner)
     {
         using var selector = new CaptureSelectionForm();
-        return selector.ShowDialog(owner) == DialogResult.OK ? selector.Selection : null;
+        if (selector.ShowDialog(owner) != DialogResult.OK) return null;
+        DwmFlush();
+        return selector.Selection;
     }
+
+    internal static Rectangle ForegroundBounds()
+    {
+        var window = GetForegroundWindow();
+        if (window != 0 && window != GetShellWindow() && (DwmGetWindowAttribute(window, 9, out var bounds, 16) == 0 ||
+            GetWindowRect(window, out bounds)))
+        {
+            var area = Rectangle.Intersect(Rectangle.FromLTRB(bounds.Left, bounds.Top, bounds.Right, bounds.Bottom),
+                SystemInformation.VirtualScreen);
+            if (area.Width > 0 && area.Height > 0) return area;
+        }
+        throw new InvalidOperationException(Localizer.T("Bring a window to the foreground before capture.", "请先将要截图的窗口切换到前台。"));
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct WindowRect { public int Left, Top, Right, Bottom; }
+    [DllImport("user32.dll")] private static extern nint GetForegroundWindow();
+    [DllImport("user32.dll")] private static extern nint GetShellWindow();
+    [DllImport("user32.dll")] private static extern bool GetWindowRect(nint window, out WindowRect bounds);
+    [DllImport("dwmapi.dll")] private static extern int DwmGetWindowAttribute(nint window, int attribute, out WindowRect bounds, int size);
+    [DllImport("dwmapi.dll")] private static extern int DwmFlush();
 
     private string? Selected() => (_files.SelectedItem as FileInfo)?.FullName;
 
@@ -81,49 +105,35 @@ internal sealed class DesktopCapturesPanel : UserControl
         var picture = new PictureBox { Image = image, SizeMode = PictureBoxSizeMode.Zoom, Dock = DockStyle.Fill };
         form.ClientSize = new Size(Math.Min(image.Width, 800), Math.Min(image.Height, 600));
         form.Controls.Add(picture);
-        form.FormClosed += (_, _) => image.Dispose();
+        var menu = new ContextMenuStrip();
+        menu.Items.Add(Localizer.T("Smaller", "缩小"), null, (_, _) => ResizePinned(.8));
+        menu.Items.Add(Localizer.T("Larger", "放大"), null, (_, _) => ResizePinned(1.25));
+        var opacity = new ToolStripMenuItem(Localizer.T("Opacity", "不透明度"));
+        foreach (int level in new[] { 100, 75, 50, 25 })
+            opacity.DropDownItems.Add($"{level}%", null, (_, _) => form.Opacity = level / 100d);
+        menu.Items.Add(opacity);
+        menu.Items.Add(Localizer.T("Close", "关闭"), null, (_, _) => form.Close());
+        picture.ContextMenuStrip = menu;
+        form.KeyPreview = true;
+        form.KeyDown += (_, e) => { if (e.KeyCode == Keys.Escape) form.Close(); };
+        form.FormClosed += (_, _) => { menu.Dispose(); image.Dispose(); };
         form.Show();
+
+        void ResizePinned(double scale)
+        {
+            var workArea = Screen.FromControl(form).WorkingArea;
+            form.ClientSize = new Size(Math.Clamp((int)(form.ClientSize.Width * scale), 120, Math.Max(120, workArea.Width - 20)),
+                Math.Clamp((int)(form.ClientSize.Height * scale), 80, Math.Max(80, workArea.Height - 60)));
+        }
     }
 
     internal static string? Annotate(string path, IWin32Window? owner)
     {
         if (!path.EndsWith(".png", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("Select a screenshot.");
-        using var source = Image.FromFile(path);
-        using var edited = new Bitmap(source);
-        using var form = new Form { Text = Localizer.T("Annotate capture", "标注截图"), StartPosition = FormStartPosition.CenterParent,
-            ClientSize = new Size(Math.Min(1000, source.Width), Math.Min(680, source.Height + 43)) };
-        var picture = new PictureBox { Image = edited, SizeMode = PictureBoxSizeMode.StretchImage, Cursor = Cursors.Cross, Dock = DockStyle.Fill };
-        var previous = Point.Empty;
-        Point Scale(Point point) => new(point.X * edited.Width / Math.Max(1, picture.Width), point.Y * edited.Height / Math.Max(1, picture.Height));
-        picture.MouseDown += (_, e) => { if (e.Button == MouseButtons.Left) previous = Scale(e.Location); };
-        picture.MouseMove += (_, e) =>
-        {
-            if (e.Button != MouseButtons.Left) return;
-            var current = Scale(e.Location);
-            using var graphics = Graphics.FromImage(edited);
-            using var pen = new Pen(Color.OrangeRed, Math.Max(2, edited.Width / 400f)) { StartCap = LineCap.Round, EndCap = LineCap.Round };
-            graphics.DrawLine(pen, previous, current);
-            previous = current;
-            picture.Invalidate();
-        };
-        string? output = null;
-        var save = Button("Save as…", "另存…", () =>
-        {
-            using var picker = new SaveFileDialog { Filter = "PNG (*.png)|*.png", FileName = Path.GetFileNameWithoutExtension(path) + "-annotated.png",
-                InitialDirectory = Path.GetDirectoryName(path) };
-            if (picker.ShowDialog(form) != DialogResult.OK) return;
-            try
-            {
-                edited.Save(picker.FileName, System.Drawing.Imaging.ImageFormat.Png);
-                output = picker.FileName;
-                form.Close();
-            }
-            catch (Exception ex) { Error(form, ex); }
-        });
-        form.Controls.Add(picture); form.Controls.Add(Toolbar(save));
+        using var form = new ScreenshotAnnotationForm(path);
         form.ShowDialog(owner);
-        return output;
+        return form.Output;
     }
 
     private Button Async(string en, string zh, Func<Task> action)
@@ -150,9 +160,9 @@ internal sealed class DesktopCapturesPanel : UserControl
         private bool _selecting;
         public CaptureSelectionForm()
         {
-            Bounds = SystemInformation.VirtualScreen;
             StartPosition = FormStartPosition.Manual;
             FormBorderStyle = FormBorderStyle.None; DoubleBuffered = true;
+            Bounds = SystemInformation.VirtualScreen;
             ShowInTaskbar = false; TopMost = true; Opacity = .27; BackColor = Color.Black; Cursor = Cursors.Cross; KeyPreview = true;
             Shown += (_, _) => Activate();
             KeyDown += (_, e) => { if (e.KeyCode == Keys.Escape) DialogResult = DialogResult.Cancel; };
@@ -161,30 +171,43 @@ internal sealed class DesktopCapturesPanel : UserControl
         protected override void OnMouseDown(MouseEventArgs e)
         {
             base.OnMouseDown(e);
+            if (e.Button == MouseButtons.Right) { DialogResult = DialogResult.Cancel; return; }
             if (e.Button != MouseButtons.Left) return;
             _start = e.Location; _selecting = true; Capture = true;
+            Selection = Rectangle.Empty;
         }
         protected override void OnMouseMove(MouseEventArgs e)
         {
             base.OnMouseMove(e);
             if (!_selecting) return;
-            Selection = Rectangle.FromLTRB(Math.Min(_start.X, e.X), Math.Min(_start.Y, e.Y), Math.Max(_start.X, e.X), Math.Max(_start.Y, e.Y));
+            UpdateSelection(e.Location);
             Invalidate();
         }
         protected override void OnPaint(PaintEventArgs e)
         {
             base.OnPaint(e);
-            using var pen = new Pen(Color.White, 3); e.Graphics.DrawRectangle(pen, Selection);
+            if (Selection.IsEmpty) return;
+            using var pen = new Pen(Color.White, 2);
+            e.Graphics.DrawRectangle(pen, Selection);
+            TextRenderer.DrawText(e.Graphics, $"{Selection.Width} × {Selection.Height}", Font,
+                new Point(Selection.Left + 4, Selection.Top + 4), Color.White, Color.Black);
         }
         protected override void OnMouseUp(MouseEventArgs e)
         {
             base.OnMouseUp(e);
-            if (!_selecting) return;
+            if (!_selecting || e.Button != MouseButtons.Left) return;
+            UpdateSelection(e.Location);
             _selecting = false;
             Capture = false;
             if (Selection.Width <= 0 || Selection.Height <= 0) { DialogResult = DialogResult.Cancel; return; }
             Selection = new Rectangle(PointToScreen(Selection.Location), Selection.Size);
             DialogResult = DialogResult.OK;
+        }
+
+        private void UpdateSelection(Point end)
+        {
+            end = new Point(Math.Clamp(end.X, 0, ClientSize.Width), Math.Clamp(end.Y, 0, ClientSize.Height));
+            Selection = Rectangle.FromLTRB(Math.Min(_start.X, end.X), Math.Min(_start.Y, end.Y), Math.Max(_start.X, end.X), Math.Max(_start.Y, end.Y));
         }
     }
 }

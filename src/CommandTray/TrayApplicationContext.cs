@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Threading;
 using CommandTray.Models;
@@ -16,6 +17,9 @@ internal sealed class TrayApplicationContext : IDisposable
     private DesktopPetForm? _pet;
     private readonly McpServerHost _mcpHost = new();
     private readonly Icon _appIcon;
+    private readonly Icon _recordingIcon;
+    private readonly DispatcherTimer _recordingTimer;
+    private bool _recordingInTray;
     private readonly NotifyIcon _tray;
     private readonly IClassicDesktopStyleApplicationLifetime _lifetime;
     private readonly WindowsDesktopShell _shell;
@@ -41,6 +45,7 @@ internal sealed class TrayApplicationContext : IDisposable
     {
         _configuration = configuration;
         _appIcon = Icon.ExtractAssociatedIcon(Application.ExecutablePath) ?? (Icon)SystemIcons.Application.Clone();
+        _recordingIcon = CreateRecordingIcon(_appIcon);
         _api = new CommandTrayApi(configuration, store, _supervisor);
         _lifetime = lifetime;
         _desktop = new DesktopRuntime(Path.GetDirectoryName(store.PathName)!);
@@ -78,6 +83,19 @@ internal sealed class TrayApplicationContext : IDisposable
         };
         _tray.DoubleClick += (_, _) => ShowSettings();
         _tray.BalloonTipClicked += (_, _) => _trayNoticeAction?.Invoke();
+        _recordingTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
+        _recordingTimer.Tick += (_, _) =>
+        {
+            var recording = _desktop.Media.IsRecording;
+            if (_recordingInTray == recording || _exiting) return;
+            _recordingInTray = recording;
+            _tray.Icon = recording ? _recordingIcon : _appIcon;
+            _tray.Text = recording ? Localizer.T("CommandTray Suite · Recording", "CommandTray Suite · 正在录屏") : "CommandTray Suite";
+            RebuildMenu();
+            if (!recording && _desktop.Media.RecordingFailure is { } error)
+                ShowFailure(Localizer.T("Screen recording", "屏幕录制"), error);
+        };
+        _recordingTimer.Start();
         RebuildMenu();
         Localizer.LanguageChanged += OnLanguageChanged;
 
@@ -222,6 +240,12 @@ internal sealed class TrayApplicationContext : IDisposable
         menu.Items.Add(Localizer.T("Shared files", "文件共享"), null, (_, _) => ShowPage(DesktopPage.SharedFiles));
         menu.Items.Add(Localizer.T("Clipboard", "剪贴板"), null, (_, _) => ShowPage(DesktopPage.Clipboard));
         menu.Items.Add(Localizer.T("Capture history", "捕获历史"), null, (_, _) => ShowPage(DesktopPage.Captures));
+        if (_desktop.Media.IsRecording)
+            menu.Items.Add(Localizer.T("Stop recording", "结束录屏"), null, async (_, _) => await RunSafe(async () =>
+            {
+                await _desktop.Media.StopRecordingAsync();
+                ShowNotice(Localizer.T("Recording saved", "录屏已保存"));
+            }));
         menu.Items.Add(Localizer.T("Screenshot", "截图"), null, (_, _) =>
         {
             try
@@ -261,6 +285,23 @@ internal sealed class TrayApplicationContext : IDisposable
         try { await action(); }
         catch (Exception ex) { ShowFailure("CommandTray", ex.Message); }
     }
+
+    private static Icon CreateRecordingIcon(Icon original)
+    {
+        using var image = original.ToBitmap();
+        using (var graphics = Graphics.FromImage(image))
+        {
+            graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            int diameter = Math.Max(6, image.Width / 2);
+            graphics.FillEllipse(Brushes.White, image.Width - diameter, image.Height - diameter, diameter, diameter);
+            graphics.FillEllipse(Brushes.Red, image.Width - diameter + 1, image.Height - diameter + 1, diameter - 2, diameter - 2);
+        }
+        var handle = image.GetHicon();
+        try { return (Icon)Icon.FromHandle(handle).Clone(); }
+        finally { DestroyIcon(handle); }
+    }
+
+    [DllImport("user32.dll")] private static extern bool DestroyIcon(nint icon);
 
     private void BeginExit()
     {
@@ -362,8 +403,10 @@ internal sealed class TrayApplicationContext : IDisposable
         _mcpHost.DisposeAsync().AsTask().GetAwaiter().GetResult();
         _desktop.Dispose();
         _shutdownWindow.Dispose();
+        _recordingTimer.Stop();
         _tray.ContextMenuStrip?.Dispose();
         _tray.Dispose();
+        _recordingIcon.Dispose();
         _appIcon.Dispose();
     }
 }

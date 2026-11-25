@@ -12,6 +12,7 @@ internal sealed class DesktopRuntime : IDisposable
 {
     private readonly ConcurrentDictionary<string, TerminalSession> _terminals = new();
     private readonly object _terminalGate = new();
+    private readonly SemaphoreSlim _captureGate = new(1, 1);
     private readonly string _directory;
     private readonly string _clipboardPath;
     private Control? _ui;
@@ -59,7 +60,32 @@ internal sealed class DesktopRuntime : IDisposable
         (_shell ?? throw new InvalidOperationException("The Windows application is unavailable.")).PromptSecret(title);
 
     public Rectangle? SelectScreenshotRegion() =>
-        DesktopCapturesPanel.SelectRegion(_shell?.Owner);
+        DesktopCapturesPanel.SelectRegion(null);
+
+    public async Task<T> CaptureInteractionAsync<T>(bool hide, int delay, bool stayHidden, Func<Task<T>> capture,
+        CancellationToken cancellationToken)
+    {
+        if (delay is < 0 or > 10)
+            throw new ArgumentOutOfRangeException(nameof(delay), Localizer.T("Choose a delay from 0 to 10 seconds.", "延时须在 0 到 10 秒之间。"));
+        await _captureGate.WaitAsync(cancellationToken);
+        bool restore = false;
+        try
+        {
+            if (hide) restore = await OnUiAsync(() => _shell?.HideForCapture() == true, cancellationToken);
+            if (restore || delay > 0) await Task.Delay(TimeSpan.FromMilliseconds(delay * 1000 + 120), cancellationToken);
+            var result = await capture();
+            if (stayHidden && result is string { Length: > 0 }) restore = false;
+            return result;
+        }
+        finally
+        {
+            try
+            {
+                if (restore) await OnUiAsync(() => { _shell?.RestoreAfterCapture(); return true; });
+            }
+            finally { _captureGate.Release(); }
+        }
+    }
 
     public string? AnnotateScreenshot(string path) =>
         DesktopCapturesPanel.Annotate(Media.ResolveCapture(path), _shell?.Owner);

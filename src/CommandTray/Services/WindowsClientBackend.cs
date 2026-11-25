@@ -39,6 +39,12 @@ internal sealed class WindowsClientBackend(
         string PathArgument() => Text("path") ?? LocalUri(Required("localUri"));
         int Number(string name, int fallback) => WorkspaceStore.Number(arguments[name], fallback);
         bool? Flag(string name) => arguments[name]?.GetValue<bool>();
+        Rectangle? CaptureCoordinates() => new[] { "x", "y", "width", "height" }.Any(arguments.ContainsKey)
+            ? new Rectangle(Integer(arguments["x"]) ?? throw new ArgumentException("Specify x."),
+                Integer(arguments["y"]) ?? throw new ArgumentException("Specify y."),
+                Integer(arguments["width"]) ?? throw new ArgumentException("Specify width."),
+                Integer(arguments["height"]) ?? throw new ArgumentException("Specify height."))
+            : null;
 
         switch (operation)
         {
@@ -134,15 +140,29 @@ internal sealed class WindowsClientBackend(
             case "terminal_resize": return Json(_actions.ResizeTerminal(Item(), Number("columns", 80), Number("rows", 24)));
             case "terminal_close": return Json(_actions.StopTerminal(TerminalSpace(Item()), Item()));
             case "capture_list": return Json(desktop.Media.Captures());
+            case "capture_sources": return Json(new
+            {
+                displays = DesktopMcpTools.CaptureDisplays(),
+                audio = Flag("includeAudio") == true ? await desktop.Media.AudioDevicesAsync(cancellationToken) : [],
+                lastRegion = desktop.Media.LastRegion is not null
+            });
             case "capture_record_state": return Json(desktop.Media.RecordingState);
-            case "capture_take": return Json(await _actions.Screenshot(cancellationToken, Integer(arguments["x"]), Integer(arguments["y"]),
-                Integer(arguments["width"]), Integer(arguments["height"])));
-            case "capture_select": return Json(await _actions.SelectScreenshot(cancellationToken));
+            case "capture_take": return Json(await _actions.CaptureScreenshot(cancellationToken, CaptureCoordinates(), Text("mode") ?? "desktop",
+                Number("delay", 0), Flag("hideWindow") ?? false, Flag("copy") ?? false));
+            case "capture_select": return Json(await _actions.SelectScreenshotAsync(Flag("hideWindow") ?? false, cancellationToken));
+            case "capture_copy": return Json(await _actions.CopyScreenshot(Required("path"), cancellationToken));
+            case "capture_reveal": return Json(_actions.RevealCapture(Text("path")));
+            case "capture_recycle": return Json(_actions.RecycleCapture(Required("path")));
             case "capture_pin": return Json(await _actions.Pin(Required("path"), cancellationToken));
             case "capture_annotate": return Json(await _actions.AnnotateScreenshot(Required("path"), cancellationToken));
             case "capture_open": return Json(_actions.OpenCapture(Required("path")));
-            case "capture_record_start": return Json(await _actions.StartRecording(cancellationToken, Number("frameRate", 24)));
+            case "capture_record_start": return Json(await _actions.StartRecordingAsync(Number("frameRate", 24), Text("mode") ?? "primary",
+                Flag("cursor") ?? true, Text("audio"), Text("format") ?? "mp4", Number("delay", 0), Flag("hideWindow") ?? false,
+                CaptureCoordinates(), cancellationToken));
             case "capture_record_stop": return Json(await _actions.StopRecording(cancellationToken));
+            case "capture_record_discard":
+                await desktop.Media.EndRecordingAsync(discard: true, cancellationToken);
+                return Json(new { status = "discarded" });
             case "capture_ocr": return Json(await _actions.Ocr(Required("path"), cancellationToken, Text("language") ?? "eng"));
             case "pet_set": return Json(await _actions.Pet(Flag("visible") ?? throw new ArgumentException("Specify visible."), cancellationToken));
             case "notify": return Json(await _actions.ShowNotice(Required("message"), cancellationToken, Text("spaceId"), Text("itemId")));

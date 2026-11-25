@@ -108,7 +108,8 @@ public sealed partial class ClientView
         Form(title, L("确认", "Confirm"), _ => save());
 
     private Task ShowForm(string title, string submitLabel, string pendingLabel,
-        Func<JsonObject, CancellationToken, Task> save, Field[] fields, Control? extra = null, bool cancellable = false)
+        Func<JsonObject, CancellationToken, Task> save, Field[] fields, Control? extra = null, bool cancellable = false,
+        Control? initialFocus = null)
     {
         var body = new StackPanel { Spacing = 8 };
         var error = new TextBlock
@@ -181,7 +182,7 @@ public sealed partial class ClientView
             }
         });
         dialog = OpenActionDialog(title, body, new WrapPanel { ItemSpacing = 8, Children = { cancel, submit, progress } },
-            firstInput ?? cancel);
+            initialFocus ?? firstInput ?? cancel);
         return Task.CompletedTask;
     }
 }
