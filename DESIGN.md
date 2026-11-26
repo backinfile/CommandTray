@@ -37,7 +37,7 @@ colors:
 | --- | --- | --- |
 | 空间 | 添加组件、定位、同步或配对 | 重命名空间、从中转拉取、删除空间 |
 | 便签与待办 | 编辑便签、勾选、编辑待办、新增待办 | 复制便签、重命名和移除组件、删除待办 |
-| 画板 | 绘制工具、撤销、重做、缩放、网格、导出 PNG | 原生端的笔色和线宽、组件管理 |
+| 画板 | 抓手、绘图工具、撤销、重做、缩放、适应内容、导出 PNG。选中后显示复制、删除和层级操作 | 重置视图、切换网格、清空画板、原生端的笔色和线宽 |
 | 目录与终端 | 选择目录、打开或预览、复制到指定位置、打开或关闭终端、运行时中断、发送 | 输入目录路径、新建目录、在此目录添加终端 |
 | 命令管理 | 新建、当前命令启停和编辑、日志搜索和复制 | 刷新列表、重启、打开服务网页、删除 |
 | 共享文件 | 上传、搜索和筛选、行内下载、传输取消和重试 | 刷新列表、删除文件 |
@@ -47,6 +47,8 @@ colors:
 | 设置 | 配对、编辑连接、刷新设备、同步与应用开关、复制 MCP 配置、更新状态对应的操作、导出配置 | 解除配对、导入服务配置 |
 
 ## 参考
+
+- 抓手、空格或中键拖动只平移视图。画板获得焦点后，可用方向键平移、Ctrl+滚轮以指针为中心缩放、Shift+1 适应内容。绘制时按住 Shift 可锁定比例或将线段吸附到 45°。清空可撤销，PNG 包含全部已保存的对象。[FigJam 平移与缩放](https://help.figma.com/hc/en-us/articles/1500004414582-Pan-and-zoom-in-FigJam) · [Miro 输入设备操作](https://help.miro.com/hc/en-us/articles/360017731053-Using-Miro-with-a-mouse-trackpad-or-touchscreen) · [Excalidraw 绘图指南](https://plus.excalidraw.com/how-to-start)
 
 - 侧栏可调整宽度、可切成图标栏，显示与收起都有直接入口。[VS Code Custom Layout](https://code.visualstudio.com/docs/configure/custom-layout) · [Fluent NavigationView](https://learn.microsoft.com/en-us/windows/apps/design/controls/navigationview) · [IntelliJ IDEA Tool Windows](https://www.jetbrains.com/help/idea/tool-windows.html)
 - 一个组件临时占满内容区，还原后保留原布局。分隔线支持键盘微调。[Windows Terminal Pane Zoom](https://learn.microsoft.com/en-us/windows/terminal/panes#zooming-a-pane) · [W3C Window Splitter](https://www.w3.org/WAI/ARIA/apg/patterns/windowsplitter/)
