@@ -868,6 +868,11 @@ async function perform(operation, argument) {
       });
     }
     case "board-export": exportWorkspaceBoard(argument); return;
+    case "board-action": {
+      const separator = argument.indexOf("/");
+      performBoardAction(argument.slice(0,separator),argument.slice(separator+1));
+      return;
+    }
     case "compare-conflict": compareConflict(); return;
     case "conflict-export":
       downloadBlob(new Blob([JSON.stringify(conflict,null,2)],{type:"application/json"}),"workspace-conflict.json");
