@@ -153,6 +153,7 @@ public sealed partial class ClientView : UserControl
             "services" or "service" or "logs" or "manager" or "commands" => Has(ClientFeatures.Commands) ? "commands" : "workspace",
             "shared" or "sharing" or "relay" or "files" or "sharedFiles" => "files",
             "clip" or "clipboard" => "clipboard",
+            "text-tools" => "text-tools",
             "media" or "captures" or "capture" => Has(ClientFeatures.Capture) ? "capture" : "workspace",
             "settings" => "settings",
             "ssh" => Has(ClientFeatures.Ssh) || OperatingSystem.IsAndroid() ? "ssh" : "workspace",
@@ -223,6 +224,7 @@ public sealed partial class ClientView : UserControl
                 case "workspace": await RenderWorkspaceAsync(source.Token); break;
                 case "files": await RenderFilesAsync(source.Token); break;
                 case "clipboard": await RenderClipboardAsync(source.Token); break;
+                case "text-tools": RenderUtilities(source.Token); break;
                 case "settings": await RenderSettingsAsync(source.Token); break;
                 case "commands": await RenderCommandsAsync(source.Token); break;
                 case "capture": await RenderCaptureAsync(source.Token); break;
@@ -262,7 +264,8 @@ public sealed partial class ClientView : UserControl
         var pages = new List<(string Id, string Zh, string En)>
         {
             ("files", "共享文件", "Shared files"),
-            ("clipboard", "剪贴板", "Clipboard")
+            ("clipboard", "剪贴板", "Clipboard"),
+            ("text-tools", "实用工具", "Utilities")
         };
         if (Has(ClientFeatures.Commands)) pages.Insert(0, ("commands", "命令管理", "Commands"));
         if (Has(ClientFeatures.Capture)) pages.Add(("capture", "截图与录屏", "Screen capture"));

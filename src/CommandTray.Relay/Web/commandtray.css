@@ -124,6 +124,21 @@ progress { display:block; width:100%; height:6px; accent-color:var(--accent) }
 .task input:checked + span { color: var(--muted); text-decoration: line-through }
 .board { width: 100%; display: block; background:#111a27; height: 270px; touch-action:none }
 .board.drawing { cursor:crosshair }
+.text-tool-panels { margin-top:12px }
+.text-tool-panels .bar { flex-wrap:wrap }
+.text-tool-panels textarea { display:block; width:100%; height:clamp(230px,38vh,430px); resize:vertical; font-family:monospace }
+.text-tool-status { margin-top:10px }
+.utility-tabs { display:flex; flex-wrap:wrap; gap:5px; padding:0 0 10px; margin-bottom:14px; border-bottom:1px solid var(--line) }
+.utility-tabs button[aria-pressed=true] { color:var(--accent); background:var(--selected); border-color:var(--line) }
+.utility-panel { margin-top:12px }
+.utility-panel input,.utility-panel textarea { width:100%; font-family:monospace }
+.utility-diff-result textarea,.utility-time-result textarea { display:block; min-height:128px; resize:vertical }
+.utility-hash textarea { display:block; min-height:60px; overflow-wrap:anywhere; resize:vertical }
+.utility-status { margin:10px 0 }
+.qr-preview { display:grid; min-height:180px; place-items:center }
+.qr-preview canvas { width:min(100%,256px); height:auto; image-rendering:pixelated }
+.checksum-name { overflow-wrap:anywhere }
+#checksum-progress { margin-top:8px }
 .table-wrap { overflow: auto }
 table { width: 100%; border-collapse: collapse; text-align: left }
 th,td { padding: 11px 14px; border-bottom: 1px solid var(--line) }
@@ -194,6 +209,9 @@ dialog::backdrop { background: var(--scrim) }
   .paired,.group { display:none }
   main { grid-row:2; grid-column:1; padding:17px 12px 75px }
   .workbench,.split { grid-template-columns:1fr }
+  .text-tool-panels textarea { height:160px }
+  .text-tool-panels .bar button { min-height:44px }
+  .utility-tabs button { min-height:44px; padding-inline:8px }
   .action-menu button,.task-row button,.more-actions { min-height:44px }
   .board { height:210px }
   .file-meta { display:none }

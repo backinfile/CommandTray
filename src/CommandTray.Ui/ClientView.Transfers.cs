@@ -90,10 +90,18 @@ public sealed partial class ClientView
                 var name = file.Text("name");
                 var metadata = new[] { file.Text("folder"), FileSize(file["size"]), file.Text("deviceName"),
                     DateTimeOffset.TryParse(file.Text("modifiedAt"), out var modified) ? modified.ToLocalTime().ToString("g") : "" };
+                var checksum = file.Text("sha256");
+                var options = new List<(string Label, Func<Task> Action)> { (L("复制文件名", "Copy file name"), () => CopyMetadata(name)) };
+                if (LocalUtilities.IsSha256(checksum))
+                {
+                    options.Add((L("复制 SHA-256", "Copy SHA-256"), () => CopyMetadata(checksum)));
+                    options.Add((L("校验本地文件…", "Verify local file…"), () => OpenFileChecksumAsync(checksum)));
+                }
+                options.Add((L("删除", "Delete"), () => Confirm(L("删除共享文件？", "Delete shared file?"),
+                    () => Change("file_delete", new() { ["id"] = id }), L("删除文件", "Delete file"))));
                 var actions = Row(
                     Action(L("下载", "Download"), () => QueueDownloadAsync(file, relay.Text("deviceId")), glyph: "download"),
-                    MoreActions(L("文件操作", "File actions"), (L("删除", "Delete"), () => Confirm(L("删除共享文件？", "Delete shared file?"),
-                        () => Change("file_delete", new() { ["id"] = id }), L("删除文件", "Delete file")))));
+                    MoreActions(L("文件操作", "File actions"), options.ToArray()));
                 rows.Children.Add(SettingRow(name, actions, string.Join(" · ", metadata.Where(field => field.Length > 0))));
             }
             if (rows.Children.Count == 0)
@@ -106,20 +114,29 @@ public sealed partial class ClientView
             var inputs = await RequireTopLevel().StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions { AllowMultiple = true });
             if (inputs.Count == 0) return;
             foreach (var file in inputs)
-                Enqueue(new Transfer(file.Name, true, (job, progress, cancellation) =>
-                    UploadOneAsync(file, values.Text("folder"), relay.Text("deviceId"), job, progress, cancellation)));
+                QueueUpload(file.Name, file.OpenReadAsync, values.Text("folder"), relay.Text("deviceId"));
             _ = ProcessTransfersAsync();
             await LoadAsync();
         }, new Field("folder", L("共享目录", "Shared folder"), _fileFolder ?? ""));
+
+        async Task CopyMetadata(string value)
+        {
+            await Execute("clipboard_local_write", new() { ["text"] = value }, token);
+            Report(L("已复制", "Copied"));
+        }
     }
 
-    private async Task<bool> UploadOneAsync(IStorageFile file, string folder, string deviceId, Transfer job,
+    private void QueueUpload(string name, Func<Task<Stream>> open, string folder, string deviceId) =>
+        Enqueue(new Transfer(name, true, (job, progress, cancellation) =>
+            UploadOneAsync(name, open, folder, deviceId, job, progress, cancellation)));
+
+    private async Task<bool> UploadOneAsync(string name, Func<Task<Stream>> open, string folder, string deviceId, Transfer job,
         IProgress<long> progress, CancellationToken cancellation)
     {
-        var path = TemporaryFile(file.Name);
+        var path = TemporaryFile(name);
         try
         {
-            await using (var original = await file.OpenReadAsync())
+            await using (var original = await open())
             await using (var staged = File.Create(path))
             {
                 if (original.CanSeek && original.Length > 128L * 1024 * 1024)
@@ -135,7 +152,7 @@ public sealed partial class ClientView
             }
             await _backend.ExecuteAsync("file_upload", new()
             {
-                ["name"] = file.Name, ["folder"] = folder, ["path"] = path, ["deviceId"] = deviceId
+                ["name"] = name, ["folder"] = folder, ["path"] = path, ["deviceId"] = deviceId
             }, progress, cancellation);
             return true;
         }

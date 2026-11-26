@@ -7,6 +7,7 @@ const pages = {
   workspace: ["工作区", "M3 4h18v16H3z M3 9h18 M10 9v11"],
   files: ["共享文件", "M3 6h7l2 2h9v12H3z"],
   clipboard: ["剪贴板", "M8 5H5v15h14V5h-3 M8 4h8v4H8z M8 12h8 M8 16h6"],
+  "text-tools": ["实用工具", "M4 5h16M7 5v3m10-3v3m-5-3v12m-3 0h6M4 21h16"],
   settings: ["设置", "M9 3h6l1 3 3 1 2 4-2 2v3l-3 3-3-1-2 3-4-1-1-3-3-2 1-4 3-1z M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0"]
 };
 const componentKinds = [
@@ -151,6 +152,7 @@ function dropDevice() {
   selected = null;
   files = [];
   history = [];
+  resetUtilities();
   pinnedClips.clear();
   devices = [];
   conflict = null;
@@ -205,11 +207,13 @@ function navLink(id) {
     page === id ? ' aria-current="page"' : ""}>${svg(pages[id][1])}<span>${pages[id][0]}</span></button>`;
 }
 
-const toolPages = ["files", "clipboard"];
+const toolPages = ["files", "clipboard", "text-tools"];
 const spacesOptions = () => (workspace?.document?.spaces ?? []).map(space => ({label:space.name, space:space.id, scope:"空间"}));
 const toolOptions = () => toolPages.map(id => ({label:pages[id][0], page:id, scope:"工具"}));
 
 function render() {
+  disposeUtility?.();
+  disposeUtility = undefined;
   closeActionMenu();
   unmountWorkspaceBoards();
   el("shell").classList.toggle("unpaired", !device);
@@ -239,8 +243,9 @@ function render() {
     chooser("工具", pages.files[1], "choose-tool", toolPages.includes(page)) +
     '<div class="nav-footer"><small class="paired">已配对</small>' + navLink("settings") + "</div>";
   el("content").innerHTML = loading ? '<p class="muted" role="status">正在加载…</p>' :
-    ({ workspace: renderWorkspace, files: renderFiles, clipboard: renderClipboard, settings: renderSettings }[page])();
+    ({ workspace: renderWorkspace, files: renderFiles, clipboard: renderClipboard, "text-tools": renderUtilities, settings: renderSettings }[page])();
   if (!loading && page === "workspace") mountWorkspaceBoards();
+  if (!loading && page === "text-tools") connectUtilities();
 }
 
 async function pair(event) {
@@ -283,6 +288,7 @@ async function open(target) {
   const controller = pageRequest = new AbortController();
   const operation = ++navigation;
   page = target;
+  if (target === "text-tools") { loading = false; render(); return; }
   loading = true;
   render();
   try {
@@ -431,9 +437,15 @@ function fileRows() {
   const visible = files.filter(file => (!fileFolder || fileFolder === (file.folder || "/")) &&
     [file.name,file.folder,file.deviceName].some(value=>String(value??"").toLowerCase().includes(query)));
   if (!visible.length) return empty(files.length ? "没有符合条件的文件" : "暂无共享文件");
-  const rows = visible.map(file => `<tr><td><strong>${escape(file.name)}</strong><small>${escape(file.folder || "根目录")}</small></td>
-    <td class="file-meta">${sizeText(file.size)}</td><td class="file-meta">${escape(file.deviceName || "")}<small>${escape(localTime(file.modifiedAt))}</small></td>
-    <td><div class="actions">${button("下载", "download:" + file.id)}${moreActions("文件操作", [["删除文件", "remove-file:" + file.id, true]])}</div></td></tr>`).join("");
+  const rows = visible.map(file => {
+    const actions = [["复制文件名", "file-name:" + file.id]];
+    if (/^[0-9a-f]{64}$/i.test(file.sha256))
+      actions.push(["复制 SHA-256", "file-checksum:" + file.id],["校验本地文件…", "verify-file:" + file.id]);
+    actions.push(["删除文件", "remove-file:" + file.id, true]);
+    return `<tr><td><strong>${escape(file.name)}</strong><small>${escape(file.folder || "根目录")}</small></td>
+      <td class="file-meta">${sizeText(file.size)}</td><td class="file-meta">${escape(file.deviceName || "")}<small>${escape(localTime(file.modifiedAt))}</small></td>
+      <td><div class="actions">${button("下载", "download:" + file.id)}${moreActions("文件操作", actions)}</div></td></tr>`;
+  }).join("");
   return `<div class="surface table-wrap"><table><thead><tr><th>名称</th><th class="file-meta">大小</th><th class="file-meta">来源 / 时间</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 function renderFiles() {
@@ -521,7 +533,11 @@ function clipPanels() {
     const {entry,pinned}=selectedEntry, key=clipKey(entry);
     detail = `<div class="body"><div class="toolbar"><small>${pinned ? "置顶 · " : ""}${escape(entry.deviceName || "未知设备")} · ${escape(localTime(entry.updatedAt))}</small></div>
       <div class="clip-text">${escape(entry.text)}</div><div class="toolbar clip-actions">${button("复制","copy:"+key,"secondary")}${
-      button(pinned?"取消置顶":"置顶","clip-pin:"+key)}${moreActions("记录操作",[["在本机隐藏","clip-hide:"+key]])}</div></div>`;
+      button(pinned?"取消置顶":"置顶","clip-pin:"+key)}${moreActions("记录操作",[
+        ["编辑后发送…","edit-clip:"+key],
+        ["处理文本","transform-clip:"+key],
+        ["在本机隐藏","clip-hide:"+key]
+      ])}</div></div>`;
   }
   return surface("历史", "", list) + surface("内容", "", detail, "clip-inspector");
 }
@@ -560,6 +576,22 @@ function showDialog(title, content, mode = "action") {
 }
 const dialogPending = () => el("dialog").querySelector("form[data-pending]") !== null;
 function closeUserDialog() { if (!dialogPending()) el("dialog").close(); }
+
+async function copyText(text) {
+  try { await navigator.clipboard.writeText(text); report("已复制"); }
+  catch {
+    showDialog("复制文本",textarea("文本",text,false));
+    el("dialog-content").querySelector("textarea").select();
+  }
+}
+
+const clipboardText = key => (history.find(entry=>clipKey(entry)===key) ?? pinnedClips.get(key))?.text;
+function composeClipboard(text = "") {
+  return modal(text ? "编辑后发送" : "发送文本", "", textarea("文本",text), "发送", async values => {
+    await request("clipboard", { method:"PUT", body:{text:values.get("text")} });
+    await open("clipboard");
+  });
+}
 
 function modal(title, description, fields, submit, action, danger = false) {
   showDialog(title, `<form>${description ? `<p class="dialog-description">${escape(description)}</p>` : ""}${fields}
@@ -897,10 +929,37 @@ async function perform(operation, argument) {
       await request("files/" + encodeURIComponent(argument), { method:"DELETE" });
       await open("files");
     }, true);
-    case "send-clipboard": return modal("发送文本", "", textarea("文本"), "发送", async values => {
-      await request("clipboard", { method:"PUT", body:{text:values.get("text")} });
-      await open("clipboard");
-    });
+    case "file-name":
+    case "file-checksum": {
+      const file = files.find(file => file.id === argument);
+      const value = operation === "file-name" ? file?.name : file?.sha256;
+      if (value) await copyText(value);
+      return;
+    }
+    case "verify-file": {
+      const file = files.find(entry=>entry.id===argument);
+      if (!file?.sha256) return;
+      utilityDraft.expected = file.sha256;
+      utilitySection = "checksum";
+      await open("text-tools");
+      el("checksum-choose")?.focus({preventScroll:true});
+      return;
+    }
+    case "send-clipboard": return composeClipboard();
+    case "edit-clip": {
+      const text = clipboardText(argument);
+      if (text != null) composeClipboard(text);
+      return;
+    }
+    case "transform-clip": {
+      const text = clipboardText(argument);
+      if (text == null) return;
+      textDraft = text;
+      utilitySection = "convert";
+      await open("text-tools");
+      el("text-tool-input")?.focus({preventScroll:true});
+      return;
+    }
     case "clip-select":
       clipSelection=argument; refreshClips();
       if (matchMedia("(max-width: 700px)").matches) document.querySelector(".clip-inspector")?.scrollIntoView({ block:"start" });
@@ -908,13 +967,8 @@ async function perform(operation, argument) {
     case "clip-pin": return setClipPin(argument, !pinnedClips.has(argument) && !clipPreferences().pinned.includes(argument));
     case "clip-hide": return setClipPin(argument, false, true);
     case "copy": {
-      const text=(history.find(entry=>clipKey(entry)===argument) ?? pinnedClips.get(argument))?.text;
-      if (text==null) return;
-      try { await navigator.clipboard.writeText(text); report("已复制"); }
-      catch {
-        showDialog("复制文本",textarea("文本",text));
-        el("dialog-content").querySelector("textarea").select();
-      }
+      const text = clipboardText(argument);
+      if (text != null) await copyText(text);
       return;
     }
     case "disconnect": return modal("断开此浏览器配对？", "", "", "断开配对", async () => {

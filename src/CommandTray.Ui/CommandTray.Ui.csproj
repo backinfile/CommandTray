@@ -8,6 +8,7 @@
   <ItemGroup>
     <PackageReference Include="Avalonia" Version="12.1.6" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.6" />
+    <PackageReference Include="QRCoder" Version="1.9.0" />
     <ProjectReference Include="../CommandTray.Core/CommandTray.Core.csproj" />
   </ItemGroup>
 </Project>

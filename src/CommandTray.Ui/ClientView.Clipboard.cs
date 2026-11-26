@@ -31,14 +31,7 @@ public sealed partial class ClientView
         var more = new List<(string Label, Func<Task> Action)> { (L("刷新历史", "Refresh history"), LoadAsync) };
         if (paired)
         {
-            actions.Add(PrimaryAction(L("发送文本", "Send text"), () =>
-                Form(L("发送文本", "Send text"), L("发送", "Send"), L("正在发送…", "Sending…"),
-                    async (values, cancellation) =>
-                    {
-                        await Execute("clipboard_send", new() { ["text"] = values.RequireText("text") }, cancellation);
-                        await LoadAsync();
-                        Report(L("已发送", "Sent"));
-                    }, new Field("text", L("文本", "Text"), Multiline: true)), "send"));
+            actions.Add(PrimaryAction(L("发送文本", "Send text"), () => ComposeClipboard(), "send"));
             more.Insert(0, (L("发送本机剪贴板", "Send local clipboard"), async () =>
             {
                 var local = TextOf(await Execute("clipboard_local_read", [], token));
@@ -211,14 +204,19 @@ public sealed partial class ClientView
             input.Classes.Add("detail-text");
             inspector.Children.Add(Muted(ClipSource(entry, pinned)));
             inspector.Children.Add(input);
+            var options = new List<(string Label, Func<Task> Action)>
+            {
+                (L("处理文本", "Process text"), () => OpenTextToolsAsync(entry.Text)),
+                (L("在本机隐藏", "Hide on this device"), () => SetPreference(entry, new() { ["hide"] = true }))
+            };
+            if (paired) options.Insert(0, (L("编辑后发送…", "Edit and send…"), () => ComposeClipboard(entry.Text)));
             inspector.Children.Add(ActionBar(SecondaryAction(L("复制", "Copy"), async () =>
             {
                 await Execute("clipboard_local_write", new() { ["text"] = entry.Text }, token);
                 Report(L("已复制到本机剪贴板", "Copied to this device"));
             }, "copy"), Action(pinned ? L("取消置顶", "Unpin") : L("置顶", "Pin"), () =>
                 SetPreference(entry, new() { ["pin"] = !pinned }), glyph: "pin"),
-                MoreActions(L("记录操作", "Entry actions"), (L("在本机隐藏", "Hide on this device"), () =>
-                    SetPreference(entry, new() { ["hide"] = true })))));
+                MoreActions(L("记录操作", "Entry actions"), options.ToArray())));
         }
 
         async Task SetPreference(ClipEntry entry, JsonObject change)
@@ -239,6 +237,16 @@ public sealed partial class ClientView
             ["source"] = entry.Source, ["text"] = entry.Text, ["time"] = entry.Time, ["local"] = entry.Local
         };
         static string ClipId(string identity) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(identity)));
+
+        Task ComposeClipboard(string text = "") =>
+            Form(text.Length == 0 ? L("发送文本", "Send text") : L("编辑后发送", "Edit and send"),
+                L("发送", "Send"), L("正在发送…", "Sending…"),
+                async (values, cancellation) =>
+                {
+                    await Execute("clipboard_send", new() { ["text"] = values.RequireText("text") }, cancellation);
+                    await LoadAsync();
+                    Report(L("已发送", "Sent"));
+                }, new Field("text", L("文本", "Text"), text, Multiline: true));
     }
 
     private string ClipboardDirectionLabel(string direction) => direction switch

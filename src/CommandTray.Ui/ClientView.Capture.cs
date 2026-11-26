@@ -223,6 +223,7 @@ public sealed partial class ClientView
             var actions = ActionBar();
             var choices = new List<(string Label, Func<Task> Action)>
             {
+                (L("上传到共享文件…", "Upload to shared files…"), () => ShareCaptureAsync(selected, token)),
                 (L("重命名…", "Rename…"), () => Form(L("重命名", "Rename"), values =>
                         Capture("capture_rename", new() { ["path"] = selected, ["name"] = values.RequireText("name") }, token),
                         new Field("name", L("文件名", "File name"), Path.GetFileNameWithoutExtension(selected)))),
@@ -358,6 +359,23 @@ public sealed partial class ClientView
     }
 
     private static bool IsScreenshot(string path) => Path.GetExtension(path).Equals(".png", StringComparison.OrdinalIgnoreCase);
+
+    private async Task ShareCaptureAsync(string path, CancellationToken token)
+    {
+        var relay = await Execute("relay_status", [], token);
+        if (!relay.Flag("paired"))
+            throw new InvalidOperationException(L("请先在共享文件页配对中转服务器。", "Pair a relay from Shared files first."));
+        if (!File.Exists(path))
+            throw new FileNotFoundException(L("捕获文件已不存在。", "The capture file no longer exists."));
+        await Form(L("上传捕获文件", "Upload capture"), L("上传", "Upload"), values =>
+        {
+            QueueUpload(Path.GetFileName(path), () => Task.FromResult<Stream>(File.OpenRead(path)),
+                values.Text("folder"), relay.Text("deviceId"));
+            Navigate("files");
+            _ = ProcessTransfersAsync();
+            return Task.CompletedTask;
+        }, new Field("folder", L("共享目录", "Shared folder"), "captures"));
+    }
 
     private async Task ExportCaptureAsync(string path)
     {

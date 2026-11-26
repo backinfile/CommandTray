@@ -31,6 +31,7 @@ internal static class TrayGlyph
                 "rectangle" => "M4,6 H20 V18 H4 Z",
                 "ellipse" => "M21,12 A9,6 0 1 1 3,12 A9,6 0 1 1 21,12",
                 "text" => "M5,5 H19 M12,5 V20 M8,20 H16",
+                "text-tools" => "M4,5 H20 M7,5 V8 M17,5 V8 M12,5 V17 M9,17 H15 M4,21 H20",
                 "eraser" => "M3,14 L12,4 L20,11 L12,20 H8 Z M8,9 L16,16 M11,20 H21",
                 "undo" => "M8,5 L3,10 L8,15 M4,10 H15 A5,5 0 0 1 20,15 V19",
                 "redo" => "M16,5 L21,10 L16,15 M20,10 H9 A5,5 0 0 0 4,15 V19",
