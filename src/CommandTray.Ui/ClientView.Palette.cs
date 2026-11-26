@@ -146,7 +146,8 @@ public sealed partial class ClientView
     private async Task OpenPaletteAsync()
     {
         if (_paletteOverlay.IsVisible || _compact) return;
-        var entries = ToolPages().Select(ToolEntry).ToList();
+        var entries = ToolGroups().SelectMany(group => group.Pages).Select(ToolEntry).ToList();
+        entries.Add(ToolEntry(("tools", "工具总览", "All tools")));
         entries.Add(ToolEntry(("settings", "设置", "Settings")));
         entries.Add(new(_sidebarCollapsed ? L("展开侧栏", "Expand sidebar") : L("收起侧栏", "Collapse sidebar"),
             L("操作", "Action"), _sidebarCollapsed ? "rail-expand" : "rail-collapse", ToggleSidebarAsync));

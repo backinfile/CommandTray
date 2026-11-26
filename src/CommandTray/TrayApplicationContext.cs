@@ -156,7 +156,6 @@ internal sealed class TrayApplicationContext : IDisposable
         {
             _pet = new DesktopPetForm(() => ShowPage(DesktopPage.Workspace));
             _pet.FormClosed += (_, _) => { _pet = null; if (!_exiting) RebuildMenu(); };
-            _pet.ContextMenuStrip = _tray.ContextMenuStrip;
             _pet.Show();
         }
         else if (!visible) _pet?.Close();
@@ -276,7 +275,6 @@ internal sealed class TrayApplicationContext : IDisposable
         }));
         var old = _tray.ContextMenuStrip;
         _tray.ContextMenuStrip = menu;
-        if (_pet is not null) _pet.ContextMenuStrip = menu;
         old?.Dispose();
     }
 

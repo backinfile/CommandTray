@@ -174,20 +174,23 @@ public sealed partial class ClientView
 
     private Button AddComponentMenu(string id)
     {
-        var actions = new List<(string Label, Func<Task> Action)>
-        {
-            (L("画板", "Board"), () => ItemForm(id, "board", L("画板", "Board"))),
-            (L("待办", "Checklist"), () => ItemForm(id, "todo", L("待办", "Checklist"))),
-            (L("便签", "Note"), () => ItemForm(id, "note", L("便签", "Note")))
-        };
-        if (Has(ClientFeatures.LocalFiles)) actions.Add((L("本地目录", "Local folder"), () => ItemForm(id, "files", L("目录", "Folder"))));
-        if (Has(ClientFeatures.Terminals)) actions.Add((L("终端", "Terminal"), () => ItemForm(id, "terminal", L("终端", "Terminal"))));
+        var actions = WorkspacePanelKinds().Select(panel =>
+            (panel.Label, (Func<Task>)(() => ItemForm(id, panel.Id, panel.Name)))).ToArray();
         var label = L("添加组件", "Add component");
-        var menu = Menu(label, actions.ToArray());
+        var menu = Menu(label, actions);
         menu.Content = IconLabel("plus", label);
         menu.Classes.Add("primary");
         Avalonia.Automation.AutomationProperties.SetName(menu, label);
         return menu;
+    }
+
+    private IEnumerable<(string Id, string Label, string Name)> WorkspacePanelKinds()
+    {
+        yield return ("board", L("画板", "Board"), L("画板", "Board"));
+        yield return ("todo", L("待办", "Checklist"), L("待办", "Checklist"));
+        yield return ("note", L("便签", "Note"), L("便签", "Note"));
+        if (Has(ClientFeatures.LocalFiles)) yield return ("files", L("本地目录", "Local folder"), L("目录", "Folder"));
+        if (Has(ClientFeatures.Terminals)) yield return ("terminal", L("终端", "Terminal"), L("终端", "Terminal"));
     }
 
     private Button WorkspaceMenu(JsonObject selected, JsonNode? relay)
@@ -211,14 +214,16 @@ public sealed partial class ClientView
         return MoreActions(L("空间操作", "Space actions"), actions.ToArray());
     }
 
-    private Task ItemForm(string spaceId, string kind, string name)
+    private Task ItemForm(string spaceId, string kind, string name, string? spaceName = null)
     {
         var fields = new List<Field> { new("title", L("名称", "Name"), name) };
         if (kind == "note") fields.Add(new("text", L("便签正文", "Note"), Multiline: true));
         if (kind is "files" or "terminal") fields.Add(new("path", L("目录", "Directory")));
         if (kind == "terminal")
             fields.Add(new("shell", L("Shell", "Shell"), OperatingSystem.IsWindows() ? "cmd" : "/bin/sh"));
-        return Form(L($"添加{name}", $"Add {name}"), L("添加", "Add"), values =>
+        var heading = L($"添加{name}", $"Add {name}");
+        if (spaceName is { Length: > 0 }) heading += $" · {spaceName}";
+        return Form(heading, L("添加", "Add"), values =>
         {
             var title = values.Text("title", name);
             var data = kind switch

@@ -11,6 +11,9 @@ internal static class RelayWeb
         MapAsset("/text-tools.js", "text-tools.js", "text/javascript; charset=utf-8");
         MapAsset("/utilities.js", "utilities.js", "text/javascript; charset=utf-8");
         MapAsset("/utility-vendor.js", "utility-vendor.js", "text/javascript; charset=utf-8");
+        MapAsset("/qr-recognition.js", "qr-recognition.js", "text/javascript; charset=utf-8");
+        MapAsset("/qr-decode-worker.js", "qr-decode-worker.js", "text/javascript; charset=utf-8");
+        MapAsset("/qr-scan-vendor.js", "qr-scan-vendor.js", "text/javascript; charset=utf-8");
 
         void MapAsset(string route, string name, string contentType) =>
             app.MapGet(route, (HttpContext context) =>
@@ -20,7 +23,7 @@ internal static class RelayWeb
                 context.Response.Headers["Referrer-Policy"] = "no-referrer";
                 context.Response.Headers["Content-Security-Policy"] =
                     "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; " +
-                    "form-action 'self'; frame-ancestors 'none'; base-uri 'none'";
+                    "worker-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'";
                 var asset = typeof(RelayWeb).Assembly.GetManifestResourceStream("CommandTray.Web." + name)
                     ?? throw new InvalidOperationException($"The relay Web asset '{name}' is missing.");
                 if (name == "index.html")

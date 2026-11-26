@@ -99,10 +99,6 @@ public sealed partial class ClientView
                 if (DesktopWorkbench)
                     pane.Children.Add(SettingRow(L("登录后启动", "Start at login"), SettingSwitch("runAtLogin",
                         L("登录后启动", "Start at login"), settings.Flag("runAtLogin"))));
-                if (Has(ClientFeatures.Pet))
-                    pane.Children.Add(SettingRow(L("桌宠", "Desktop pet"), Row(
-                        Action(L("显示", "Show"), async () => await Execute("pet_set", new() { ["visible"] = true })),
-                        Action(L("隐藏", "Hide"), async () => await Execute("pet_set", new() { ["visible"] = false })))));
                 break;
         }
     }

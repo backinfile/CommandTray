@@ -66,21 +66,23 @@ button:hover { background: var(--hover) }
 .search-trigger { display:flex; align-items:center; gap:7px; color:var(--muted); white-space:nowrap }
 kbd { color:var(--muted); font-size:11px; border:1px solid var(--line); border-radius:4px; padding:0 4px; margin-left:5px }
 .page-title { font-size:21px; overflow:hidden; text-overflow:ellipsis }
-.sidebar { grid-row: 2; grid-column: 1; position:sticky; top:60px; height:calc(100dvh - 60px); overflow:auto; display: flex;
-  flex-direction: column; gap: 6px; padding: 16px 13px; border-right: 1px solid var(--line); background: var(--sidebar) }
+.sidebar { grid-row: 2; grid-column: 1; position:sticky; top:60px; height:calc(100dvh - 60px); display: flex;
+  flex-direction: column; border-right: 1px solid var(--line); background: var(--sidebar) }
+.nav-scroll { min-height:0; overflow:auto; scrollbar-width:thin; padding:12px 11px 8px }
 .nav-button { width: 100%; display: flex; align-items: center; gap: 10px; text-align: left; min-height: 41px; background: transparent; border-color: transparent; color: var(--muted); font-weight: 580; white-space: nowrap }
 .nav-button span { overflow: hidden; text-overflow: ellipsis }
 .nav-button[aria-current="page"],.nav-button[aria-pressed="true"] { background: var(--selected); color: var(--text) }
 .nav-button svg { width: 17px; height: 17px; flex: none }
 .nav-button[aria-current] svg,.nav-button[aria-pressed=true] svg { color: var(--accent) }
-.group { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line) }
+.group { margin-top: 9px; padding-top: 9px; border-top: 1px solid var(--line) }
 .group small { display: block; padding: 0 11px 5px }
+.overview-link { margin-top:7px }
 .group-title { display:flex; align-items:center; justify-content:space-between; margin:0 0 4px 11px }
 .new-space { display:grid; place-items:center; min-height:30px; width:31px; padding:0; background:transparent; border-color:transparent }
-.sidebar .choose-space,.sidebar .choose-tool { display:none }
+.sidebar .choose-space,.sidebar .mobile-tools { display:none }
 .shell.collapsed .space-group { display:none }
-.shell.collapsed .sidebar .choose-space { display:flex }
-.nav-footer { margin-top: auto; padding-top: 14px }
+.shell.collapsed .nav-scroll .choose-space { display:flex }
+.nav-footer { flex:none; margin-top:auto; border-top:1px solid var(--line); padding:8px 11px }
 .paired { display: block; padding: 0 11px 7px }
 .paired:before { content: ""; display: inline-block; margin-right: 7px; width: 7px; height: 7px; border-radius: 50%; background: var(--success); vertical-align: 1px }
 main { grid-row: 2; grid-column: 2; min-width: 0; padding: 29px 28px 65px }
@@ -133,8 +135,10 @@ progress { display:block; width:100%; height:6px; accent-color:var(--accent) }
 .text-tool-panels .bar { flex-wrap:wrap }
 .text-tool-panels textarea { display:block; width:100%; height:clamp(230px,38vh,430px); resize:vertical; font-family:monospace }
 .text-tool-status { margin-top:10px }
-.utility-tabs { display:flex; flex-wrap:wrap; gap:5px; padding:0 0 10px; margin-bottom:14px; border-bottom:1px solid var(--line) }
-.utility-tabs button[aria-pressed=true] { color:var(--accent); background:var(--selected); border-color:var(--line) }
+.tool-directory { display:grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,280px),1fr)); gap:14px; align-items:start }
+.tool-links { display:grid; gap:5px }
+.tool-link { display:flex; align-items:center; gap:10px; min-height:40px; padding:7px 10px; text-align:left }
+.tool-link svg { width:17px; height:17px; flex:none; color:var(--accent) }
 .utility-panel { margin-top:12px }
 .utility-panel input,.utility-panel textarea { width:100%; font-family:monospace }
 .utility-diff-result textarea,.utility-time-result textarea { display:block; min-height:128px; resize:vertical }
@@ -142,6 +146,9 @@ progress { display:block; width:100%; height:6px; accent-color:var(--accent) }
 .utility-status { margin:10px 0 }
 .qr-preview { display:grid; min-height:180px; place-items:center }
 .qr-preview canvas { width:min(100%,256px); height:auto; image-rendering:pixelated }
+#qr-video { display:block; width:100%; max-height:55vh; border-radius:7px; background:var(--canvas) }
+#qr-camera-status,.qr-scan-actions { margin-top:12px }
+#qr-scan-result { display:block; width:100%; min-height:125px; resize:vertical; font-family:monospace }
 .checksum-name { overflow-wrap:anywhere }
 #checksum-progress { margin-top:8px }
 .table-wrap { overflow: auto }
@@ -206,17 +213,17 @@ dialog::backdrop { background: var(--scrim) }
   .sidebar { position:fixed; inset:auto 0 0; z-index:3; height:auto; display:grid; grid-template-columns:repeat(3,minmax(0,1fr));
     border:0; border-top:1px solid var(--line); padding:4px 8px max(5px,env(safe-area-inset-bottom)); gap:3px }
   .sidebar .nav-button { justify-items:center; justify-content:center; text-align:center; display:grid; min-height:47px; gap:0; padding:2px; line-height:1.35; font-size:11px }
-  .sidebar .space-group,.sidebar .tool-group { display:none }
-  .sidebar .choose-space,.sidebar .choose-tool,.shell.collapsed .sidebar .choose-space { display:grid }
+  .sidebar .nav-scroll { display:none }
+  .sidebar > .choose-space,.sidebar .mobile-tools { display:grid }
   .workspace-actions { top:53px }
   .shell.collapsed .sidebar .nav-button span { display:block }
-  .nav-footer { margin:0; padding:0 }
-  .paired,.group { display:none }
+  .nav-footer { margin:0; padding:0; border:0 }
+  .paired { display:none }
   main { grid-row:2; grid-column:1; padding:17px 12px 75px }
   .workbench,.split { grid-template-columns:1fr }
   .text-tool-panels textarea { height:160px }
   .text-tool-panels .bar button { min-height:44px }
-  .utility-tabs button { min-height:44px; padding-inline:8px }
+  .tool-link { min-height:44px }
   .action-menu button,.task-row button,.more-actions { min-height:44px }
   .board-tools { flex-wrap:wrap; overflow:visible }
   .board-tools .board-divider { display:none }

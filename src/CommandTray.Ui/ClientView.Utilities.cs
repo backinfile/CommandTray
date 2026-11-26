@@ -14,54 +14,14 @@ namespace CommandTray.Ui;
 
 public sealed partial class ClientView
 {
-    private enum UtilitySection { Convert, Compare, Timestamp, Qr, Checksum }
-    private UtilitySection _utilitySection;
     private string _diffBefore = "", _diffAfter = "", _timestampInput = "", _qrInput = "", _expectedHash = "";
     private TimestampFormat _timestampFormat;
 
     private Task OpenFileChecksumAsync(string checksum)
     {
-        _utilitySection = UtilitySection.Checksum;
         _expectedHash = checksum;
-        Navigate("text-tools");
+        Navigate("checksum");
         return Task.CompletedTask;
-    }
-
-    private void RenderUtilities(CancellationToken token)
-    {
-        Header(L("实用工具", "Utilities"));
-        var tabs = ActionBar();
-        foreach (var (section, name) in new[]
-        {
-            (UtilitySection.Convert, L("文本转换", "Text conversion")),
-            (UtilitySection.Compare, L("文本对比", "Text comparison")),
-            (UtilitySection.Timestamp, L("时间戳", "Timestamp")),
-            (UtilitySection.Qr, L("二维码", "QR code")),
-            (UtilitySection.Checksum, L("文件校验", "File checksum"))
-        })
-        {
-            var tab = Action(name, () =>
-            {
-                if (_utilitySection != section)
-                {
-                    _utilitySection = section;
-                    Navigate("text-tools");
-                }
-                return Task.CompletedTask;
-            });
-            tab.Classes.Add("workbench-tab");
-            tab.Classes.Set("selected", _utilitySection == section);
-            tabs.Children.Add(tab);
-        }
-        _contents.Children.Add(tabs);
-        switch (_utilitySection)
-        {
-            case UtilitySection.Convert: RenderTextTools(token); break;
-            case UtilitySection.Compare: RenderTextComparison(token); break;
-            case UtilitySection.Timestamp: RenderTimestamp(token); break;
-            case UtilitySection.Qr: RenderQrCode(token); break;
-            case UtilitySection.Checksum: RenderFileChecksum(token); break;
-        }
     }
 
     private void RenderTextComparison(CancellationToken token)
@@ -189,6 +149,8 @@ public sealed partial class ClientView
     private void RenderQrCode(CancellationToken token)
     {
         var input = UtilityInput(L("文本或链接", "Text or link"), _qrInput, true);
+        _contents.Children.Add(ActionBar(SecondaryAction(L("识别图片…", "Read image…"),
+            () => ChooseQrImageAsync(input, token), "file")));
         input.MaxLength = LocalUtilities.QrByteLimit;
         var image = new Image { Width = 256, Height = 256, Stretch = Stretch.Uniform, Margin = new Thickness(12), IsVisible = false };
         AutomationProperties.SetName(image, L("二维码", "QR code"));

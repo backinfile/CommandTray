@@ -40,7 +40,6 @@ public sealed partial class ClientView
 
     private void RenderNavigation()
     {
-        var pages = ToolPages();
         _navigation.Children.Clear();
         _sidebarSpaceList = null;
         _sidebarRelayStatus = null;
@@ -50,7 +49,7 @@ public sealed partial class ClientView
         {
             var strip = new UniformGrid { Columns = 3 };
             strip.Children.Add(NavigationButton("workspace", L("空间", "Spaces"), ChooseSpaceAsync));
-            strip.Children.Add(NavigationButton("tools", L("工具", "Tools"), ChooseToolAsync));
+            strip.Children.Add(NavigationButton("tools", L("工具", "Tools")));
             strip.Children.Add(NavigationButton("settings", L("设置", "Settings")));
             _navigation.Children.Add(strip);
             _navHeader.Content = null;
@@ -97,22 +96,26 @@ public sealed partial class ClientView
             _sidebarRelayStatus.Classes.Add("nav-status");
             _navFooter.Child = new StackPanel { Spacing = 4, Children = { _sidebarRelayStatus, settings } };
             UpdateSidebarSpaces();
-            var toolLabel = Muted(L("工具", "Tools"));
-            toolLabel.Classes.Add("nav-status");
-            var tools = new Border
-            {
-                BorderThickness = new Thickness(0, 1, 0, 0), Margin = new Thickness(0, 12, 0, 0),
-                Padding = new Thickness(0, 10, 0, 2), Child = toolLabel
-            };
-            tools.Classes.Add("nav-group");
-            _navigation.Children.Add(tools);
         }
         else
         {
             _navigation.Children.Add(NavigationButton("workspace", L("空间", "Spaces"), ChooseSpaceAsync));
             _navFooter.Child = settings;
         }
-        foreach (var page in pages) _navigation.Children.Add(NavigationButton(page.Id, L(page.Zh, page.En)));
+        var overview = NavigationButton("tools", L("工具总览", "All tools"));
+        overview.Margin = new Thickness(0, 6, 0, 0);
+        _navigation.Children.Add(overview);
+        foreach (var group in ToolGroups())
+        {
+            if (!_sidebarCollapsed)
+            {
+                var groupLabel = Muted(group.Title);
+                groupLabel.Classes.Add("nav-status");
+                _navigation.Children.Add(groupLabel);
+            }
+            foreach (var page in group.Pages)
+                _navigation.Children.Add(NavigationButton(page.Id, L(page.Zh, page.En)));
+        }
     }
 
     private void UpdateSidebarSpaces()
@@ -171,12 +174,6 @@ public sealed partial class ClientView
             new PaletteEntry(space.Text("name"), L("空间", "Space"), "spaces", () => OpenPaletteSpaceAsync(space.Text("id")))));
         entries.Add(new(L("新建空间", "New space"), L("操作", "Action"), "plus", NewSpaceAsync));
         update();
-    }
-
-    private Task ChooseToolAsync()
-    {
-        ShowPalette(L("工具", "Tools"), L("搜索工具", "Find tools"), ToolPages().Select(ToolEntry).ToList());
-        return Task.CompletedTask;
     }
 
     private async Task ToggleSidebarAsync()

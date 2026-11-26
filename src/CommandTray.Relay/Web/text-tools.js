@@ -9,7 +9,10 @@ const textOperations = [
   ["url-encode", "URL 组件编码"],
   ["url-decode", "URL 组件解码"],
   ["unique-lines", "按行去重"],
-  ["sha256", "文本 SHA-256"]
+  ["sha256", "文本 SHA-256"],
+  ["trim-lines", "去除每行首尾空格"],
+  ["remove-blank-lines", "删除空行"],
+  ["uuid-v4", "生成 UUID v4"]
 ];
 let textDraft = "", textOperation = textOperations[0][0];
 
@@ -71,8 +74,9 @@ function connectTextTools() {
     run.disabled = true;
     setResult("", "正在处理…");
     try {
-      if (input.value.length > textToolLimit) throw new Error("输入最多 100 万字符。");
-      const result = await convertText(mode.value,input.value);
+      const text = mode.value==="uuid-v4" ? "" : input.value;
+      if (text.length > textToolLimit) throw new Error("输入最多 100 万字符。");
+      const result = await convertText(mode.value,text);
       if (input.isConnected && current === revision) setResult(result);
     } catch (error) {
       if (input.isConnected && current === revision) setResult("",error.message,true);
@@ -111,6 +115,20 @@ async function convertText(operation, input) {
       return [...new Set(lines)].join("\n")+(end?"\n":"");
     }
     case "sha256": return utilityHex(commandTrayUtilityPrimitives.sha256(new TextEncoder().encode(input)));
+    case "trim-lines":
+      return normalizeTextLines(input).split("\n").map(line=>line.trim()).join("\n");
+    case "remove-blank-lines": {
+      const normalized = normalizeTextLines(input);
+      const result = normalized.split("\n").filter(line=>line.trim()).join("\n");
+      return result && normalized.endsWith("\n") ? result+"\n" : result;
+    }
+    case "uuid-v4": {
+      const bytes=crypto.getRandomValues(new Uint8Array(16));
+      bytes[6]=(bytes[6]&0x0f)|0x40;
+      bytes[8]=(bytes[8]&0x3f)|0x80;
+      const hex=utilityHex(bytes);
+      return [hex.slice(0,8),hex.slice(8,12),hex.slice(12,16),hex.slice(16,20),hex.slice(20)].join("-");
+    }
   }
 }
 

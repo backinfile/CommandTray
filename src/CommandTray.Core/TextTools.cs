@@ -8,7 +8,8 @@ namespace CommandTray.Core;
 
 public enum TextOperation
 {
-    FormatJson, CompactJson, EncodeBase64, DecodeBase64, EncodeUrl, DecodeUrl, UniqueLines, Sha256
+    FormatJson, CompactJson, EncodeBase64, DecodeBase64, EncodeUrl, DecodeUrl, UniqueLines, Sha256,
+    TrimLines, RemoveBlankLines, GenerateUuid
 }
 
 public static partial class TextTools
@@ -29,6 +30,9 @@ public static partial class TextTools
             TextOperation.DecodeUrl => DecodeUrl(input),
             TextOperation.UniqueLines => UniqueLines(input),
             TextOperation.Sha256 => Convert.ToHexStringLower(SHA256.HashData(Utf8.GetBytes(input))),
+            TextOperation.TrimLines => string.Join('\n', input.ReplaceLineEndings("\n").Split('\n').Select(line => line.Trim())),
+            TextOperation.RemoveBlankLines => RemoveBlankLines(input),
+            TextOperation.GenerateUuid => Guid.NewGuid().ToString("D"),
             _ => throw new ArgumentOutOfRangeException(nameof(operation))
         };
     }
@@ -67,6 +71,13 @@ public static partial class TextTools
         var content = finalLineBreak ? normalized[..^1] : normalized;
         var seen = new HashSet<string>(StringComparer.Ordinal);
         return string.Join('\n', content.Split('\n').Where(seen.Add)) + (finalLineBreak ? "\n" : "");
+    }
+
+    private static string RemoveBlankLines(string input)
+    {
+        var normalized = input.ReplaceLineEndings("\n");
+        var result = string.Join('\n', normalized.Split('\n').Where(line => !string.IsNullOrWhiteSpace(line)));
+        return result.Length > 0 && normalized.EndsWith('\n') ? result + "\n" : result;
     }
 
     [GeneratedRegex("%(?![0-9a-fA-F]{2})")]

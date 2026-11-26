@@ -5,9 +5,14 @@ const versionHeader = "X-CommandTray-Client-Version";
 
 const pages = {
   workspace: ["工作区", "M3 4h18v16H3z M3 9h18 M10 9v11"],
+  tools: ["工具总览", "M4 4h6v6H4z M14 4h6v6h-6z M4 14h6v6H4z M14 14h6v6h-6z"],
   files: ["共享文件", "M3 6h7l2 2h9v12H3z"],
   clipboard: ["剪贴板", "M8 5H5v15h14V5h-3 M8 4h8v4H8z M8 12h8 M8 16h6"],
-  "text-tools": ["实用工具", "M4 5h16M7 5v3m10-3v3m-5-3v12m-3 0h6M4 21h16"],
+  "text-tools": ["文本转换", "M4 5h16M7 5v3m10-3v3m-5-3v12m-3 0h6M4 21h16"],
+  "text-compare": ["文本对比", "M4 6h6m-6 6h4m-4 6h6m4-12h6m-4 6h4m-6 6h6M12 3v18"],
+  timestamp: ["时间戳", "M21 12a9 9 0 1 1-18 0 9 9 0 1 1 18 0M12 7v5l3 2"],
+  qr: ["二维码", "M4 4h5v5H4zM15 4h5v5h-5zM4 15h5v5H4zM14 14h3v3h3v3h-3m-3-1v1m6-6v1"],
+  checksum: ["文件校验", "M5 3h9l5 5v13H5zM14 3v5h5M8 14l3 3 5-5"],
   settings: ["设置", "M9 3h6l1 3 3 1 2 4-2 2v3l-3 3-3-1-2 3-4-1-1-3-3-2 1-4 3-1z M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0"]
 };
 const componentKinds = [
@@ -202,14 +207,35 @@ function selectedSpace() {
   return workspace?.document?.spaces?.find(space => space.id === selected);
 }
 
-function navLink(id) {
-  return `<button class="nav-button" type="button" data-page="${id}" aria-label="${pages[id][0]}" title="${pages[id][0]}"${
-    page === id ? ' aria-current="page"' : ""}>${svg(pages[id][1])}<span>${pages[id][0]}</span></button>`;
+function navLink(id, { appearance = "nav-button", label = pages[id][0], current = page === id } = {}) {
+  return `<button class="${appearance}" type="button" data-page="${id}" aria-label="${label}" title="${label}"${
+    current ? ' aria-current="page"' : ""}>${svg(pages[id][1])}<span>${label}</span></button>`;
 }
 
-const toolPages = ["files", "clipboard", "text-tools"];
+const toolGroups = [
+  ["设备与共享", ["files", "clipboard"]],
+  ["实用工具", ["text-tools", "text-compare", "timestamp", "qr", "checksum"]]
+];
+const toolPages = toolGroups.flatMap(([, ids]) => ids);
+const utilityViews = {
+  "text-tools": [renderTextTools, connectTextTools],
+  "text-compare": [renderTextComparison, connectTextComparison],
+  timestamp: [renderTimestamp, connectTimestamp],
+  qr: [renderQrCode, connectQrCode],
+  checksum: [renderFileChecksum, connectFileChecksum]
+};
+let disposeUtility;
 const spacesOptions = () => (workspace?.document?.spaces ?? []).map(space => ({label:space.name, space:space.id, scope:"空间"}));
-const toolOptions = () => toolPages.map(id => ({label:pages[id][0], page:id, scope:"工具"}));
+const toolOptions = () => ["tools", ...toolPages].map(id => ({label:pages[id][0], page:id, scope:"工具"}));
+
+function renderToolsOverview() {
+  const group = (title, links) => surface(title, "", `<div class="body tool-links">${links}</div>`);
+  const pages = toolGroups.map(([title, ids]) =>
+    group(title, ids.map(id => navLink(id, {appearance:"tool-link"})).join("")));
+  const panels = componentKinds.map(([kind, label, glyph]) =>
+    `<button class="tool-link" type="button" data-action="add-item:${kind}">${svg(glyph)}<span>${label}</span></button>`);
+  return `<div class="tool-directory">${pages.join("")}${group("工作区组件", panels.join(""))}</div>`;
+}
 
 function render() {
   disposeUtility?.();
@@ -237,15 +263,18 @@ function render() {
     escape(space.id)}"${space.id === selected && page === "workspace" ? ' aria-current="page"' : ""} aria-label="${escape(space.name)}" title="${escape(space.name)}">${
     svg(pages.workspace[1])}<span>${escape(space.name)}</span></button>`).join("");
   const chooser = (label, icon, name, active) => `<button type="button" class="nav-button ${name}" data-action="${name}" title="${label}" aria-label="${label}" aria-haspopup="dialog"${active ? ' aria-current="page"' : ""}>${svg(icon)}<span>${label}</span></button>`;
-  el("sidebar").innerHTML = '<div class="space-group"><div class="group-title"><small>空间</small><button type="button" class="new-space" data-action="new-space" title="新建空间" aria-label="新建空间">＋</button></div>' + spaces + "</div>" +
+  el("sidebar").innerHTML = '<div class="nav-scroll"><div class="space-group"><div class="group-title"><small>空间</small><button type="button" class="new-space" data-action="new-space" title="新建空间" aria-label="新建空间">＋</button></div>' + spaces + "</div>" +
     chooser("空间", pages.workspace[1], "choose-space", page === "workspace") +
-    '<div class="tool-group group"><small>工具</small>' + toolPages.map(navLink).join("") + "</div>" +
-    chooser("工具", pages.files[1], "choose-tool", toolPages.includes(page)) +
+    navLink("tools", {appearance:"nav-button overview-link"}) +
+    toolGroups.map(([title, ids]) => `<div class="group"><small>${title}</small>${ids.map(id => navLink(id)).join("")}</div>`).join("") + '</div>' +
+    chooser("空间", pages.workspace[1], "choose-space", page === "workspace") +
+    navLink("tools", {appearance:"nav-button mobile-tools", label:"工具", current:page === "tools" || toolPages.includes(page)}) +
     '<div class="nav-footer"><small class="paired">已配对</small>' + navLink("settings") + "</div>";
+  const utility = utilityViews[page];
   el("content").innerHTML = loading ? '<p class="muted" role="status">正在加载…</p>' :
-    ({ workspace: renderWorkspace, files: renderFiles, clipboard: renderClipboard, "text-tools": renderUtilities, settings: renderSettings }[page])();
+    (utility?.[0] ?? {workspace:renderWorkspace, files:renderFiles, clipboard:renderClipboard, tools:renderToolsOverview, settings:renderSettings}[page])();
   if (!loading && page === "workspace") mountWorkspaceBoards();
-  if (!loading && page === "text-tools") connectUtilities();
+  if (!loading && utility) disposeUtility = utility[1]();
 }
 
 async function pair(event) {
@@ -288,7 +317,12 @@ async function open(target) {
   const controller = pageRequest = new AbortController();
   const operation = ++navigation;
   page = target;
-  if (target === "text-tools") { loading = false; render(); return; }
+  if (target === "tools" || utilityViews[target]) {
+    loading = false;
+    render();
+    window.scrollTo(0, 0);
+    return;
+  }
   loading = true;
   render();
   try {
@@ -531,13 +565,12 @@ function clipPanels() {
   let detail = empty("请选择记录");
   if (selectedEntry) {
     const {entry,pinned}=selectedEntry, key=clipKey(entry);
+    const options=[["编辑后发送…","edit-clip:"+key],["处理文本","transform-clip:"+key]];
+    if (canGenerateQr(entry.text)) options.push(["生成二维码","qr-clip:"+key]);
+    options.push(["在本机隐藏","clip-hide:"+key]);
     detail = `<div class="body"><div class="toolbar"><small>${pinned ? "置顶 · " : ""}${escape(entry.deviceName || "未知设备")} · ${escape(localTime(entry.updatedAt))}</small></div>
       <div class="clip-text">${escape(entry.text)}</div><div class="toolbar clip-actions">${button("复制","copy:"+key,"secondary")}${
-      button(pinned?"取消置顶":"置顶","clip-pin:"+key)}${moreActions("记录操作",[
-        ["编辑后发送…","edit-clip:"+key],
-        ["处理文本","transform-clip:"+key],
-        ["在本机隐藏","clip-hide:"+key]
-      ])}</div></div>`;
+      button(pinned?"取消置顶":"置顶","clip-pin:"+key)}${moreActions("记录操作",options)}</div></div>`;
   }
   return surface("历史", "", list) + surface("内容", "", detail, "clip-inspector");
 }
@@ -816,7 +849,6 @@ async function perform(operation, argument) {
     case "choose-space": return showPicker("切换空间", "搜索空间", [
       ...spacesOptions(), {label:"新建空间", scope:"操作", action:"new-space"}
     ]);
-    case "choose-tool": return showPicker("工具", "搜索工具", toolOptions());
     case "new-space": return modal("新建空间", "", input("名称"), "创建", async values => {
       const id = uuid(), name = values.get("text").trim();
       if (!name) throw new Error("请输入空间名称。");
@@ -831,10 +863,13 @@ async function perform(operation, argument) {
     case "rename-space": return modal("重命名空间", "", input("名称", selectedSpace().name), "保存", values =>
       writeWorkspace((_, space) => { space.name = values.get("text").trim() || space.name; }));
     case "add-item": {
+      if (!selectedSpace()) return perform("new-space");
+      const panel = componentKinds.find(([key]) => key === argument);
       const options = componentKinds.map(([key,label])=>`<option value="${key}">${label}</option>`).join("");
-      return modal("添加组件", "", input("名称") + field("类型", '<select name="kind">'+options+'</select>'), "添加", values =>
+      return modal(panel ? "添加" + panel[1] : "添加组件", panel ? selectedSpace().name : "",
+        input("名称", panel?.[1]) + (panel ? "" : field("类型", '<select name="kind">'+options+'</select>')), "添加", values =>
         writeWorkspace((_, space) => {
-          const kind = values.get("kind");
+          const kind = panel?.[0] ?? values.get("kind");
           (space.items ??= []).push({ id:uuid(),kind,title:values.get("text").trim(),x:0,y:0,width:320,height:270,
             data:kind==="note"?{text:""}:kind==="todo"?{tasks:[]}:{strokes:[]} });
         }));
@@ -945,8 +980,7 @@ async function perform(operation, argument) {
       const file = files.find(entry=>entry.id===argument);
       if (!file?.sha256) return;
       utilityDraft.expected = file.sha256;
-      utilitySection = "checksum";
-      await open("text-tools");
+      await open("checksum");
       el("checksum-choose")?.focus({preventScroll:true});
       return;
     }
@@ -960,9 +994,16 @@ async function perform(operation, argument) {
       const text = clipboardText(argument);
       if (text == null) return;
       textDraft = text;
-      utilitySection = "convert";
       await open("text-tools");
       el("text-tool-input")?.focus({preventScroll:true});
+      return;
+    }
+    case "qr-clip": {
+      const text = clipboardText(argument);
+      if (!canGenerateQr(text)) return;
+      utilityDraft.qr = text;
+      await open("qr");
+      el("qr-input")?.focus({preventScroll:true});
       return;
     }
     case "clip-select":

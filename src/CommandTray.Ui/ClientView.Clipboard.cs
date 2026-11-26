@@ -209,6 +209,8 @@ public sealed partial class ClientView
                 (L("处理文本", "Process text"), () => OpenTextToolsAsync(entry.Text)),
                 (L("在本机隐藏", "Hide on this device"), () => SetPreference(entry, new() { ["hide"] = true }))
             };
+            if (CanGenerateQr(entry.Text))
+                options.Insert(1, (L("生成二维码", "Generate QR code"), () => OpenQrInputAsync(entry.Text)));
             if (paired) options.Insert(0, (L("编辑后发送…", "Edit and send…"), () => ComposeClipboard(entry.Text)));
             inspector.Children.Add(ActionBar(SecondaryAction(L("复制", "Copy"), async () =>
             {

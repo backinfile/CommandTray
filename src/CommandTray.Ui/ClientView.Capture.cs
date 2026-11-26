@@ -248,7 +248,9 @@ public sealed partial class ClientView
                 {
                     (L("打开原图", "Open original"), async () => await Execute("capture_open", args, token)),
                     (L("贴图", "Pin"), async () => await Execute("capture_pin", args, token)),
-                    (L("识别文字", "OCR"), () => ScreenshotOcr(selected))
+                    (L("识别文字", "OCR"), () => ScreenshotOcr(selected)),
+                    (L("识别二维码", "Read QR code"), () => RecognizeQrImageAsync(
+                        () => Task.FromResult<Stream>(File.OpenRead(selected)), token, OpenQrInputAsync))
                 });
             }
             else actions.Children.Add(SecondaryAction(L("播放", "Play"), async () => await Execute("capture_open", args, token), "play"));
@@ -406,18 +408,19 @@ public sealed partial class ClientView
         AutomationProperties.SetLiveSetting(status, AutomationLiveSetting.Polite);
         var body = new StackPanel { Spacing = 8, Children = { Muted(L("识别语言", "Recognition language")), language, result, status } };
         var copy = Action(L("复制文字", "Copy text"), async () => await Execute("clipboard_local_write", new() { ["text"] = result.Text }));
-        copy.IsEnabled = false;
+        var transform = Action(L("处理文本", "Process text"), () => OpenTextToolsAsync(result.Text ?? ""));
+        copy.IsEnabled = transform.IsEnabled = false;
         var run = PrimaryAction(L("识别", "Recognize"), async () =>
         {
             var ct = CurrentActionCancellation;
             status.Text = L("正在识别…", "Recognizing…");
             result.Text = "";
-            copy.IsEnabled = false;
+            copy.IsEnabled = transform.IsEnabled = false;
             try
             {
                 var reply = await Execute("capture_ocr", new() { ["path"] = path, ["language"] = languages[language.SelectedIndex] }, ct);
                 result.Text = TextOf(reply).Trim();
-                copy.IsEnabled = result.Text.Length > 0;
+                copy.IsEnabled = transform.IsEnabled = result.Text.Length > 0;
                 status.Text = copy.IsEnabled ? "" : L("未识别到文字", "No text recognized");
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
@@ -425,7 +428,7 @@ public sealed partial class ClientView
         });
         OpenActionDialog(L("识别文字", "Recognize text"), body, new WrapPanel { ItemSpacing = 7, Children =
         {
-            CloseActionButton(L("关闭", "Close")), run, copy
+            CloseActionButton(L("关闭", "Close")), run, copy, transform
         }}, language);
         return Task.CompletedTask;
     }

@@ -1,36 +1,11 @@
 "use strict";
 
-const utilitySections = [
-  ["convert","文本转换"], ["compare","文本对比"], ["timestamp","时间戳"],
-  ["qr","二维码"], ["checksum","文件校验"]
-];
-let utilitySection = "convert", disposeUtility;
 const utilityDraft = {before:"",after:"",time:"",format:"seconds",qr:"",expected:""};
 
 function resetUtilities() {
-  utilitySection = "convert";
   Object.assign(utilityDraft,{before:"",after:"",time:"",format:"seconds",qr:"",expected:""});
   textDraft = "";
   textOperation = textOperations[0][0];
-}
-
-function renderUtilities() {
-  const tabs = utilitySections.map(([id,label]) =>
-    '<button type="button" data-utility="'+id+'" aria-pressed="'+(id===utilitySection)+'">'+label+'</button>').join("");
-  const content = {convert:renderTextTools,compare:renderTextComparison,timestamp:renderTimestamp,qr:renderQrCode,checksum:renderFileChecksum};
-  return '<div class="utility-tabs" id="utility-tabs" role="group" aria-label="实用工具">'+tabs+'</div>'+content[utilitySection]();
-}
-
-function connectUtilities() {
-  el("utility-tabs").addEventListener("click",event=>{
-    const next = event.target.closest("button")?.dataset.utility;
-    if (!next || next===utilitySection) return;
-    utilitySection = next;
-    render();
-    el("utility-tabs").querySelector('[aria-pressed="true"]').focus({preventScroll:true});
-  });
-  const connect = {convert:connectTextTools,compare:connectTextComparison,timestamp:connectTimestamp,qr:connectQrCode,checksum:connectFileChecksum};
-  disposeUtility = connect[utilitySection]();
 }
 
 function utilityField(label,id,{multiline=false,readOnly=false,limit=textToolLimit}={}) {
@@ -188,7 +163,7 @@ function formatLocalTime(date) {
 }
 
 function renderQrCode() {
-  return '<div class="split text-tool-panels">'+
+  return qrScanActions()+'<div class="split text-tool-panels">'+
     surface("文本或链接",utilityButton("qr-run","生成二维码","primary"),utilityField("文本或链接","qr-input",{multiline:true,limit:2000}))+
     surface("二维码预览",utilityButton("qr-save","保存 PNG","secondary",true),
       '<div class="body qr-preview"><canvas id="qr-preview" role="img" aria-label="二维码" hidden></canvas></div>')+
@@ -202,8 +177,8 @@ function connectQrCode() {
   el("qr-run").addEventListener("click",()=>{
     reset();
     if (!input.value) {setUtilityStatus("请输入文本或链接。","error");return;}
+    if (!canGenerateQr(input.value)) {setUtilityStatus("二维码内容最多 2,000 个 UTF-8 字节。","error");return;}
     const bytes=new TextEncoder().encode(input.value);
-    if (bytes.length>2000) {setUtilityStatus("二维码内容最多 2,000 个 UTF-8 字节。","error");return;}
     const {QrCode,QrSegment}=commandTrayUtilityPrimitives.qrcodegen;
     const code=QrCode.encodeSegments([QrSegment.makeEci(26),QrSegment.makeBytes(bytes)],QrCode.Ecc.MEDIUM);
     const scale=8,border=4;
@@ -218,6 +193,7 @@ function connectQrCode() {
     save.disabled=false;
   });
   save.addEventListener("click",()=>preview.toBlob(blob=>{if(blob) downloadBlob(blob,"qrcode.png");},"image/png"));
+  return connectQrScanner(input,text=>{input.value=utilityDraft.qr=text;reset();});
   function reset() { preview.hidden=true; save.disabled=true; setUtilityStatus(""); }
 }
 

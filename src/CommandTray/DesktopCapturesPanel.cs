@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Drawing.Drawing2D;
 using System.Runtime.InteropServices;
 using CommandTray.Services;
 using static CommandTray.DesktopWorkspacePanel;
@@ -162,82 +161,4 @@ internal sealed class DesktopCapturesPanel : UserControl
         catch (Exception ex) { Error(this, ex); }
     }
 
-}
-
-internal sealed class DesktopPetForm : Form
-{
-    private readonly System.Windows.Forms.Timer _noticeTimer = new() { Interval = 4500 };
-    private string? _notice;
-    private Action? _openNotice;
-    private Point? _dragStart;
-    private bool _dragged;
-
-    public DesktopPetForm(Action showWorkspace)
-    {
-        FormBorderStyle = FormBorderStyle.None; ShowInTaskbar = false; TopMost = true; DoubleBuffered = true;
-        BackColor = Color.Magenta; TransparencyKey = Color.Magenta; Size = new Size(280, 110);
-        var screen = Screen.PrimaryScreen?.WorkingArea ?? SystemInformation.WorkingArea;
-        StartPosition = FormStartPosition.Manual; Location = new Point(screen.Right - Width - 20, screen.Bottom - Height - 10);
-        _noticeTimer.Tick += (_, _) => { _noticeTimer.Stop(); _notice = null; _openNotice = null; Invalidate(); };
-        MouseDown += (_, e) => { if (e.Button == MouseButtons.Left) { _dragStart = e.Location; _dragged = false; } };
-        MouseMove += (_, _) =>
-        {
-            if (_dragStart is not Point start) return;
-            var next = new Point(Cursor.Position.X - start.X, Cursor.Position.Y - start.Y);
-            if (!_dragged && Math.Abs(next.X - Left) + Math.Abs(next.Y - Top) <= 4) return;
-            Location = next; _dragged = true;
-        };
-        MouseUp += (_, e) =>
-        {
-            if (_dragStart is null || e.Button != MouseButtons.Left) return;
-            _dragStart = null;
-            if (_dragged) return;
-            if (e.Y is >= 3 and <= 46 && _openNotice is { } open)
-            {
-                _noticeTimer.Stop();
-                _notice = null;
-                _openNotice = null;
-                Invalidate();
-                open();
-            }
-            else showWorkspace();
-        };
-    }
-    protected override bool ShowWithoutActivation => true;
-
-    public void Notice(string message, Action? openSource)
-    {
-        _notice = message; _openNotice = openSource; _noticeTimer.Stop(); _noticeTimer.Start(); Invalidate();
-    }
-
-    protected override void OnPaint(PaintEventArgs e)
-    {
-        base.OnPaint(e);
-        var graphics = e.Graphics;
-        graphics.SmoothingMode = SmoothingMode.AntiAlias;
-        var x = Width - 65;
-        var y = 51;
-        using var fur = new SolidBrush(Color.FromArgb(247, 181, 120));
-        using var shadow = new SolidBrush(Color.FromArgb(95, 61, 60));
-        graphics.FillPolygon(shadow, [(new Point(x + 8, y + 24)), new Point(x + 10, y), new Point(x + 28, y + 15)]);
-        graphics.FillPolygon(shadow, [new Point(x + 31, y + 15), new Point(x + 49, y), new Point(x + 51, y + 25)]);
-        graphics.FillEllipse(fur, x + 5, y + 13, 51, 37);
-        graphics.FillEllipse(shadow, x + 18, y + 29, 4, 5);
-        graphics.FillEllipse(shadow, x + 38, y + 29, 4, 5);
-        graphics.FillEllipse(shadow, x + 27, y + 37, 6, 3);
-        if (_notice is null) return;
-        using var paper = new SolidBrush(UiTheme.Surface);
-        using var border = new Pen(UiTheme.Separator);
-        var rectangle = new Rectangle(3, 3, Width - 9, 43);
-        using var outline = UiTheme.RoundedRectangle(rectangle, 9);
-        graphics.FillPath(paper, outline); graphics.DrawPath(border, outline);
-        TextRenderer.DrawText(graphics, _notice, UiTheme.Small, Rectangle.Inflate(rectangle, -8, -5), UiTheme.Text,
-            TextFormatFlags.WordBreak | TextFormatFlags.EndEllipsis | TextFormatFlags.VerticalCenter);
-    }
-
-    protected override void Dispose(bool disposing)
-    {
-        if (disposing) _noticeTimer.Dispose();
-        base.Dispose(disposing);
-    }
 }

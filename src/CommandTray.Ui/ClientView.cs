@@ -153,7 +153,8 @@ public sealed partial class ClientView : UserControl
             "services" or "service" or "logs" or "manager" or "commands" => Has(ClientFeatures.Commands) ? "commands" : "workspace",
             "shared" or "sharing" or "relay" or "files" or "sharedFiles" => "files",
             "clip" or "clipboard" => "clipboard",
-            "text-tools" => "text-tools",
+            "tools" or "text-tools" or "text-compare" or "timestamp" or "qr" or "checksum" => page,
+            "pet" => Has(ClientFeatures.Pet) ? "pet" : "workspace",
             "media" or "captures" or "capture" => Has(ClientFeatures.Capture) ? "capture" : "workspace",
             "settings" => "settings",
             "ssh" => Has(ClientFeatures.Ssh) || OperatingSystem.IsAndroid() ? "ssh" : "workspace",
@@ -214,7 +215,7 @@ public sealed partial class ClientView : UserControl
         Report("");
         try
         {
-            if (_page != "workspace" && !_compact)
+            if (_page is not ("workspace" or "tools" or "text-tools" or "text-compare" or "timestamp" or "qr" or "checksum" or "pet") && !_compact)
             {
                 try { await RefreshSidebarSpacesAsync(source.Token); }
                 catch (Exception error) when (!source.IsCancellationRequested) { Report(error.Message); }
@@ -224,7 +225,13 @@ public sealed partial class ClientView : UserControl
                 case "workspace": await RenderWorkspaceAsync(source.Token); break;
                 case "files": await RenderFilesAsync(source.Token); break;
                 case "clipboard": await RenderClipboardAsync(source.Token); break;
-                case "text-tools": RenderUtilities(source.Token); break;
+                case "tools": RenderToolsOverview(); break;
+                case "text-tools": Header(L("文本转换", "Text conversion")); RenderTextTools(source.Token); break;
+                case "text-compare": Header(L("文本对比", "Text comparison")); RenderTextComparison(source.Token); break;
+                case "timestamp": Header(L("时间戳", "Timestamp")); RenderTimestamp(source.Token); break;
+                case "qr": Header(L("二维码", "QR code")); RenderQrCode(source.Token); break;
+                case "checksum": Header(L("文件校验", "File checksum")); RenderFileChecksum(source.Token); break;
+                case "pet": RenderPet(); break;
                 case "settings": await RenderSettingsAsync(source.Token); break;
                 case "commands": await RenderCommandsAsync(source.Token); break;
                 case "capture": await RenderCaptureAsync(source.Token); break;
@@ -259,20 +266,6 @@ public sealed partial class ClientView : UserControl
         finally { _refreshingWorkspace = false; }
     }
 
-    private List<(string Id, string Zh, string En)> ToolPages()
-    {
-        var pages = new List<(string Id, string Zh, string En)>
-        {
-            ("files", "共享文件", "Shared files"),
-            ("clipboard", "剪贴板", "Clipboard"),
-            ("text-tools", "实用工具", "Utilities")
-        };
-        if (Has(ClientFeatures.Commands)) pages.Insert(0, ("commands", "命令管理", "Commands"));
-        if (Has(ClientFeatures.Capture)) pages.Add(("capture", "截图与录屏", "Screen capture"));
-        if (Has(ClientFeatures.Ssh) || OperatingSystem.IsAndroid()) pages.Add(("ssh", "SSH 主机", "SSH hosts"));
-        return pages;
-    }
-
     private Button NavigationButton(string id, string name, Func<Task>? action = null)
     {
         string glyph = PageGlyph(id);
@@ -294,13 +287,13 @@ public sealed partial class ClientView : UserControl
         }
         else if (_sidebarCollapsed) button.Content = TrayGlyph.Icon(glyph, 19);
         button.Classes.Add("navigation");
-        if (_page == id || id == "tools" && _page is not ("workspace" or "settings")) button.Classes.Add("selected");
+        if (_page == id || _compact && id == "tools" && _page is not ("workspace" or "settings")) button.Classes.Add("selected");
         return button;
     }
 
     private static string PageGlyph(string id) => id switch
     {
-        "workspace" => "spaces", "commands" => "terminal", "tools" => "folder-open", _ => id
+        "workspace" => "spaces", "commands" => "terminal", "tools" => "tool-grid", _ => id
     };
 
     private bool Has(ClientFeatures feature) => (_backend.Features & feature) != 0;

@@ -15,7 +15,7 @@ colors:
 
 ## 工作区
 
-桌面左侧分为「空间」和「工具」，默认宽度为 244。空间列表直接打开对应画布，工具列表显示当前客户端支持的全局功能，设置固定在底部。顶部显示当前空间名。「定位组件」按当前空间的组件名称和类型查找，选中后滚动到原卡片并高亮。拖动标题移动组件，拖动右下角调整大小，操作期间会显示点阵。按住 Shift 时，位置和尺寸以 24 像素为步长吸附。
+桌面侧栏默认宽度为 244。空间列表直接打开对应画布。工具按「设备与共享」「开发与运维」「屏幕与桌面」「实用工具」展开，只显示当前客户端支持的分组和条目。设置固定在底部。「工具总览」按同样的分组列出入口，并提供画板、待办、便签、本地目录和终端等可用组件的添加入口。顶部显示当前页面或空间名。「定位组件」按当前空间的组件名称和类型查找，选中后滚动到原卡片并高亮。拖动标题移动组件，拖动右下角调整大小，操作期间会显示点阵。按住 Shift 时，位置和尺寸以 24 像素为步长吸附。
 
 用 `Ctrl+K` 搜索页面、空间、组件和当前可用的添加操作。方向键选择，Enter 跳转，Esc 关闭并回到先前的焦点。跳到组件时高亮边框。目录组件支持点路径返回上一级，并能在当前目录添加终端组件。
 
@@ -27,7 +27,7 @@ colors:
 
 原生客户端和 Web 使用石墨蓝工作台。亮蓝强调主要操作、焦点和选中项。绿色标记运行、连接或完成，琥珀色表示等待处理，玫瑰红表示失败和需要确认的移除操作。状态同时显示文字。终端使用独立的输出区和等宽字体。[Fluent 2 色彩规范](https://fluent2.microsoft.design/color) · [WCAG 2.2](https://www.w3.org/TR/WCAG22/)
 
-窄屏底栏提供「空间」「工具」「设置」。空间和工具入口打开可搜索的列表。便签、待办和画板在同一条滚动流中。共享文件保留文件名、目录和行内下载操作，剪贴板历史显示文本、来源设备和发送时间。
+窄屏底栏提供「空间」「工具」「设置」。「空间」打开可搜索列表，「工具」打开工具总览。便签、待办和画板在同一条滚动流中。共享文件保留文件名、目录和行内下载操作，剪贴板历史显示文本、来源设备和发送时间。
 
 ## 操作布局
 
@@ -41,10 +41,11 @@ colors:
 | 目录与终端 | 选择目录、打开或预览、复制到指定位置、打开或关闭终端、运行时中断、发送 | 输入目录路径、新建目录、在此目录添加终端 |
 | 命令管理 | 新建、当前命令启停和编辑、日志搜索和复制 | 刷新列表、重启、打开服务网页、删除 |
 | 共享文件 | 上传、搜索和筛选、行内下载、传输取消和重试 | 刷新列表、复制文件名或 SHA-256、删除文件 |
-| 剪贴板 | 发送文本、原生同步设置、搜索和筛选、当前记录复制和置顶 | 编辑后发送、处理文本、刷新历史、发送本机剪贴板、在本机隐藏 |
+| 剪贴板 | 发送文本、原生同步设置、搜索和筛选、当前记录复制和置顶 | 编辑后发送、处理文本、生成二维码、刷新历史、发送本机剪贴板、在本机隐藏 |
 | 实用工具 | 文本转换、文本对比、时间戳、二维码、文件校验 | 从共享文件进入校验时预填 SHA-256 |
-| 截图与录屏 | 范围、延时、截图、开始或结束录屏、历史搜索、复制图片、标注、播放和另存 | 上传到共享文件、放弃录屏、打开原图、贴图、识别文字、重命名、复制路径、定位文件和回收 |
+| 截图与录屏 | 范围、延时、截图、开始或结束录屏、历史搜索、复制图片、标注、播放和另存 | 上传到共享文件、放弃录屏、打开原图、贴图、识别文字和二维码、重命名、复制路径、定位文件和回收 |
 | SSH 主机 | 添加主机、连接、编辑、密钥入口 | 删除主机，在密钥面板内导入或删除密钥 |
+| Windows 桌宠 | 显示、隐藏。单击打招呼，双击打开工作区，拖动后停在原地 | 自动走动、睡觉或叫醒、调整大小 |
 | 设置 | 配对、编辑连接、刷新设备、同步与应用开关、复制 MCP 配置、更新状态对应的操作、导出配置 | 解除配对、导入服务配置 |
 
 ## 参考
@@ -52,6 +53,7 @@ colors:
 - 抓手、空格或中键拖动只平移视图。画板获得焦点后，可用方向键平移、Ctrl+滚轮以指针为中心缩放、Shift+1 适应内容。绘制时按住 Shift 可锁定比例或将线段吸附到 45°。清空可撤销，PNG 包含全部已保存的对象。[FigJam 平移与缩放](https://help.figma.com/hc/en-us/articles/1500004414582-Pan-and-zoom-in-FigJam) · [Miro 输入设备操作](https://help.miro.com/hc/en-us/articles/360017731053-Using-Miro-with-a-mouse-trackpad-or-touchscreen) · [Excalidraw 绘图指南](https://plus.excalidraw.com/how-to-start)
 
 - 侧栏可调整宽度、可切成图标栏，显示与收起都有直接入口。[VS Code Custom Layout](https://code.visualstudio.com/docs/configure/custom-layout) · [Fluent NavigationView](https://learn.microsoft.com/en-us/windows/apps/design/controls/navigationview) · [IntelliJ IDEA Tool Windows](https://www.jetbrains.com/help/idea/tool-windows.html)
+- Windows 桌宠「栗尾」有待机、走动、睡觉和挥手四个原创姿态，使用像素透明窗口。它在当前显示器的工作区内活动，悬停时停下，拖放后可通过菜单恢复自动走动。通知气泡可打开来源组件。[eSheep](https://github.com/Adrianotiger/desktopPet/blob/master/Readme.md) · [Desktop Pet Studio](https://github.com/PhantatP/desktop-pet-studio)
 - 一个组件临时占满内容区，还原后保留原布局。分隔线支持键盘微调。[Windows Terminal Pane Zoom](https://learn.microsoft.com/en-us/windows/terminal/panes#zooming-a-pane) · [W3C Window Splitter](https://www.w3.org/WAI/ARIA/apg/patterns/windowsplitter/)
 
 - 命令入口优先支持键盘搜索、选中和执行。拖动时才通过 Shift 启用吸附。[PowerToys Command Palette](https://learn.microsoft.com/en-us/windows/powertoys/command-palette/overview) · [FancyZones](https://learn.microsoft.com/en-us/windows/powertoys/fancyzones)

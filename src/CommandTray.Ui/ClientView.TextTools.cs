@@ -15,7 +15,6 @@ public sealed partial class ClientView
     private Task OpenTextToolsAsync(string text)
     {
         _textToolInput = text;
-        _utilitySection = UtilitySection.Convert;
         Navigate("text-tools");
         return Task.CompletedTask;
     }
@@ -31,7 +30,10 @@ public sealed partial class ClientView
             (TextOperation.EncodeUrl, L("URL 组件编码", "URL component encode")),
             (TextOperation.DecodeUrl, L("URL 组件解码", "URL component decode")),
             (TextOperation.UniqueLines, L("按行去重", "Remove duplicate lines")),
-            (TextOperation.Sha256, L("文本 SHA-256", "Text SHA-256"))
+            (TextOperation.Sha256, L("文本 SHA-256", "Text SHA-256")),
+            (TextOperation.TrimLines, L("去除每行首尾空格", "Trim each line")),
+            (TextOperation.RemoveBlankLines, L("删除空行", "Remove blank lines")),
+            (TextOperation.GenerateUuid, L("生成 UUID v4", "Generate UUID v4"))
         };
         var input = Editor(L("输入", "Input"), false);
         input.Text = _textToolInput;
@@ -73,10 +75,11 @@ public sealed partial class ClientView
             var text = input.Text ?? "";
             var selected = _textToolOperation;
             var mode = operations[selected].Kind;
-            if (text.Length > TextTools.InputLimit) { SetResult("", TooLong()); return; }
+            var valueInput = mode == TextOperation.GenerateUuid ? "" : text;
+            if (valueInput.Length > TextTools.InputLimit) { SetResult("", TooLong()); return; }
             SetResult("", L("正在处理…", "Working…"), error: false);
             string value, message = "";
-            try { value = await Task.Run(() => TextTools.ConvertText(mode, text), token); }
+            try { value = await Task.Run(() => TextTools.ConvertText(mode, valueInput), token); }
             catch (Exception error) when (error is JsonException or FormatException or ArgumentException)
             {
                 value = "";
