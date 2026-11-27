@@ -266,10 +266,11 @@ public sealed partial class ClientView : UserControl
         finally { _refreshingWorkspace = false; }
     }
 
-    private Button NavigationButton(string id, string name, Func<Task>? action = null)
+    private Button NavigationButton(string id, string name, Func<Task>? action = null, string? style = null)
     {
         string glyph = PageGlyph(id);
-        var button = Action(name, action ?? (() => { Navigate(id); return Task.CompletedTask; }), name, glyph);
+        var button = Action(name, action ?? (() => { Navigate(id); return Task.CompletedTask; }), name);
+        int size = style switch { "nav-main-entry" => 18, "nav-sub-entry" => 14, _ => 16 };
         if (_compact)
         {
             var label = IconLabel(glyph, name);
@@ -285,10 +286,25 @@ public sealed partial class ClientView : UserControl
             }
             button.Content = label;
         }
-        else if (_sidebarCollapsed) button.Content = TrayGlyph.Icon(glyph, 19);
+        else button.Content = _sidebarCollapsed ? TrayGlyph.Icon(glyph, size) : SidebarLabel(glyph, name, size);
         button.Classes.Add("navigation");
+        if (style is not null) button.Classes.Add(style);
         if (_page == id || _compact && id == "tools" && _page is not ("workspace" or "settings")) button.Classes.Add("selected");
         return button;
+    }
+
+    private static Grid SidebarLabel(string glyph, string name, int iconSize)
+    {
+        var label = new TextBlock
+        {
+            Text = name, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center
+        };
+        Grid.SetColumn(label, 1);
+        return new Grid
+        {
+            ColumnDefinitions = new ColumnDefinitions("Auto,*"), ColumnSpacing = 9,
+            Children = { TrayGlyph.Icon(glyph, iconSize), label }
+        };
     }
 
     private static string PageGlyph(string id) => id switch

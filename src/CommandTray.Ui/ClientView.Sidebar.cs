@@ -15,6 +15,7 @@ public sealed partial class ClientView
     private const int DefaultSidebarWidth = 244;
     private const int MinimumSidebarWidth = 168;
     private const int MaximumSidebarWidth = 336;
+    private static readonly string[] PrimaryToolPages = ["commands", "clipboard", "files"];
     private bool _sidebarCollapsed;
     private int _sidebarWidth = DefaultSidebarWidth;
     private Button? _sidebarToggle;
@@ -80,15 +81,31 @@ public sealed partial class ClientView
             brand.Children.Add(name);
             heading.Child = TitleRow(brand, _sidebarToggle);
         }
-        _navHeader.Content = heading;
+        var groups = ToolGroups().ToArray();
+        var tools = groups.SelectMany(group => group.Pages).ToDictionary(page => page.Id);
+        var primary = new StackPanel { Spacing = 2 };
+        primary.Children.Add(_sidebarCollapsed
+            ? NavigationButton("workspace", L("切换空间", "Switch space"), ChooseSpaceAsync, "nav-main-entry")
+            : NavigationButton("workspace", L("工作区", "Workspace"), style: "nav-main-entry"));
+        foreach (var id in PrimaryToolPages)
+            if (tools.TryGetValue(id, out var page))
+                primary.Children.Add(NavigationButton(id, L(page.Zh, page.En), style: "nav-main-entry"));
+        var primarySection = new Border
+        {
+            Child = primary, Padding = new Thickness(0, 0, 0, 9), BorderThickness = new Thickness(0, 0, 0, 1)
+        };
+        primarySection.Classes.Add("nav-group");
+        _navHeader.Content = new StackPanel { Children = { heading, primarySection } };
+
         AutomationProperties.SetName(_navSplitter, L("调整侧栏宽度", "Resize sidebar"));
-        var settings = NavigationButton("settings", L("设置", "Settings"));
+        var settings = NavigationButton("settings", L("设置", "Settings"), style: "nav-footer-entry");
         if (!_sidebarCollapsed)
         {
-            _sidebarSpaceList = new StackPanel { Spacing = 4 };
+            _sidebarSpaceList = new StackPanel { Spacing = 1 };
             var group = new Border
             {
-                Margin = new Thickness(0, 3, 0, 0), Child = _sidebarSpaceList
+                Child = _sidebarSpaceList, Padding = new Thickness(0, 3, 0, 8),
+                BorderThickness = new Thickness(0, 0, 0, 1)
             };
             group.Classes.Add("nav-group");
             _navigation.Children.Add(group);
@@ -97,25 +114,30 @@ public sealed partial class ClientView
             _navFooter.Child = new StackPanel { Spacing = 4, Children = { _sidebarRelayStatus, settings } };
             UpdateSidebarSpaces();
         }
-        else
-        {
-            _navigation.Children.Add(NavigationButton("workspace", L("空间", "Spaces"), ChooseSpaceAsync));
-            _navFooter.Child = settings;
-        }
-        var overview = NavigationButton("tools", L("工具总览", "All tools"));
+        else _navFooter.Child = settings;
+        var overview = NavigationButton("tools", L("工具总览", "All tools"), style: "nav-overview");
         overview.Margin = new Thickness(0, 6, 0, 0);
         _navigation.Children.Add(overview);
-        foreach (var group in ToolGroups())
+        foreach (var group in groups)
         {
+            var pages = group.Pages.Where(page => !PrimaryToolPages.Contains(page.Id)).ToArray();
+            if (pages.Length == 0) continue;
+            var entries = new StackPanel { Spacing = 1, Margin = new Thickness(0, 1) };
             if (!_sidebarCollapsed)
             {
-                var groupLabel = Muted(group.Title);
-                groupLabel.Classes.Add("nav-status");
-                _navigation.Children.Add(groupLabel);
+                entries.Children.Add(SidebarHeading(group.Title));
             }
-            foreach (var page in group.Pages)
-                _navigation.Children.Add(NavigationButton(page.Id, L(page.Zh, page.En)));
+            foreach (var page in pages)
+                entries.Children.Add(NavigationButton(page.Id, L(page.Zh, page.En), style: "nav-sub-entry"));
+            _navigation.Children.Add(entries);
         }
+    }
+
+    private static TextBlock SidebarHeading(string title)
+    {
+        var label = new TextBlock { Text = title, VerticalAlignment = VerticalAlignment.Center };
+        label.Classes.Add("nav-heading");
+        return label;
     }
 
     private void UpdateSidebarSpaces()
@@ -127,27 +149,20 @@ public sealed partial class ClientView
         }
         if (_sidebarSpaceList is not { } group) return;
         group.Children.Clear();
-        var label = Muted(L("空间", "Spaces"));
-        label.Classes.Add("nav-status");
-        group.Children.Add(TitleRow(label, IconButton("plus", L("新建空间", "New space"), NewSpaceAsync)));
+        var add = IconButton("plus", L("新建空间", "New space"), NewSpaceAsync);
+        add.Classes.Add("nav-add-space");
+        group.Children.Add(TitleRow(SidebarHeading(L("空间", "Spaces")), add));
         foreach (var (id, name) in _sidebarSpaces)
         {
             var button = Action(name, () => OpenPaletteSpaceAsync(id), name);
-            var text = new TextBlock
-            {
-                Text = name, Margin = new Thickness(8, 0, 0, 0),
-                TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center
-            };
-            Grid.SetColumn(text, 1);
-            var row = new Grid
-            {
-                ColumnDefinitions = new ColumnDefinitions("Auto,*"),
-                Children = { TrayGlyph.Icon("spaces", 15), text }
-            };
-            button.Content = row;
-            button.HorizontalContentAlignment = HorizontalAlignment.Stretch;
+            button.Content = SidebarLabel("spaces", name, 14);
             button.Classes.Add("navigation");
-            if (_page == "workspace" && id == _spaceId) button.Classes.Add("selected");
+            button.Classes.Add("nav-sub-entry");
+            if (_page == "workspace" && id == _spaceId)
+            {
+                button.Classes.Add("current-space");
+                AutomationProperties.SetItemStatus(button, L("当前空间", "Current space"));
+            }
             group.Children.Add(button);
         }
     }

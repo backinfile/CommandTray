@@ -216,6 +216,7 @@ const toolGroups = [
   ["设备与共享", ["files", "clipboard"]],
   ["实用工具", ["text-tools", "text-compare", "timestamp", "qr", "checksum"]]
 ];
+const primaryToolPages = ["clipboard", "files"];
 const toolPages = toolGroups.flatMap(([, ids]) => ids);
 const utilityViews = {
   "text-tools": [renderTextTools, connectTextTools],
@@ -235,6 +236,44 @@ function renderToolsOverview() {
   const panels = componentKinds.map(([kind, label, glyph]) =>
     `<button class="tool-link" type="button" data-action="add-item:${kind}">${svg(glyph)}<span>${label}</span></button>`);
   return `<div class="tool-directory">${pages.join("")}${group("工作区组件", panels.join(""))}</div>`;
+}
+
+function renderSidebar() {
+  const sidebar = el("sidebar");
+  const scrollSelector = matchMedia("(max-height: 465px)").matches ? ".nav-main" : ".nav-scroll";
+  const scroll = sidebar.querySelector(scrollSelector)?.scrollTop ?? 0;
+  const focused = sidebar.contains(document.activeElement) ? document.activeElement : null;
+  const spaces = (workspace?.document?.spaces ?? []).map(space =>
+    `<button type="button" class="nav-button nav-sub-entry" data-space="${escape(space.id)}"${
+      space.id === selected && page === "workspace" ? ' aria-current="location"' : ""} title="${escape(space.name)}">${svg(pages.workspace[1])}<span>${escape(space.name)}</span></button>`).join("");
+  const spacePicker = (label, style = "") =>
+    `<button type="button" class="nav-button choose-space ${style}" data-action="choose-space" title="${label}" aria-label="${label}" aria-haspopup="dialog"${
+      page === "workspace" ? ' aria-current="page"' : ""}>${svg(pages.workspace[1])}<span>${label}</span></button>`;
+  const workspaceLink = collapsed ? spacePicker("切换空间", "nav-main-entry") :
+    navLink("workspace", {appearance:"nav-button nav-main-entry"});
+  const primary = primaryToolPages.map(id => navLink(id, {appearance:"nav-button nav-main-entry"})).join("");
+  const tools = toolGroups.map(([title, ids]) => {
+    const links = ids.filter(id => !primaryToolPages.includes(id));
+    return links.length ? `<section class="tool-nav-group"><h2 class="nav-label">${title}</h2>${
+      links.map(id => navLink(id, {appearance:"nav-button nav-sub-entry"})).join("")}</section>` : "";
+  }).join("");
+  sidebar.innerHTML = `<div class="nav-main">
+    <div class="nav-primary">${workspaceLink}${primary}</div>
+    <div class="nav-scroll"><section class="space-group">
+      <div class="space-heading"><h2 class="nav-label">空间</h2><button type="button" class="new-space" data-action="new-space" title="新建空间" aria-label="新建空间">${svg("M12 4v16M4 12h16")}</button></div>
+      ${spaces}</section>
+      ${navLink("tools", {appearance:"nav-button overview-link"})}
+      ${tools}
+    </div></div>
+    ${spacePicker("空间")}
+    ${navLink("tools", {appearance:"nav-button mobile-tools", label:"工具", current:page === "tools" || toolPages.includes(page)})}
+    <div class="nav-footer"><small class="paired">已配对</small>${navLink("settings")}</div>`;
+  sidebar.querySelector(scrollSelector).scrollTop = scroll;
+  if (focused) {
+    const {page, space, action} = focused.dataset;
+    [...sidebar.querySelectorAll("button")].find(button => button.getClientRects().length &&
+      button.dataset.page === page && button.dataset.space === space && button.dataset.action === action)?.focus({preventScroll:true});
+  }
 }
 
 function render() {
@@ -259,17 +298,7 @@ function render() {
     collapsed ? "展开侧栏" : "收起侧栏"}" title="${collapsed ? "展开侧栏" : "收起侧栏"}">${svg("M3 4h18v16H3z M9 4v16")}</button>${
     `<h1 class="page-title">${escape(page === "workspace" ? selectedSpace()?.name ?? "空间" : pages[page][0])}</h1>`}</div><button class="search-trigger" type="button" data-action="search">${
     svg("M16 10a6 6 0 1 1-12 0 6 6 0 0 1 12 0m-2 4 6 6")}快速查找 <kbd>Ctrl K</kbd></button>`;
-  const spaces = (workspace?.document?.spaces ?? []).map(space => `<button type="button" class="nav-button" data-space="${
-    escape(space.id)}"${space.id === selected && page === "workspace" ? ' aria-current="page"' : ""} aria-label="${escape(space.name)}" title="${escape(space.name)}">${
-    svg(pages.workspace[1])}<span>${escape(space.name)}</span></button>`).join("");
-  const chooser = (label, icon, name, active) => `<button type="button" class="nav-button ${name}" data-action="${name}" title="${label}" aria-label="${label}" aria-haspopup="dialog"${active ? ' aria-current="page"' : ""}>${svg(icon)}<span>${label}</span></button>`;
-  el("sidebar").innerHTML = '<div class="nav-scroll"><div class="space-group"><div class="group-title"><small>空间</small><button type="button" class="new-space" data-action="new-space" title="新建空间" aria-label="新建空间">＋</button></div>' + spaces + "</div>" +
-    chooser("空间", pages.workspace[1], "choose-space", page === "workspace") +
-    navLink("tools", {appearance:"nav-button overview-link"}) +
-    toolGroups.map(([title, ids]) => `<div class="group"><small>${title}</small>${ids.map(id => navLink(id)).join("")}</div>`).join("") + '</div>' +
-    chooser("空间", pages.workspace[1], "choose-space", page === "workspace") +
-    navLink("tools", {appearance:"nav-button mobile-tools", label:"工具", current:page === "tools" || toolPages.includes(page)}) +
-    '<div class="nav-footer"><small class="paired">已配对</small>' + navLink("settings") + "</div>";
+  renderSidebar();
   const utility = utilityViews[page];
   el("content").innerHTML = loading ? '<p class="muted" role="status">正在加载…</p>' :
     (utility?.[0] ?? {workspace:renderWorkspace, files:renderFiles, clipboard:renderClipboard, tools:renderToolsOverview, settings:renderSettings}[page])();

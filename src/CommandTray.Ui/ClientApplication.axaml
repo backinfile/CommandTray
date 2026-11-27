@@ -141,6 +141,14 @@
       <Setter Property="Foreground" Value="{StaticResource ShellMuted}" />
       <Setter Property="Margin" Value="10,4" />
     </Style>
+    <Style Selector="TextBlock.nav-heading">
+      <Setter Property="FontSize" Value="{DynamicResource TrayFontCaption}" />
+      <Setter Property="Foreground" Value="{StaticResource ShellMuted}" />
+      <Setter Property="Margin" Value="10,5,0,2" />
+    </Style>
+    <Style Selector="Button.action.nav-add-space">
+      <Setter Property="MinHeight" Value="28" />
+    </Style>
     <Style Selector="GridSplitter.sidebar-splitter">
       <Setter Property="Focusable" Value="True" />
       <Setter Property="Template">
@@ -223,6 +231,36 @@
       <Setter Property="Background" Value="{DynamicResource TraySelection}" />
       <Setter Property="Foreground" Value="{DynamicResource TrayInk}" />
       <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+    <Style Selector="Border.sidebar Button.action.navigation.nav-main-entry">
+      <Setter Property="MinHeight" Value="36" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="Foreground" Value="{StaticResource ShellInk}" />
+    </Style>
+    <Style Selector="Border.sidebar Button.action.navigation.nav-overview">
+      <Setter Property="MinHeight" Value="34" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="FontSize" Value="{DynamicResource TrayFontDetail}" />
+      <Setter Property="Foreground" Value="{StaticResource ShellInk}" />
+    </Style>
+    <Style Selector="Border.sidebar Button.action.navigation.nav-sub-entry">
+      <Setter Property="MinHeight" Value="30" />
+      <Setter Property="Padding" Value="19,2,8,2" />
+      <Setter Property="FontSize" Value="{DynamicResource TrayFontDetail}" />
+    </Style>
+    <Style Selector="Border.sidebar Button.action.navigation.nav-footer-entry">
+      <Setter Property="MinHeight" Value="34" />
+      <Setter Property="FontSize" Value="{DynamicResource TrayFontDetail}" />
+    </Style>
+    <Style Selector="Border.sidebar Button.action.navigation.current-space">
+      <Setter Property="Foreground" Value="{StaticResource ShellInk}" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+    <Style Selector="Border.sidebar Button.action.navigation.current-space Path.glyph">
+      <Setter Property="Stroke" Value="{StaticResource ShellAccent}" />
+    </Style>
+    <Style Selector="Border.sidebar Button.action.navigation.selected">
+      <Setter Property="BorderThickness" Value="1,0,0,0" />
     </Style>
     <Style Selector="Button.action.space-tab">
       <Setter Property="Foreground" Value="{DynamicResource TraySecondary}" />

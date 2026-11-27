@@ -50,7 +50,7 @@ button:hover { background: var(--hover) }
 .skip-link:focus { transform:none }
 .shell { min-height: 100dvh; display: grid; grid-template: 60px 1fr / 244px minmax(0,1fr) }
 .shell.collapsed { grid-template-columns: 64px minmax(0,1fr) }
-.shell.collapsed .brand strong,.shell.collapsed .sidebar .nav-button span,.shell.collapsed .group small,.shell.collapsed .paired { display:none }
+.shell.collapsed .brand strong,.shell.collapsed .sidebar .nav-button span,.shell.collapsed .nav-label,.shell.collapsed .paired { display:none }
 .shell.collapsed .nav-button { justify-content:center; padding:0 }
 .shell.unpaired { grid-template: 60px 1fr / minmax(0,1fr) }
 .shell.unpaired .top,.shell.unpaired .sidebar { display:none }
@@ -68,20 +68,30 @@ kbd { color:var(--muted); font-size:11px; border:1px solid var(--line); border-r
 .page-title { font-size:21px; overflow:hidden; text-overflow:ellipsis }
 .sidebar { grid-row: 2; grid-column: 1; position:sticky; top:60px; height:calc(100dvh - 60px); display: flex;
   flex-direction: column; border-right: 1px solid var(--line); background: var(--sidebar) }
-.nav-scroll { min-height:0; overflow:auto; scrollbar-width:thin; padding:12px 11px 8px }
-.nav-button { width: 100%; display: flex; align-items: center; gap: 10px; text-align: left; min-height: 41px; background: transparent; border-color: transparent; color: var(--muted); font-weight: 580; white-space: nowrap }
+.nav-main { flex:1; min-height:0; display:flex; flex-direction:column }
+.nav-primary { flex:none; display:grid; gap:2px; padding:6px 11px 10px; border-bottom:1px solid var(--line) }
+.nav-scroll { min-height:0; overflow:auto; scrollbar-width:thin; padding:4px 11px 10px }
+.nav-button { width:100%; display:flex; align-items:center; gap:9px; text-align:left; min-height:34px;
+  background:transparent; color:var(--muted); white-space:nowrap }
 .nav-button span { overflow: hidden; text-overflow: ellipsis }
-.nav-button[aria-current="page"],.nav-button[aria-pressed="true"] { background: var(--selected); color: var(--text) }
-.nav-button svg { width: 17px; height: 17px; flex: none }
-.nav-button[aria-current] svg,.nav-button[aria-pressed=true] svg { color: var(--accent) }
-.group { margin-top: 9px; padding-top: 9px; border-top: 1px solid var(--line) }
-.group small { display: block; padding: 0 11px 5px }
-.overview-link { margin-top:7px }
-.group-title { display:flex; align-items:center; justify-content:space-between; margin:0 0 4px 11px }
-.new-space { display:grid; place-items:center; min-height:30px; width:31px; padding:0; background:transparent; border-color:transparent }
-.sidebar .choose-space,.sidebar .mobile-tools { display:none }
+.nav-main-entry { min-height:38px; color:var(--text); font-weight:650 }
+.nav-button[aria-current="page"] { background:var(--selected); color:var(--text); border-inline-start-color:var(--accent); font-weight:650 }
+.nav-button[aria-current="location"] { color:var(--text); font-weight:650 }
+.nav-button svg { width:16px; height:16px; flex:none }
+.nav-main-entry svg { width:18px; height:18px }
+.nav-button[aria-current] svg { color:var(--accent) }
+.nav-label { margin:8px 0 3px 11px; color:var(--muted); font-size:12px; font-weight:500 }
+.space-group { padding:0 0 10px; border-bottom:1px solid var(--line) }
+.space-heading { display:flex; align-items:center; justify-content:space-between }
+.space-heading .nav-label { margin-block:0 }
+.new-space { display:grid; place-items:center; width:31px; min-height:28px; padding:0; color:var(--muted) }
+.new-space svg { width:15px; height:15px }
+.overview-link { margin-top:6px; color:var(--text); font-size:13px; font-weight:650 }
+.nav-sub-entry { min-height:31px; padding-inline:19px 9px; font-size:13px }
+.nav-sub-entry svg { width:14px; height:14px }
+.tool-nav-group { margin-block:3px }
+.sidebar > .choose-space,.sidebar .mobile-tools { display:none }
 .shell.collapsed .space-group { display:none }
-.shell.collapsed .nav-scroll .choose-space { display:flex }
 .nav-footer { flex:none; margin-top:auto; border-top:1px solid var(--line); padding:8px 11px }
 .paired { display: block; padding: 0 11px 7px }
 .paired:before { content: ""; display: inline-block; margin-right: 7px; width: 7px; height: 7px; border-radius: 50%; background: var(--success); vertical-align: 1px }
@@ -204,6 +214,10 @@ dialog::backdrop { background: var(--scrim) }
   .workbench { grid-template-columns:minmax(0,1fr) }
   .workbench .tile-board { grid-row:auto }
 }
+@media(max-height: 465px) and (min-width: 701px) {
+  .nav-main { overflow:auto; scrollbar-width:thin }
+  .nav-scroll { flex:none; overflow:visible }
+}
 @media(max-width: 700px) {
   .shell,.shell.collapsed { grid-template: 53px 1fr / minmax(0,1fr) }
   .brand { display:none }
@@ -213,11 +227,12 @@ dialog::backdrop { background: var(--scrim) }
   .sidebar { position:fixed; inset:auto 0 0; z-index:3; height:auto; display:grid; grid-template-columns:repeat(3,minmax(0,1fr));
     border:0; border-top:1px solid var(--line); padding:4px 8px max(5px,env(safe-area-inset-bottom)); gap:3px }
   .sidebar .nav-button { justify-items:center; justify-content:center; text-align:center; display:grid; min-height:47px; gap:0; padding:2px; line-height:1.35; font-size:11px }
-  .sidebar .nav-scroll { display:none }
+  .sidebar .nav-main { display:none }
   .sidebar > .choose-space,.sidebar .mobile-tools { display:grid }
   .workspace-actions { top:53px }
   .shell.collapsed .sidebar .nav-button span { display:block }
   .nav-footer { margin:0; padding:0; border:0 }
+  .sidebar .nav-button[aria-current="page"] { border-inline-start-color:transparent; border-top-color:var(--accent) }
   .paired { display:none }
   main { grid-row:2; grid-column:1; padding:17px 12px 75px }
   .workbench,.split { grid-template-columns:1fr }

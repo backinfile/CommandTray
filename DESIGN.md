@@ -15,7 +15,9 @@ colors:
 
 ## 工作区
 
-桌面侧栏默认宽度为 244。空间列表直接打开对应画布。工具按「设备与共享」「开发与运维」「屏幕与桌面」「实用工具」展开，只显示当前客户端支持的分组和条目。设置固定在底部。「工具总览」按同样的分组列出入口，并提供画板、待办、便签、本地目录和终端等可用组件的添加入口。顶部显示当前页面或空间名。「定位组件」按当前空间的组件名称和类型查找，选中后滚动到原卡片并高亮。拖动标题移动组件，拖动右下角调整大小，操作期间会显示点阵。按住 Shift 时，位置和尺寸以 24 像素为步长吸附。
+桌面侧栏默认宽度为 244。工作区、命令管理、剪贴板和共享文件放在顶部主导航，命令管理只在支持它的客户端显示。工作区打开当前空间，下面的空间列表可直接切换画布。工具总览之后的辅助工具按领域展开，用较紧凑的缩进行显示。空间和工具列表可滚动，设置固定在底部。「工具总览」按领域列出所有可用工具，也提供添加画板、待办、便签、本地目录和终端等组件的入口。
+
+顶部显示当前页面或空间名。「定位组件」按当前空间的组件名称和类型查找，选中后滚动到原卡片并高亮。拖动标题移动组件，拖动右下角调整大小，操作期间会显示点阵。按住 Shift 时，位置和尺寸以 24 像素为步长吸附。
 
 用 `Ctrl+K` 搜索页面、空间、组件和当前可用的添加操作。方向键选择，Enter 跳转，Esc 关闭并回到先前的焦点。跳到组件时高亮边框。目录组件支持点路径返回上一级，并能在当前目录添加终端组件。
 
@@ -52,7 +54,7 @@ colors:
 
 - 抓手、空格或中键拖动只平移视图。画板获得焦点后，可用方向键平移、Ctrl+滚轮以指针为中心缩放、Shift+1 适应内容。绘制时按住 Shift 可锁定比例或将线段吸附到 45°。清空可撤销，PNG 包含全部已保存的对象。[FigJam 平移与缩放](https://help.figma.com/hc/en-us/articles/1500004414582-Pan-and-zoom-in-FigJam) · [Miro 输入设备操作](https://help.miro.com/hc/en-us/articles/360017731053-Using-Miro-with-a-mouse-trackpad-or-touchscreen) · [Excalidraw 绘图指南](https://plus.excalidraw.com/how-to-start)
 
-- 侧栏可调整宽度、可切成图标栏，显示与收起都有直接入口。[VS Code Custom Layout](https://code.visualstudio.com/docs/configure/custom-layout) · [Fluent NavigationView](https://learn.microsoft.com/en-us/windows/apps/design/controls/navigationview) · [IntelliJ IDEA Tool Windows](https://www.jetbrains.com/help/idea/tool-windows.html)
+- 主导航与其下的内容入口分层，设置位于侧栏底部。侧栏可调整宽度和切换为图标栏。[VS Code 导航结构](https://code.visualstudio.com/api/ux-guidelines/overview) · [Fluent 2 Nav](https://fluent2.microsoft.design/components/web/react/core/nav/usage) · [Windows NavigationView](https://learn.microsoft.com/en-us/windows/apps/develop/ui/controls/navigationview)
 - Windows 桌宠「栗尾」有待机、走动、睡觉和挥手四个原创姿态，使用像素透明窗口。它在当前显示器的工作区内活动，悬停时停下，拖放后可通过菜单恢复自动走动。通知气泡可打开来源组件。[eSheep](https://github.com/Adrianotiger/desktopPet/blob/master/Readme.md) · [Desktop Pet Studio](https://github.com/PhantatP/desktop-pet-studio)
 - 一个组件临时占满内容区，还原后保留原布局。分隔线支持键盘微调。[Windows Terminal Pane Zoom](https://learn.microsoft.com/en-us/windows/terminal/panes#zooming-a-pane) · [W3C Window Splitter](https://www.w3.org/WAI/ARIA/apg/patterns/windowsplitter/)
 
