@@ -33,6 +33,7 @@ internal sealed class DesktopRuntime : IDisposable
     public WorkspaceStore Workspace { get; }
     public DesktopRelay Relay { get; }
     public DesktopMedia Media { get; }
+    public object[] CaptureShortcuts { get; set; } = [];
     public string McpCredential { get; }
     internal ClipboardPreferences ClipboardPreferences { get; }
     public event EventHandler<DesktopNotice>? Notification;

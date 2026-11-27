@@ -6,6 +6,7 @@ using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 
@@ -92,7 +93,7 @@ public sealed partial class ClientView
     });
 
     private readonly record struct Field(string Key, string Label, string Value = "", bool Secret = false,
-        bool Multiline = false, bool Toggle = false);
+        bool Multiline = false, bool Toggle = false, bool BrowseFolder = false);
 
     private Task Form(string title, Func<JsonObject, Task> save, params Field[] fields) =>
         Form(title, L("保存", "Save"), save, fields);
@@ -133,7 +134,8 @@ public sealed partial class ClientView
             }
             var input = new TextBox
             {
-                Text = field.Value, AcceptsReturn = field.Multiline, TextWrapping = TextWrapping.Wrap,
+                Text = field.Value, AcceptsReturn = field.Multiline,
+                TextWrapping = field.BrowseFolder ? TextWrapping.NoWrap : TextWrapping.Wrap,
                 PasswordChar = field.Secret ? '●' : '\0', MinHeight = field.Multiline ? 100 : 36,
                 MaxHeight = field.Multiline ? 220 : double.PositiveInfinity
             };
@@ -141,7 +143,28 @@ public sealed partial class ClientView
             AutomationProperties.SetName(input, field.Label);
             input.TextChanged += (_, _) => error.IsVisible = false;
             body.Children.Add(Muted(field.Label));
-            body.Children.Add(input);
+            if (field.BrowseFolder && TopLevel.GetTopLevel(this)?.StorageProvider.CanPickFolder == true)
+            {
+                var browse = SecondaryAction(L("选择目录…", "Choose folder…"), async () =>
+                {
+                    var token = CurrentActionCancellation;
+                    var current = input.Text;
+                    try
+                    {
+                        var path = await ChooseLocalFolderAsync(current);
+                        if (path is null || token.IsCancellationRequested || input.Text != current) return;
+                        input.Text = path;
+                        input.Focus();
+                    }
+                    catch (Exception failure) when (!token.IsCancellationRequested)
+                    {
+                        error.Text = failure.Message;
+                        error.IsVisible = true;
+                    }
+                }, glyph: "folder-open");
+                body.Children.Add(TitleRow(input, browse));
+            }
+            else body.Children.Add(input);
             firstInput ??= input;
             inputs.Add((field.Key, () => JsonValue.Create(input.Text ?? "")));
         }
@@ -190,5 +213,18 @@ public sealed partial class ClientView
         dialog = OpenActionDialog(title, body, new WrapPanel { ItemSpacing = 8, Children = { cancel, submit, progress } },
             initialFocus ?? firstInput ?? cancel);
         return Task.CompletedTask;
+    }
+
+    private async Task<string?> ChooseLocalFolderAsync(string? current)
+    {
+        var storage = RequireTopLevel().StorageProvider;
+        var options = new FolderPickerOpenOptions { Title = L("选择本地目录", "Choose a local folder"), AllowMultiple = false };
+        if (!string.IsNullOrWhiteSpace(current) && Path.IsPathFullyQualified(current))
+            options.SuggestedStartLocation = await storage.TryGetFolderFromPathAsync(current);
+        using var suggested = options.SuggestedStartLocation;
+        var folders = await storage.OpenFolderPickerAsync(options);
+        using var selected = folders.FirstOrDefault();
+        if (selected is null) return null;
+        return selected.TryGetLocalPath() ?? throw new IOException(L("请选择本机可访问的目录。", "Select a folder accessible on this device."));
     }
 }

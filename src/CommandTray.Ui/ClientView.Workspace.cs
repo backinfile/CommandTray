@@ -218,10 +218,11 @@ public sealed partial class ClientView
     {
         var fields = new List<Field> { new("title", L("名称", "Name"), name) };
         if (kind == "note") fields.Add(new("text", L("便签正文", "Note"), Multiline: true));
-        if (kind is "files" or "terminal") fields.Add(new("path", L("目录", "Directory")));
+        if (kind == "files") fields.Insert(0, new("path", L("目录路径", "Folder path"), BrowseFolder: true));
+        if (kind == "terminal") fields.Add(new("path", L("目录", "Directory")));
         if (kind == "terminal")
             fields.Add(new("shell", L("Shell", "Shell"), OperatingSystem.IsWindows() ? "cmd" : "/bin/sh"));
-        var heading = L($"添加{name}", $"Add {name}");
+        var heading = kind == "files" ? L("添加本地目录", "Add local folder") : L($"添加{name}", $"Add {name}");
         if (spaceName is { Length: > 0 }) heading += $" · {spaceName}";
         return Form(heading, L("添加", "Add"), values =>
         {

@@ -18,6 +18,8 @@ public enum ClientFeatures
     ConfigurationFiles = 512
 }
 
+public enum CaptureShortcut { Region, ActiveWindow, ToggleRecording }
+
 public interface IClientBackend
 {
     ClientFeatures Features { get; }

@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Drawing;
 using System.Text;
 using CommandTray.Services;
 
@@ -6,6 +7,36 @@ namespace CommandTray.Tests;
 
 public sealed class DesktopMediaTests
 {
+    [Fact]
+    public void WindowRecordingTargetsOnlyTheSelectedHandleAndSupportsTimedStop()
+    {
+        var args = DesktopMedia.RecordingArguments(Rectangle.Empty, 30, false, "Microphone", "mkv",
+            "capture.mkv.partial", window: 41236, durationSeconds: 300);
+
+        Assert.Equal("hwnd=41236", args[Array.IndexOf(args, "-i") + 1]);
+        Assert.DoesNotContain("desktop", args);
+        Assert.DoesNotContain("-offset_x", args);
+        Assert.DoesNotContain("-video_size", args);
+        Assert.Equal("0", args[Array.IndexOf(args, "-draw_mouse") + 1]);
+        Assert.Equal("300", args[Array.IndexOf(args, "-t") + 1]);
+        Assert.Contains("audio=Microphone", args);
+        Assert.Contains("matroska", args);
+        Assert.Throws<InvalidOperationException>(() => CaptureWindows.Resolve("0:0"));
+    }
+
+    [Fact]
+    public void DisplayRecordingKeepsItsVirtualOriginWithoutATimeLimit()
+    {
+        var args = DesktopMedia.RecordingArguments(new Rectangle(-1920, -40, 1920, 1080), 24, true,
+            null, "mp4", "display.mp4.partial");
+
+        Assert.Equal("-1920", args[Array.IndexOf(args, "-offset_x") + 1]);
+        Assert.Equal("-40", args[Array.IndexOf(args, "-offset_y") + 1]);
+        Assert.Equal("desktop", args[Array.IndexOf(args, "-i") + 1]);
+        Assert.DoesNotContain("-t", args);
+        Assert.Contains("+faststart", args);
+    }
+
     [Fact]
     public void RenameCapturePreservesFormatAndRefusesExistingName()
     {

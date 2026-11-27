@@ -9,7 +9,7 @@ namespace CommandTray.Services;
 internal sealed class WindowsClientBackend(
     DesktopRuntime desktop, CommandTrayApi commands, ConfigurationStore configurationStore, AppConfiguration configuration,
     SuiteUpdates? updates = null, Func<string, CancellationToken, Task>? installUpdate = null)
-    : IClientBackend
+    : IClientBackend, ICapturePreviewBackend
 {
     private readonly DesktopMcpTools _actions = new(desktop);
     private readonly object _templateGate = new();
@@ -23,6 +23,29 @@ internal sealed class WindowsClientBackend(
         (updates is null ? ClientFeatures.None : ClientFeatures.Updates);
 
     public event EventHandler? SettingsChanged;
+
+    public async ValueTask<CapturePreviewFrame> ReadCapturePreviewAsync(CapturePreviewTarget target, CaptureRegion? exclusion,
+        CancellationToken token)
+    {
+        return await Task.Run(() =>
+        {
+            if (target.Recording) target = desktop.Media.ActivePreviewTarget ?? target;
+            var window = target.Mode != "window" ? 0 :
+                target.Recording ? CaptureWindows.Resolve(target.WindowId) : CaptureWindows.ForegroundApplication();
+            Rectangle? area = target.Mode switch
+            {
+                "window" => window == 0 ? null : CaptureWindows.ClientBounds(window),
+                "last" => (target.Recording ? desktop.Media.LastRecordingRegion : null) ?? desktop.Media.LastRegion,
+                "region" => target.Region is { } region
+                    ? new Rectangle(region.X, region.Y, region.Width, region.Height) : DesktopMcpTools.DisplayBounds("primary"),
+                _ => DesktopMcpTools.DisplayBounds(target.Mode)
+            };
+            if (area is null) throw new InvalidOperationException(Localizer.T("The preview source is unavailable.", "预览对象已不可用。"));
+            var bounds = window == 0 ? Rectangle.Intersect(area.Value, SystemInformation.VirtualScreen) : area.Value;
+            var mask = exclusion is { } exclude ? new Rectangle(exclude.X, exclude.Y, exclude.Width, exclude.Height) : (Rectangle?)null;
+            return DesktopCapturePreview.Read(window, bounds, mask, token);
+        }, token);
+    }
 
     public ValueTask<JsonNode?> ExecuteAsync(string operation, JsonObject arguments, CancellationToken cancellationToken = default) =>
         ExecuteAsync(operation, arguments, null, cancellationToken);
@@ -140,11 +163,19 @@ internal sealed class WindowsClientBackend(
             case "terminal_resize": return Json(_actions.ResizeTerminal(Item(), Number("columns", 80), Number("rows", 24)));
             case "terminal_close": return Json(_actions.StopTerminal(TerminalSpace(Item()), Item()));
             case "capture_list": return Json(desktop.Media.Captures());
+            case "capture_pick_region":
+                var area = await desktop.CaptureInteractionAsync(hide: true, delay: 0, stayHidden: false,
+                    () => desktop.OnUiAsync(desktop.SelectScreenshotRegion, cancellationToken), cancellationToken);
+                return area is { } selected ? Json(new { x = selected.X, y = selected.Y, width = selected.Width, height = selected.Height }) : null;
             case "capture_sources": return Json(new
             {
                 displays = DesktopMcpTools.CaptureDisplays(),
                 audio = Flag("includeAudio") == true ? await desktop.Media.AudioDevicesAsync(cancellationToken) : [],
-                lastRegion = desktop.Media.LastRegion is not null
+                windows = Flag("includeWindows") == true ? CaptureWindows.List() : [],
+                lastRegion = desktop.Media.LastRegion is not null,
+                lastRecordingRegion = desktop.Media.LastRecordingRegion is not null || desktop.Media.LastRegion is not null,
+                encoderAvailable = DesktopMedia.EncoderAvailable,
+                shortcuts = desktop.CaptureShortcuts
             });
             case "capture_record_state": return Json(desktop.Media.RecordingState);
             case "capture_take": return Json(await _actions.CaptureScreenshot(cancellationToken, CaptureCoordinates(), Text("mode") ?? "desktop",
@@ -160,7 +191,7 @@ internal sealed class WindowsClientBackend(
             case "capture_open": return Json(_actions.OpenCapture(Required("path")));
             case "capture_record_start": return Json(await _actions.StartRecordingAsync(Number("frameRate", 24), Text("mode") ?? "primary",
                 Flag("cursor") ?? true, Text("audio"), Text("format") ?? "mp4", Number("delay", 0), Flag("hideWindow") ?? false,
-                CaptureCoordinates(), cancellationToken));
+                CaptureCoordinates(), cancellationToken, Text("windowId"), Number("durationSeconds", 0)));
             case "capture_record_stop": return Json(await _actions.StopRecording(cancellationToken));
             case "capture_record_discard":
                 await desktop.Media.EndRecordingAsync(discard: true, cancellationToken);

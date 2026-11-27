@@ -1,4 +1,6 @@
 using Avalonia.Controls;
+using System.Text.Json.Nodes;
+using CommandTray.Core;
 using CommandTray.Ui;
 using CommandTray.Services;
 
@@ -55,8 +57,15 @@ internal sealed class WindowsDesktopShell(WindowsClientBackend backend, System.D
         if (!_closing && _window is { IsVisible: false }) _window.Show();
     }
 
+    public Task<JsonNode?> RunCaptureShortcutAsync(CaptureShortcut shortcut)
+    {
+        RequireWindow();
+        return _view!.RunCaptureShortcutAsync(shortcut);
+    }
+
     public void Close()
     {
+        _view?.CancelPendingRecording();
         _closing = true;
         _window?.Close();
     }

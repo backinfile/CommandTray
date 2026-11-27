@@ -37,7 +37,7 @@ colors:
 
 | 页面或组件 | 直接显示 | 菜单或下一层 |
 | --- | --- | --- |
-| 空间 | 添加组件、定位、同步或配对 | 重命名空间、从中转拉取、删除空间 |
+| 空间 | 添加组件、定位、同步或配对。添加本地目录时可浏览选择路径，也可直接输入 | 重命名空间、从中转拉取、删除空间 |
 | 便签与待办 | 编辑便签、勾选、编辑待办、新增待办 | 复制便签、重命名和移除组件、删除待办 |
 | 画板 | 抓手、绘图工具、撤销、重做、缩放、适应内容、导出 PNG。选中后显示复制、删除和层级操作 | 重置视图、切换网格、清空画板、原生端的笔色和线宽 |
 | 目录与终端 | 选择目录、打开或预览、复制到指定位置、打开或关闭终端、运行时中断、发送 | 输入目录路径、新建目录、在此目录添加终端 |
@@ -45,12 +45,14 @@ colors:
 | 共享文件 | 上传、搜索和筛选、行内下载、传输取消和重试 | 刷新列表、复制文件名或 SHA-256、删除文件 |
 | 剪贴板 | 发送文本、原生同步设置、搜索和筛选、当前记录复制和置顶 | 编辑后发送、处理文本、生成二维码、刷新历史、发送本机剪贴板、在本机隐藏 |
 | 实用工具 | 文本转换、文本对比、时间戳、二维码、文件校验 | 从共享文件进入校验时预填 SHA-256 |
-| 截图与录屏 | 范围、延时、截图、开始或结束录屏、历史搜索、复制图片、标注、播放和另存 | 上传到共享文件、放弃录屏、打开原图、贴图、识别文字和二维码、重命名、复制路径、定位文件和回收 |
+| 截图与录屏 | 截图范围、延时和截图后复制，录制对象、应用窗口、声音、帧率、格式、启动倒计时和自动结束。实时预览、与操作按钮贴合的全局快捷键、录屏状态和历史 | 上传到共享文件、放弃录屏、打开原图、贴图、识别文字和二维码、重命名、复制路径、定位文件和回收 |
 | SSH 主机 | 添加主机、连接、编辑、密钥入口 | 删除主机，在密钥面板内导入或删除密钥 |
 | Windows 桌宠 | 显示、隐藏。单击打招呼，双击打开工作区，拖动后停在原地 | 自动走动、睡觉或叫醒、调整大小 |
 | 设置 | 配对、编辑连接、刷新设备、同步与应用开关、复制 MCP 配置、更新状态对应的操作、导出配置 | 解除配对、导入服务配置 |
 
 ## 参考
+
+- 截图默认拖选区域，也可选择活动窗口、显示器或已有选区。预览可切换截图和录屏来源，录制区域可先拖选、预览再开始。录屏采用所选窗口的句柄，窗口列表支持刷新。屏幕预览遮挡预览框自身以免重复成像，当前页不可见时停止更新。按钮内标出可用快捷键。在托盘运行期间，`Ctrl+Alt+Shift+S` 截取选区，`Ctrl+Alt+Shift+W` 截取活动窗口，`Ctrl+Alt+Shift+R` 开始录屏、取消启动等待或结束录屏。应用窗口录制需要支持 `hwnd` 输入的 FFmpeg。 [Windows 截图工具](https://support.microsoft.com/en-us/windows/apps/use-snipping-tool-to-capture-screenshots) · [ShareX 区域截图](https://getsharex.com/docs/region-capture) · [OBS Window Capture](https://obsproject.com/kb/window-capture-sources) · [Xbox Game Bar 快捷键](https://support.microsoft.com/en-us/accessibility/windows/use-a-screen-reader-to-record-your-screen-with-xbox-game-bar) · [FFmpeg gdigrab](https://ffmpeg.org/ffmpeg-devices.html#gdigrab)
 
 - 抓手、空格或中键拖动只平移视图。画板获得焦点后，可用方向键平移、Ctrl+滚轮以指针为中心缩放、Shift+1 适应内容。绘制时按住 Shift 可锁定比例或将线段吸附到 45°。清空可撤销，PNG 包含全部已保存的对象。[FigJam 平移与缩放](https://help.figma.com/hc/en-us/articles/1500004414582-Pan-and-zoom-in-FigJam) · [Miro 输入设备操作](https://help.miro.com/hc/en-us/articles/360017731053-Using-Miro-with-a-mouse-trackpad-or-touchscreen) · [Excalidraw 绘图指南](https://plus.excalidraw.com/how-to-start)
 

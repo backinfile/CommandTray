@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Threading;
+using CommandTray.Core;
 using CommandTray.Models;
 using CommandTray.Services;
 using CommandTray.Sync;
@@ -100,6 +101,8 @@ internal sealed class TrayApplicationContext : IDisposable
         Localizer.LanguageChanged += OnLanguageChanged;
 
         _shutdownWindow = new ShutdownWindow(BeginExit);
+        _desktop.CaptureShortcuts = _shutdownWindow.RegisterCaptureShortcuts(action =>
+            Dispatcher.UIThread.Post(async () => await RunCaptureShortcutAsync(action)));
         lifetime.ShutdownRequested += (_, args) =>
         {
             args.Cancel = true;
@@ -239,12 +242,8 @@ internal sealed class TrayApplicationContext : IDisposable
         menu.Items.Add(Localizer.T("Shared files", "文件共享"), null, (_, _) => ShowPage(DesktopPage.SharedFiles));
         menu.Items.Add(Localizer.T("Clipboard", "剪贴板"), null, (_, _) => ShowPage(DesktopPage.Clipboard));
         menu.Items.Add(Localizer.T("Capture history", "捕获历史"), null, (_, _) => ShowPage(DesktopPage.Captures));
-        if (_desktop.Media.IsRecording)
-            menu.Items.Add(Localizer.T("Stop recording", "结束录屏"), null, async (_, _) => await RunSafe(async () =>
-            {
-                await _desktop.Media.StopRecordingAsync();
-                ShowNotice(Localizer.T("Recording saved", "录屏已保存"));
-            }));
+        menu.Items.Add(_desktop.Media.IsRecording ? Localizer.T("Stop recording", "结束录屏") : Localizer.T("Start recording", "开始录屏"),
+            null, async (_, _) => await RunCaptureShortcutAsync(CaptureShortcut.ToggleRecording));
         menu.Items.Add(Localizer.T("Screenshot", "截图"), null, (_, _) =>
         {
             try
@@ -283,6 +282,17 @@ internal sealed class TrayApplicationContext : IDisposable
         try { await action(); }
         catch (Exception ex) { ShowFailure("CommandTray", ex.Message); }
     }
+
+    private Task RunCaptureShortcutAsync(CaptureShortcut shortcut) => RunSafe(async () =>
+    {
+        if (_exiting) return;
+        var result = await _shell.RunCaptureShortcutAsync(shortcut);
+        if (result.Text("warning") is { Length: > 0 } warning) ShowNotice(warning);
+        else if (result.Text("path").Length > 0 && result.Text("status") != "recording")
+            ShowNotice(shortcut == CaptureShortcut.ToggleRecording
+                ? Localizer.T("Recording saved", "录屏已保存")
+                : Localizer.T("Screenshot saved", "截图已保存"));
+    });
 
     private static Icon CreateRecordingIcon(Icon original)
     {

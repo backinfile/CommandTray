@@ -177,8 +177,7 @@ public sealed partial class ClientView
             ToolTip.SetTip(location, path);
             var choose = IconButton("folder-open", L("选择目录", "Choose folder"), async () =>
             {
-                var folders = await RequireTopLevel().StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions());
-                if (folders.FirstOrDefault()?.TryGetLocalPath() is string selected)
+                if (await ChooseLocalFolderAsync(path) is { } selected)
                     await SaveTilePath(spaceId, item, selected);
             });
             var pathBar = new Border { Child = TitleRow(location, Row(choose, MoreActions(L("目录操作", "Folder actions"), options.ToArray()))) };
@@ -209,7 +208,7 @@ public sealed partial class ClientView
                 contents.Children.Clear();
                 contents.Children.Add(Muted(error.Message));
                 contents.Children.Add(Action(L("选择目录", "Choose folder"), () => Form(L("目录", "Folder"),
-                    values => SaveTilePath(spaceId, item, values.RequireText("path")), new Field("path", L("路径", "Path"), path))));
+                    values => SaveTilePath(spaceId, item, values.RequireText("path")), new Field("path", L("路径", "Path"), path, BrowseFolder: true))));
             }
         };
         return new ScrollViewer { Content = contents, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };

@@ -348,7 +348,7 @@ internal sealed class DesktopMcpTools(DesktopRuntime desktop)
         height = screen.Bounds.Height
     }).ToArray();
 
-    private static Rectangle DisplayBounds(string mode) => mode switch
+    internal static Rectangle DisplayBounds(string mode) => mode switch
     {
         "desktop" => SystemInformation.VirtualScreen,
         "primary" => Screen.PrimaryScreen?.Bounds ?? SystemInformation.VirtualScreen,
@@ -414,18 +414,28 @@ internal sealed class DesktopMcpTools(DesktopRuntime desktop)
         new { path = await desktop.Media.StartRecordingAsync(frameRate, cancellationToken) };
 
     internal async Task<object> StartRecordingAsync(int frameRate, string mode, bool cursor, string? audio, string format,
-        int delay, bool hide, Rectangle? coordinates, CancellationToken cancellationToken)
+        int delay, bool hide, Rectangle? coordinates, CancellationToken cancellationToken, string? windowId = null,
+        int durationSeconds = 0)
     {
+        if (delay is < 0 or > 10)
+            throw new ArgumentOutOfRangeException(nameof(delay), Localizer.T("Choose a delay from 0 to 10 seconds.", "延时须在 0 到 10 秒之间。"));
+        if (mode == "window" && (coordinates.HasValue || string.IsNullOrEmpty(windowId)))
+            throw new ArgumentException(Localizer.T("Select an application window.", "请选择应用窗口。"));
         var path = await desktop.CaptureInteractionAsync(hide, 0, hide, async () =>
         {
-            Rectangle? area = coordinates ?? (mode == "region"
-                ? await desktop.OnUiAsync(desktop.SelectScreenshotRegion, cancellationToken)
-                : DisplayBounds(mode));
-            if (area is null) return "";
-            if (delay is < 0 or > 10)
-                throw new ArgumentOutOfRangeException(nameof(delay), Localizer.T("Choose a delay from 0 to 10 seconds.", "延时须在 0 到 10 秒之间。"));
+            Rectangle? area = coordinates ?? (mode switch
+            {
+                "region" => await desktop.OnUiAsync(desktop.SelectScreenshotRegion, cancellationToken),
+                "last" => desktop.Media.LastRecordingRegion ?? desktop.Media.LastRegion ?? throw new InvalidOperationException(
+                    Localizer.T("Capture a region first.", "请先捕获一个区域。")),
+                "window" => null,
+                _ => DisplayBounds(mode)
+            });
+            if (mode != "window" && area is null) return "";
             if (delay > 0 || mode == "region") await Task.Delay(delay * 1000 + 120, cancellationToken);
-            return await desktop.Media.StartRecordingAsync(frameRate, area, cursor, audio, format, cancellationToken);
+            var window = mode == "window" ? CaptureWindows.Resolve(windowId) : 0;
+            return await desktop.Media.StartRecordingAsync(frameRate, area, cursor, audio, format, cancellationToken,
+                window, durationSeconds, coordinates.HasValue || mode is "region" or "last", windowId);
         }, cancellationToken);
         return new { status = path.Length == 0 ? "cancelled" : "recording", path };
     }

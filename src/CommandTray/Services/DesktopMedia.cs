@@ -3,6 +3,7 @@ using System.Drawing.Imaging;
 using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
+using CommandTray.Core;
 
 namespace CommandTray.Services;
 
@@ -12,6 +13,7 @@ internal sealed partial class DesktopMedia : IDisposable
     private readonly object _gate = new();
     private Session? _recording;
     private Rectangle? _lastRegion;
+    private Rectangle? _lastRecordingRegion;
     private string? _lastRecording;
     private string? _recordingError;
     private bool _disposed;
@@ -24,7 +26,10 @@ internal sealed partial class DesktopMedia : IDisposable
 
     public string Folder => _folder;
     public Rectangle? LastRegion { get { lock (_gate) return _lastRegion; } }
+    public Rectangle? LastRecordingRegion { get { lock (_gate) return _lastRecordingRegion; } }
+    public static bool EncoderAvailable => FindProgram("ffmpeg.exe") is not null;
     public bool IsRecording { get { lock (_gate) return _recording is not null; } }
+    internal CapturePreviewTarget? ActivePreviewTarget { get { lock (_gate) return _recording?.PreviewTarget; } }
     public string? RecordingFailure { get { lock (_gate) return _recordingError; } }
 
     public object RecordingState
@@ -157,36 +162,50 @@ internal sealed partial class DesktopMedia : IDisposable
     public Task<string> StartRecordingAsync(int frameRate, CancellationToken cancellationToken = default) =>
         StartRecordingAsync(frameRate, null, true, null, "mp4", cancellationToken);
 
-    public Task<string> StartRecordingAsync(int frameRate, Rectangle? area, bool cursor, string? audio, string format,
-        CancellationToken cancellationToken)
+    public async Task<string> StartRecordingAsync(int frameRate, Rectangle? area, bool cursor, string? audio, string format,
+        CancellationToken cancellationToken, nint window = 0, int durationSeconds = 0, bool rememberRegion = false, string? windowId = null)
     {
         if (frameRate is < 1 or > 60)
             throw new ArgumentOutOfRangeException(nameof(frameRate), Localizer.T("Choose a frame rate from 1 to 60.", "帧率须在 1 到 60 之间。"));
         if (format is not ("mp4" or "mkv")) throw new ArgumentException("Choose MP4 or MKV.", nameof(format));
-        var rectangle = ValidateArea(area ?? Screen.PrimaryScreen?.Bounds ?? SystemInformation.VirtualScreen);
+        if (durationSeconds is < 0 or > 86400)
+            throw new ArgumentOutOfRangeException(nameof(durationSeconds),
+                Localizer.T("Choose a recording duration from 0 to 86400 seconds.", "录制时长须在 0 到 86400 秒之间。"));
+        var rectangle = window == 0 ? ValidateArea(area ?? Screen.PrimaryScreen?.Bounds ?? SystemInformation.VirtualScreen) : Rectangle.Empty;
         var file = NewFile("." + format);
-        var info = ExternalProgram("ffmpeg.exe", RecordingArguments(rectangle, frameRate, cursor, audio, format, file + ".partial"));
-        return StartEncoderAsync(info, file, cancellationToken);
+        var info = ExternalProgram("ffmpeg.exe", RecordingArguments(rectangle, frameRate, cursor, audio, format, file + ".partial",
+            window, durationSeconds));
+        var preview = window == 0
+            ? new CapturePreviewTarget(true, "region", Region: new CaptureRegion(rectangle.X, rectangle.Y, rectangle.Width, rectangle.Height))
+            : windowId is not null ? new CapturePreviewTarget(true, "window", windowId) : (CapturePreviewTarget?)null;
+        var result = await StartEncoderAsync(info, file, cancellationToken, preview);
+        if (window == 0 && rememberRegion)
+            lock (_gate) _lastRecordingRegion = rectangle;
+        return result;
     }
 
-    internal static string[] RecordingArguments(Rectangle area, int frameRate, bool cursor, string? audio, string format, string temporary)
+    internal static string[] RecordingArguments(Rectangle area, int frameRate, bool cursor, string? audio, string format, string temporary,
+        nint window = 0, int durationSeconds = 0)
     {
         var args = new List<string>
         {
             "-hide_banner", "-loglevel", "error", "-nostats", "-stats_period", "0.2", "-progress", "pipe:1",
-            "-f", "gdigrab", "-draw_mouse", cursor ? "1" : "0", "-framerate", frameRate.ToString(CultureInfo.InvariantCulture),
-            "-offset_x", area.X.ToString(CultureInfo.InvariantCulture), "-offset_y", area.Y.ToString(CultureInfo.InvariantCulture),
-            "-video_size", $"{area.Width}x{area.Height}", "-i", "desktop"
+            "-f", "gdigrab", "-draw_mouse", cursor ? "1" : "0", "-framerate", frameRate.ToString(CultureInfo.InvariantCulture)
         };
+        if (window != 0) args.AddRange(["-i", "hwnd=" + window.ToInt64().ToString(CultureInfo.InvariantCulture)]);
+        else args.AddRange(["-offset_x", area.X.ToString(CultureInfo.InvariantCulture), "-offset_y", area.Y.ToString(CultureInfo.InvariantCulture),
+            "-video_size", $"{area.Width}x{area.Height}", "-i", "desktop"]);
         if (!string.IsNullOrEmpty(audio))
             args.AddRange(["-thread_queue_size", "512", "-f", "dshow", "-i", "audio=" + audio, "-map", "0:v:0", "-map", "1:a:0", "-c:a", "aac"]);
         args.AddRange(["-vf", "pad=ceil(iw/2)*2:ceil(ih/2)*2", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "ultrafast"]);
+        if (durationSeconds > 0) args.AddRange(["-t", durationSeconds.ToString(CultureInfo.InvariantCulture)]);
         if (format == "mp4") args.AddRange(["-movflags", "+faststart"]);
         args.AddRange(["-f", format == "mp4" ? "mp4" : "matroska", temporary]);
         return args.ToArray();
     }
 
-    internal async Task<string> StartEncoderAsync(ProcessStartInfo info, string file, CancellationToken cancellationToken = default)
+    internal async Task<string> StartEncoderAsync(ProcessStartInfo info, string file, CancellationToken cancellationToken = default,
+        CapturePreviewTarget? preview = null)
     {
         Session session;
         lock (_gate)
@@ -197,14 +216,18 @@ internal sealed partial class DesktopMedia : IDisposable
                 throw new InvalidOperationException(Localizer.T("Stop the current recording first.", "请先结束当前录屏。"));
             info.RedirectStandardInput = info.RedirectStandardOutput = true;
             var process = Process.Start(info) ?? throw new InvalidOperationException("Unable to start FFmpeg.");
-            session = new Session(process, file);
+            session = new Session(process, file, preview);
             _recordingError = _lastRecording = null;
             _recording = session;
         }
         _ = Task.Run(() => ObserveRecordingAsync(session));
         try
         {
-            if (await session.Ready.Task.WaitAsync(TimeSpan.FromSeconds(12), cancellationToken)) return file;
+            if (await session.Ready.Task.WaitAsync(TimeSpan.FromSeconds(12), cancellationToken))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                return file;
+            }
             throw new InvalidOperationException(session.Error ?? Localizer.T("FFmpeg captured no frames.", "FFmpeg 没有捕获到画面。"));
         }
         catch (TimeoutException)
@@ -332,10 +355,11 @@ internal sealed partial class DesktopMedia : IDisposable
         }
     }
 
-    private sealed class Session(Process process, string path)
+    private sealed class Session(Process process, string path, CapturePreviewTarget? preview)
     {
         public Process Process { get; } = process;
         public string Path { get; } = path;
+        public CapturePreviewTarget? PreviewTarget { get; } = preview;
         public Stopwatch Clock { get; } = new();
         public TaskCompletionSource<bool> Ready { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource Completed { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);

@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Text.Json.Nodes;
 using Avalonia;
 using Avalonia.Automation;
@@ -20,9 +19,6 @@ public sealed partial class ClientView
     private string _screenshotSource = "region";
     private int _screenshotDelay;
     private bool _copyScreenshots = true;
-    private RecordingPreferences _recordingPreferences = new("primary", 24, "mp4", "", 0, true);
-
-    private sealed record RecordingPreferences(string Source, int Fps, string Format, string Audio, int Delay, bool Cursor);
 
     private async Task RenderCaptureAsync(CancellationToken token)
     {
@@ -35,13 +31,6 @@ public sealed partial class ClientView
                 $"Display {display.Integer("index")} · {display.Integer("width")}×{display.Integer("height")}"),
                 Value: display.Text("id"))).ToArray();
         var recording = await Execute("capture_record_state", [], token);
-        var summary = Muted("");
-        var recordingFile = Muted("");
-        recordingFile.TextWrapping = TextWrapping.Wrap;
-        var recordingError = Muted("");
-        recordingError.Classes.Add("form-error");
-        recordingError.TextWrapping = TextWrapping.Wrap;
-        AutomationProperties.SetLiveSetting(recordingError, AutomationLiveSetting.Assertive);
         var modes = new List<(string Label, string Value)>
         {
             (L("选择区域", "Select a region"), "region"),
@@ -51,31 +40,39 @@ public sealed partial class ClientView
         };
         if (displays.Length > 1) modes.AddRange(displays);
         if (sources.Flag("lastRegion")) modes.Add((L("上次区域", "Last region"), "last"));
-        modes.Add((L("输入坐标…", "Enter coordinates…"), "coordinates"));
-        var scope = CaptureChoice(L("范围", "Source"), modes.Select(mode => mode.Label), Math.Max(0, modes.FindIndex(mode => mode.Value == _screenshotSource)));
+        var scope = CaptureChoice(L("截图范围", "Screenshot source"), modes.Select(mode => mode.Label),
+            Math.Max(0, modes.FindIndex(mode => mode.Value == _screenshotSource)));
         var delays = new[] { 0, 3, 5, 10 };
-        var wait = CaptureChoice(L("延时", "Delay"), delays.Select(delay => delay == 0 ? L("立即", "Now") : L($"{delay} 秒", $"{delay} seconds")),
+        var wait = CaptureChoice(L("截图延时", "Screenshot delay"), delays.Select(delay => delay == 0 ? L("立即", "Now") : L($"{delay} 秒", $"{delay} seconds")),
             Array.IndexOf(delays, _screenshotDelay));
         var copy = new CheckBox { Content = L("截图后复制", "Copy after capture"), IsChecked = _copyScreenshots };
-        scope.SelectionChanged += (_, _) => { if (scope.SelectedIndex >= 0) _screenshotSource = modes[scope.SelectedIndex].Value; };
+        Action<bool> selectPreview = _ => { };
+        var capture = PrimaryAction(L("截图", "Take screenshot"), StartScreenshotAsync, "capture");
+        UpdateScreenshotButton();
+        scope.SelectionChanged += (_, _) =>
+        {
+            if (scope.SelectedIndex < 0) return;
+            _screenshotSource = modes[scope.SelectedIndex].Value;
+            UpdateScreenshotButton();
+            selectPreview(false);
+        };
         wait.SelectionChanged += (_, _) => { if (wait.SelectedIndex >= 0) _screenshotDelay = delays[wait.SelectedIndex]; };
         copy.IsCheckedChanged += (_, _) => _copyScreenshots = copy.IsChecked == true;
-        var capture = PrimaryAction(L("截图", "Take screenshot"), StartScreenshotAsync, "capture");
-        var record = SecondaryAction("", async () =>
+        var controls = ActionBar(CaptureField(L("截图范围", "Screenshot source"), scope),
+            CaptureField(L("截图延时", "Screenshot delay"), wait), copy);
+        controls.Margin = new Thickness(12, 10);
+        var (recordingPanel, updateRecording) = RecordingPanel(displays, sources, recording, token, () => selectPreview(true));
+        var capturePanels = new StackPanel { Spacing = 8, Children =
         {
-            if (recording.Flag("recording")) await Capture("capture_record_stop", [], token);
-            else await RecordingOptionsAsync(displays, token);
-        });
-        var discard = MoreActions(L("录屏操作", "Recording actions"),
-            (L("放弃录屏", "Discard recording"), () => Confirm(L("放弃当前录屏？", "Discard this recording?"),
-                () => Capture("capture_record_discard", [], token), L("放弃录屏", "Discard recording"))));
-        Header(L("截图与录屏", "Screen capture"));
-        var controls = ActionBar(CaptureField(L("范围", "Source"), scope), CaptureField(L("延时", "Delay"), wait), copy, capture, record);
-        _contents.Children.Add(controls);
-        var recordingStatus = new WrapPanel { ItemSpacing = 10, LineSpacing = 6, Children = { summary, recordingFile, discard } };
-        _contents.Children.Add(recordingStatus);
-        _contents.Children.Add(recordingError);
-        UpdateRecording();
+            WorkbenchPanel(L("截图", "Screenshot"), "capture", controls, capture), recordingPanel
+        }};
+        if (_backend is ICapturePreviewBackend previewBackend)
+        {
+            var (preview, select) = CapturePreviewPanel(previewBackend, ReadPreviewTarget, token);
+            selectPreview = select;
+            _contents.Children.Add(LayoutCapturePreview(capturePanels, preview));
+        }
+        else _contents.Children.Add(capturePanels);
 
         var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         bool polling = false;
@@ -88,7 +85,7 @@ public sealed partial class ClientView
             {
                 recording = await Execute("capture_record_state", [], token);
                 if (token.IsCancellationRequested) return;
-                UpdateRecording();
+                updateRecording(recording);
                 if (recording.Text("lastPath") is { Length: > 0 } saved && saved != lastPath && !captures.Contains(saved))
                 {
                     _captureSelection = saved;
@@ -122,63 +119,35 @@ public sealed partial class ClientView
         };
         DrawList();
 
-        void UpdateRecording()
-        {
-            string state = recording.Text("state");
-            var active = recording.Flag("recording");
-            recordingStatus.IsVisible = active;
-            SetStatusTone(summary, state == "recording" ? "success" : active ? "warning" : "");
-            record.Classes.Set("primary", active);
-            record.Classes.Set("secondary", !active);
-            capture.Classes.Set("primary", !active);
-            string elapsed = TimeSpan.FromSeconds(recording.Integer("elapsedSeconds")).ToString(@"hh\:mm\:ss", CultureInfo.InvariantCulture);
-            summary.Text = state switch
-            {
-                "starting" => L("正在启动录屏…", "Starting recording…"),
-                "saving" => L("正在结束录屏…", "Finishing recording…"),
-                "recording" => L($"正在录制 · {elapsed}", $"Recording · {elapsed}"),
-                _ => ""
-            };
-            string label = active ? L("结束录屏", "Stop recording") : L("开始录屏", "Record screen");
-            if (AutomationProperties.GetName(record) != label)
-            {
-                record.Content = IconLabel(active ? "stop" : "play", label);
-                AutomationProperties.SetName(record, label);
-            }
-            record.IsEnabled = state is not ("starting" or "saving");
-            discard.IsVisible = state == "recording";
-            recordingFile.Text = recording.Text("path");
-            recordingFile.IsVisible = recordingFile.Text.Length > 0;
-            recordingError.Text = recording.Text("error");
-            recordingError.IsVisible = recordingError.Text.Length > 0;
-        }
-
         Task StartScreenshotAsync()
         {
             var mode = modes[scope.SelectedIndex].Value;
-            if (mode == "coordinates") return CoordinateScreenshot();
+            selectPreview(false);
             return Capture(mode == "region" ? "capture_select" : "capture_take", ScreenshotArguments(mode), token);
         }
 
-        JsonObject ScreenshotArguments(string mode) =>
-            new() { ["mode"] = mode, ["delay"] = _screenshotDelay, ["hideWindow"] = true, ["copy"] = _copyScreenshots };
-
-        Task CoordinateScreenshot()
+        void UpdateScreenshotButton()
         {
-            Field[] coordinates = [new("x", "X"), new("y", "Y"), new("width", L("宽", "Width")), new("height", L("高", "Height"))];
-            return Form(L("区域截图", "Region capture"), L("截图", "Capture"), L("正在截图…", "Capturing…"), (values, ct) =>
+            var shortcut = modes[scope.SelectedIndex].Value switch
             {
-                var area = ScreenshotArguments("desktop");
-                foreach (var field in coordinates)
-                {
-                    if (!int.TryParse(values.Text(field.Key), NumberStyles.Integer, CultureInfo.InvariantCulture, out int value))
-                        throw new ArgumentException(L($"{field.Label} 必须是整数。", $"{field.Label} must be a whole number."));
-                    if ((field.Key is "width" or "height") && value <= 0)
-                        throw new ArgumentException(L($"{field.Label} 必须大于 0。", $"{field.Label} must be greater than zero."));
-                    area[field.Key] = value;
-                }
-                return Capture("capture_take", area, ct);
-            }, coordinates);
+                "region" => CaptureShortcut.Region,
+                "window" => CaptureShortcut.ActiveWindow,
+                _ => (CaptureShortcut?)null
+            };
+            SetCaptureButton(capture, L("截图", "Take screenshot"), "capture", sources, shortcut);
+        }
+
+        CapturePreviewTarget? ReadPreviewTarget(bool forRecording)
+        {
+            if (!forRecording) return new CapturePreviewTarget(false, modes[scope.SelectedIndex].Value);
+            var options = _recordingPreferences;
+            if (recording.Flag("recording")) return new CapturePreviewTarget(true, options.Source, options.WindowId, options.Region);
+            return options.Source switch
+            {
+                "window" when options.WindowId.Length == 0 => null,
+                "region" when options.Region is null => null,
+                _ => new CapturePreviewTarget(true, options.Source, options.WindowId, options.Region)
+            };
         }
 
         void DrawList()
@@ -286,61 +255,11 @@ public sealed partial class ClientView
         return Row(text, control);
     }
 
-    private async Task RecordingOptionsAsync((string Label, string Value)[] displays, CancellationToken token)
-    {
-        var sources = new[] { (L("主显示器", "Primary display"), "primary"), (L("所有显示器", "All displays"), "desktop"),
-            (L("选择区域", "Select a region"), "region") }.Concat(displays).ToArray();
-        var preferences = _recordingPreferences;
-        var source = CaptureChoice(L("范围", "Source"), sources.Select(item => item.Item1),
-            Math.Max(0, Array.FindIndex(sources, option => option.Item2 == preferences.Source)));
-        var rates = new[] { 15, 24, 30, 60 };
-        var fps = CaptureChoice(L("帧率", "Frame rate"), rates.Select(rate => $"{rate} fps"), Array.IndexOf(rates, preferences.Fps));
-        var formats = new[] { "MP4", "MKV" };
-        var format = CaptureChoice(L("格式", "Format"), formats, Array.IndexOf(formats, preferences.Format.ToUpperInvariant()));
-        var delays = new[] { 0, 3, 5, 10 };
-        var delay = CaptureChoice(L("倒计时", "Countdown"), delays.Select(value => value == 0 ? L("立即", "None") : L($"{value} 秒", $"{value} seconds")),
-            Array.IndexOf(delays, preferences.Delay));
-        var cursor = new CheckBox { Content = L("录制鼠标指针", "Record cursor"), IsChecked = preferences.Cursor };
-        var audio = CaptureChoice(L("声音设备", "Audio device"), new[] { L("无声音", "No audio") });
-        var devices = new List<string> { "" };
-        var audioStatus = Muted(L("正在读取声音设备…", "Loading audio devices…"));
-        var fields = new StackPanel { Spacing = 7, Children =
-        {
-            Muted(L("范围", "Source")), source, Muted(L("帧率", "Frame rate")), fps, Muted(L("格式", "Format")), format,
-            Muted(L("声音设备", "Audio device")), audio, audioStatus, Muted(L("倒计时", "Countdown")), delay, cursor
-        }};
-        await ShowForm(L("录屏设置", "Recording options"), L("开始录屏", "Start recording"), L("正在启动录屏…", "Starting recording…"),
-            (_, ct) =>
-            {
-                var chosen = new RecordingPreferences(sources[source.SelectedIndex].Item2, rates[fps.SelectedIndex],
-                    formats[format.SelectedIndex].ToLowerInvariant(), devices[Math.Max(0, audio.SelectedIndex)],
-                    delays[delay.SelectedIndex], cursor.IsChecked == true);
-                _recordingPreferences = chosen;
-                return Capture("capture_record_start", new()
-                {
-                    ["mode"] = chosen.Source, ["frameRate"] = chosen.Fps, ["format"] = chosen.Format, ["audio"] = chosen.Audio,
-                    ["delay"] = chosen.Delay, ["cursor"] = chosen.Cursor, ["hideWindow"] = true
-                }, ct);
-            }, [], fields, cancellable: true, initialFocus: source);
-        var dialogToken = CurrentActionCancellation;
-        using var linked = CancellationTokenSource.CreateLinkedTokenSource(token, dialogToken);
-        try
-        {
-            var result = await Execute("capture_sources", new() { ["includeAudio"] = true }, linked.Token);
-            devices.AddRange(result.Array("audio").Select(node => TextOf(node)).Where(name => name.Length > 0));
-            audio.ItemsSource = devices.Select(name => name.Length == 0 ? L("无声音", "No audio") : name).ToArray();
-            audio.SelectedIndex = Math.Max(0, devices.IndexOf(preferences.Audio));
-            audioStatus.IsVisible = false;
-        }
-        catch (OperationCanceledException) when (linked.IsCancellationRequested) { }
-        catch (Exception error) { audioStatus.Text = error.Message; }
-    }
-
-    private async Task Capture(string operation, JsonObject arguments, CancellationToken token)
+    private async Task<JsonNode?> Capture(string operation, JsonObject arguments, CancellationToken token)
     {
         var result = await Execute(operation, arguments, token);
-        if (result.Text("status") == "cancelled" || token.IsCancellationRequested) return;
-        if (operation != "capture_record_start" && result.Text("path") is { Length: > 0 } path)
+        if (result.Text("status") == "cancelled" || token.IsCancellationRequested) return result;
+        if (result.Text("path") is { Length: > 0 } path)
         {
             _captureSelection = path;
             _captureFilter = 0;
@@ -351,6 +270,7 @@ public sealed partial class ClientView
             await LoadAsync();
             if (result.Text("warning") is { Length: > 0 } warning) Report(warning);
         }
+        return result;
     }
 
     private ComboBox CaptureChoice(string label, IEnumerable<string> choices, int selected = 0)
